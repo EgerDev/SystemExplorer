@@ -135,6 +135,23 @@ integrity. The Administrators SID must be absent or deny-only, not enabled;
 expected interactive integrity is Medium (`S-1-16-8192`), not High/System.
 Unexpected Low/restricted/service/impersonated context is not the intended
 standard desktop test: report it for review rather than substituting it.
+The preflight also requires enabled `INTERACTIVE` (`S-1-5-4`) or
+`REMOTE_INTERACTIVE` (`S-1-5-14`) membership, `TokenSessionId>0`, and
+`UserInteractive=true` (an interactive desktop/window station). Positive logon
+membership uses `WindowsPrincipal.IsInRole(SecurityIdentifier)` so a deny-only
+group cannot qualify. Any `SERVICE` (`S-1-5-6`) or `BATCH` (`S-1-5-3`) group
+presence blocks eligibility, even for an ordinary user SID or when interactive
+membership is also present. Built-in service identities remain excluded.
+Record `InteractiveEnabled`, `RemoteInteractiveEnabled`, `ServiceLogonPresent`,
+`BatchLogonPresent`, `TokenSessionId` and `UserInteractive` from the JSON alongside
+the existing elevation fields. These checks are only a pre-screen, not proof of
+an actual standard-user Windows 11 application run.
+
+The dependency-free `tools/tests/Windows11-Acceptance-Preflight.Tests.ps1` script
+extracts and exercises the actual logon predicate with **synthetic** desktop,
+remote-interactive, service, batch, session-zero and noninteractive fixtures.
+It does not create accounts/services/tasks or change live tokens, and is not
+evidence of live regular-user service execution or positive Windows 11 acceptance.
 Record the actual running app's Elevated status as **No** in Task Manager Details
 (add Elevated column). Keep token, session, launch path, PID and start time tied
 to the recording; recheck after any relaunch from a different context.

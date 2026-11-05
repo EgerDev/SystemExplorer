@@ -5,6 +5,31 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+function Get-AcceptanceLogonEligibility {
+    param(
+        [Parameter(Mandatory = $true)][bool]$InteractiveEnabled,
+        [Parameter(Mandatory = $true)][bool]$RemoteInteractiveEnabled,
+        [Parameter(Mandatory = $true)][bool]$ServiceLogonPresent,
+        [Parameter(Mandatory = $true)][bool]$BatchLogonPresent,
+        [Parameter(Mandatory = $true)][int]$TokenSessionId,
+        [Parameter(Mandatory = $true)][bool]$UserInteractive
+    )
+
+    $reasons = [Collections.Generic.List[string]]::new()
+    if (-not ($InteractiveEnabled -or $RemoteInteractiveEnabled)) {
+        $reasons.Add('Token lacks enabled INTERACTIVE or REMOTE_INTERACTIVE membership.')
+    }
+    if ($ServiceLogonPresent) { $reasons.Add('Token contains the SERVICE logon group.') }
+    if ($BatchLogonPresent) { $reasons.Add('Token contains the BATCH logon group.') }
+    if ($TokenSessionId -le 0) { $reasons.Add('Token session must be greater than zero.') }
+    if (-not $UserInteractive) { $reasons.Add('Process has no interactive desktop/window station.') }
+
+    [pscustomobject]@{
+        Eligible = $reasons.Count -eq 0
+        Reasons = @($reasons.ToArray())
+    }
+}
+
 try {
     $os = Get-CimInstance Win32_OperatingSystem
     $cpu = @(Get-CimInstance Win32_Processor)
@@ -40,7 +65,13 @@ namespace SystemExplorer.Acceptance
     try {
         $principal = [Security.Principal.WindowsPrincipal]::new($identity)
         $adminEnabled = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-        # TOKEN_INFORMATION_CLASS: TokenElevationType = 18, TokenElevation = 20.
+        $interactiveEnabled = $principal.IsInRole([Security.Principal.SecurityIdentifier]::new('S-1-5-4'))
+        $remoteInteractiveEnabled = $principal.IsInRole([Security.Principal.SecurityIdentifier]::new('S-1-5-14'))
+        $groupSids = @($identity.Groups | ForEach-Object { $_.Value })
+        $serviceLogonPresent = $groupSids -contains 'S-1-5-6'
+        $batchLogonPresent = $groupSids -contains 'S-1-5-3'
+        # TOKEN_INFORMATION_CLASS: TokenSessionId = 12, TokenElevationType = 18, TokenElevation = 20.
+        $tokenSessionId = [SystemExplorer.Acceptance.TokenReader]::ReadInt32($identity.Token, 12)
         $elevationType = [SystemExplorer.Acceptance.TokenReader]::ReadInt32($identity.Token, 18)
         $elevated = [SystemExplorer.Acceptance.TokenReader]::ReadInt32($identity.Token, 20) -ne 0
         $userSid = $identity.User.Value
@@ -48,7 +79,12 @@ namespace SystemExplorer.Acceptance
         $identity.Dispose()
     }
 
+    $userInteractive = [Environment]::UserInteractive
+    $logonEligibility = Get-AcceptanceLogonEligibility -InteractiveEnabled $interactiveEnabled `
+        -RemoteInteractiveEnabled $remoteInteractiveEnabled -ServiceLogonPresent $serviceLogonPresent `
+        -BatchLogonPresent $batchLogonPresent -TokenSessionId $tokenSessionId -UserInteractive $userInteractive
     $reasons = [Collections.Generic.List[string]]::new()
+    foreach ($reason in $logonEligibility.Reasons) { $reasons.Add($reason) }
     if ([int]$os.ProductType -ne 1) { $reasons.Add('OS is not a workstation (ProductType must be 1).') }
     if ([int]$os.BuildNumber -lt 22000) { $reasons.Add('OS build is below 22000.') }
     if (-not [Environment]::Is64BitOperatingSystem -or $cpu.Count -eq 0 -or
@@ -75,6 +111,12 @@ namespace SystemExplorer.Acceptance
         TokenIsElevated = $elevated
         TokenElevationType = $elevationType
         AdministratorsEnabled = $adminEnabled
+        InteractiveEnabled = $interactiveEnabled
+        RemoteInteractiveEnabled = $remoteInteractiveEnabled
+        ServiceLogonPresent = $serviceLogonPresent
+        BatchLogonPresent = $batchLogonPresent
+        TokenSessionId = $tokenSessionId
+        UserInteractive = $userInteractive
         Eligibility = $(if ($reasons.Count -eq 0) { 'ELIGIBLE_HOST_TOKEN_ONLY' } else { 'BLOCKED' })
         Reasons = @($reasons.ToArray())
         ManualAcceptance = 'NOT_RUN'
