@@ -162,3 +162,29 @@ CodSpeed's published CLI platform support is Linux (Ubuntu/Debian), and its list
 ## Remaining decisions
 
 Parent: approve or reject the isolated **WinUI-only 2.6.5 package-reference experiment**, provide the exact measurement recipe and assign clean-machine Windows 11 standard-user acceptance. Symbols/localization/deployment-mode changes are separate product decisions. UI allocation/retention candidates remain hypotheses requiring parent traces and frontend ownership agreement, not permission for this workstream to edit those files.
+
+## Follow-up receipt: approved component-package experiment
+
+The preceding investigation is preserved as historical evidence from `b43d1a6eab03cf907c69ee01dd429d94e15f2b1b`. Parent subsequently approved the isolated experiment below. This receipt supersedes only its pending package-experiment authorization, not its runtime/measurement limitations.
+
+- Created `feature/phase2-package-components` from that revision in a separate worktree, with no pre-existing application `bin/obj`; original checkout and baseline publish/evidence remain untouched.
+- Changed only the app project reference from `Microsoft.WindowsAppSDK` to `Microsoft.WindowsAppSDK.WinUI`, retaining **2.6.5**, and regenerated only the app lockfile. All deployment flags, BuildTools, project references, resources, PRI target, notices, source and scripts remain unchanged. No Runtime reference or asset exclusion was introduced.
+- Resolved graph retains WinUI/Base/Foundation/InteractiveExperiences **2.6.5**, WebView2 **1.0.3719.77**, BuildTools **10.0.28000.2957** and MSIX tooling **1.7.251221100**. Umbrella/AI/ML/Search/Widgets/DWrite/Runtime selector, MachineLearning and Tensors are absent; retained package versions/hashes are unchanged.
+
+Commands ran in `C:\Users\Administrator\repos\SystemExplorer-package-components`, using existing SDK **10.0.403** and cache; its directory was prefixed to PATH:
+
+| Command | Observed result |
+| --- | --- |
+| `dotnet restore src/SystemExplorer.App/SystemExplorer.App.csproj --force-evaluate` | Native exit **0**. |
+| `dotnet restore src/SystemExplorer.App/SystemExplorer.App.csproj --locked-mode` | Native exit **0**. |
+| `./tools/Build-SystemExplorer.ps1 -OutputDirectory C:\Users\Administrator\phase2-performance-evidence\candidate-components-publish` | Completed warnings-as-errors publish and all script postconditions, ending with `Unsigned portable directory`; stderr empty. Harness failed to retain numeric child exit code, then its blank-exit guard returned **1**. This is an exit-capture limitation, not a reported compiler/publish failure; no publish restart was performed. |
+| `git diff --check` | Direct repeat native exit **0**, after the same capture defect affected its first wrapper. |
+| Pinned BuildTools x64 `mt.exe -nologo -inputresource:<candidate>\SystemExplorer.App.exe;#1 -out:<logs>\SystemExplorer.App.embedded.manifest` | Exit **0**; extracted manifest equals generated merged `obj/Release/net10.0-windows10.0.26100.0/win-x64/Manifests/app.manifest`; every embedded manifest file reference exists in publish output. |
+
+The initial `Start-Process -Wait` restore wrapper waited for reusable MSBuild descendants after restore output completed. Existing commands were preserved, not restarted. Subsequent direct-child capture avoided that tree wait but exposed the blank ExitCode issue recorded above. No repository build/configuration workaround was applied.
+
+Static asset checks found app EXE/PRI, runtimeconfig/deps, coreclr/hostfxr, native WinUI controls/XAML, WindowsAppRuntime DLL/PRI, localized MUI resources (including en-us, en-GB, fr-FR and ja-JP), upstream notices and package license metadata. Registration-free activation is **embedded in the EXE**, not a missing standalone publish manifest; generated WindowsAppSDK/merged manifests and extracted EXE manifest are preserved. This verifies files/metadata, not runtime activation.
+
+Raw logs, inventory, manifests, dependency versions and build metadata are preserved separately under `candidate-components-logs`; no candidate binaries were uploaded. Build metadata correctly records source `b43d1a6e...` with `SourceDirty=true` because the authorized project/lockfile edits were uncommitted at publish time. The final source commit is distinct from that precommit metadata; parent will rebuild the combined artifact.
+
+No GUI launch, portable acceptance, Windows 11 standard-user check, benchmark/startup/soak or quantitative savings analysis was performed. No Core/provider suites were repeated for this App-package-only change, per parent direction. Parent retains integrated build/CI, native launch/rendered acceptance and exact same-machine measurement/analysis. No PR, merge or release is part of this checkpoint.
