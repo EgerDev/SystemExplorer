@@ -59,6 +59,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     public string GroupCount => snapshot is null ? "—" : ProcessGrouping.Create(snapshot.Processes).Count.ToString();
     public string MemoryUsed => Display.Bytes(snapshot?.Memory.PhysicalUsedBytes);
     public string CpuUsed => Display.Percent(snapshot?.TotalCpuPercent);
+    public Microsoft.UI.Xaml.Visibility EmptyVisibility => Rows.Count == 0 ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
+    public string EmptyMessage => snapshot is null ? "Waiting for the first live sample…" : string.IsNullOrWhiteSpace(Search) ? "No process rows are available in the latest sample." : "No processes match this search. Clear the filter to show all processes.";
 
     public void Apply(MonitorSnapshot next)
     {
@@ -117,6 +119,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged
             }
             else Rows.Insert(i, row);
         }
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EmptyVisibility)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EmptyMessage)));
     }
 
     private IEnumerable<ProcessSnapshot> SortProcesses(IEnumerable<ProcessSnapshot> processes) => Sort switch

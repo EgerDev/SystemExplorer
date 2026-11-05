@@ -111,6 +111,7 @@
                                         </DataTemplate>
                                     </ListView.ItemTemplate>
                                 </ListView>
+                                <TextBlock Grid.Row="1" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Top" TextAlignment="Center" Style="{StaticResource Muted}" Text="{x:Bind Model.EmptyMessage, Mode=OneWay}" Visibility="{x:Bind Model.EmptyVisibility, Mode=OneWay}" AutomationProperties.LiveSetting="Polite"/>
                             </Grid>
                         </Border>
                     </Grid>
