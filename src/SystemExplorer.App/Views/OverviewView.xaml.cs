@@ -30,19 +30,19 @@ public sealed partial class OverviewView : UserControl
         ready = true;
         Unloaded += (_, _) => { foreach (var row in Rows) row.Dispose(); };
         Loaded += (_, _) => ReconcileConsumers();
-        SizeChanged += (_, _) => ResizeConsumerList();
-        ResourcesGrid.SizeChanged += (_, _) => ResizeConsumerList();
+        foreach (var element in new FrameworkElement[] { DashboardScroller, ResourcesGrid, ReadingStatus, ConsumerHeader, ConsumerTableHeader, ConsumerFooter })
+            element.SizeChanged += (_, _) => ResizeConsumerList();
     }
 
     public void Update(OverviewReading? reading, bool paused, bool stale)
     {
         this.reading = reading;
         CpuCard.Value = Display.Percent(reading?.CpuPercent);
-        CpuCard.Detail = "System utilization · 0–100%";
+        CpuCard.Detail = "Across all processors";
         MemoryCard.Value = Display.Percent(reading?.PhysicalMemoryPercent);
         MemoryCard.Detail = $"{Display.Bytes(reading?.PhysicalUsedBytes)} / {Display.Bytes(reading?.PhysicalTotalBytes)} physical";
         DiskCard.Value = reading?.DiskTotalBytesPerSecond is { } total ? Display.Rate(total) : "—";
-        DiskCard.Detail = $"Read {Rate(reading?.DiskReadBytesPerSecond)} · Write {Rate(reading?.DiskWriteBytesPerSecond)}";
+        DiskCard.Detail = $"Read\u00a0{Rate(reading?.DiskReadBytesPerSecond)} · Write\u00a0{Rate(reading?.DiskWriteBytesPerSecond)}";
         NetworkObservation.Text = reading?.ObservedEndpointCount is { } endpoints
             ? $"{endpoints} observed endpoints · {reading.RelationshipsCapturedAt?.LocalDateTime:T}"
             : "Endpoint observation unavailable";
@@ -63,7 +63,7 @@ public sealed partial class OverviewView : UserControl
         ReconcileConsumers();
     }
 
-    private static string Rate(double? value) => value is { } number ? Display.Rate(number) : "—";
+    private static string Rate(double? value) => value is { } number ? Display.Rate(number).Replace(' ', '\u00a0') : "—";
 
     private void ReconcileConsumers()
     {
@@ -124,7 +124,8 @@ public sealed partial class OverviewView : UserControl
 
     private void ConsumerKeyDown(object sender, KeyRoutedEventArgs args)
     {
-        if (ConsumersList.SelectedItem is not OverviewConsumerRow row) return;
+        if (FocusManager.GetFocusedElement(XamlRoot) is not ListViewItem item ||
+            ConsumersList.ItemFromContainer(item) is not OverviewConsumerRow row) return;
         if (args.Key == VirtualKey.Right && row.HasChildren && !row.Expanded || args.Key == VirtualKey.Left && row.Expanded)
         {
             Toggle(row);
@@ -146,12 +147,24 @@ public sealed partial class OverviewView : UserControl
 
     private void ResizeConsumerList()
     {
-        ConsumersList.MaxHeight = Math.Clamp(ActualHeight - ResourcesGrid.ActualHeight - 208, 160, 440);
+        if (!ready || DashboardScroller.ActualHeight <= 0) return;
+        var statusHeight = ReadingStatus.Visibility == Visibility.Visible
+            ? ReadingStatus.ActualHeight + ReadingStatus.Margin.Top + ReadingStatus.Margin.Bottom : 0;
+        var chromeHeight = ConsumersPanel.Padding.Top + ConsumersPanel.Padding.Bottom +
+            ConsumersPanel.BorderThickness.Top + ConsumersPanel.BorderThickness.Bottom +
+            ConsumerHeader.ActualHeight + ConsumerTableHeader.ActualHeight + ConsumerFooter.ActualHeight +
+            ConsumersLayout.RowSpacing * (ConsumersLayout.RowDefinitions.Count - 1);
+        var available = DashboardScroller.ActualHeight - statusHeight -
+            ResourcesGrid.ActualHeight - ResourcesGrid.Margin.Top - ResourcesGrid.Margin.Bottom - chromeHeight;
+        var height = Math.Max(80, Math.Floor(available));
+        if (Math.Abs(ConsumersList.MaxHeight - height) > 1) ConsumersList.MaxHeight = height;
     }
 
     private void DashboardSizeChanged(object sender, SizeChangedEventArgs args)
     {
-        var compact = args.NewSize.Width < 880;
+        var compact = args.NewSize.Width < 820;
+        ResourcesGrid.RowSpacing = compact ? 12 : 0;
+        PanelsGrid.RowSpacing = compact ? 16 : 0;
         Grid.SetColumn(MemoryCard, compact ? 2 : 1);
         Grid.SetColumn(DiskCard, compact ? 0 : 2);
         Grid.SetColumn(NetworkCard, compact ? 2 : 3);
