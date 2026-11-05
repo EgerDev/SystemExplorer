@@ -59,6 +59,12 @@ var tests = new (string Name, Action Run)[]
         Equal(0.3, trend.Segments[1][0].X);
         Equal(1d, trend.Segments[2][0].X);
         Equal(100d, trend.Maximum);
+        Equal(10d, trend.MinimumObserved);
+        Equal(40d, trend.MaximumObserved);
+        data.BreakContinuity();
+        data.Observe(Snapshot(22, P(10, 100)) with { TotalCpuPercent = 45 });
+        Check(data.Create(null, new())!.CpuTrend.Segments.Count == 4);
+        Check(data.Create(null, new(), search: "Friendly application", descriptionLookup: _ => "Friendly application")!.Consumers.Count == 1);
     }),
     ("Overview validates rates and timestamps without estimating network bandwidth", () =>
     {

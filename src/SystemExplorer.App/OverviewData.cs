@@ -4,7 +4,7 @@ namespace SystemExplorer.App;
 
 public enum ConsumerRanking { PrivateCommit, Cpu }
 public readonly record struct TrendCoordinate(double X, double Y);
-public sealed record ResourceTrend(IReadOnlyList<IReadOnlyList<TrendCoordinate>> Segments, double Maximum, int SampleCount);
+public sealed record ResourceTrend(IReadOnlyList<IReadOnlyList<TrendCoordinate>> Segments, double Maximum, int SampleCount, double? MinimumObserved, double? MaximumObserved);
 public sealed record OverviewReading(
     DateTimeOffset CapturedAt,
     double? CpuPercent,
@@ -31,23 +31,27 @@ public sealed class OverviewData
     private const int Capacity = 180;
     private readonly Queue<Point> points = new();
     private MonitorSnapshot? latest;
-    private sealed record Point(DateTimeOffset At, double? Cpu, double? Memory, double? Disk);
+    private bool breakBefore;
+    private sealed record Point(DateTimeOffset At, double? Cpu, double? Memory, double? Disk, bool BreakBefore);
+
+    public void BreakContinuity() => breakBefore = true;
 
     public void Observe(MonitorSnapshot snapshot)
     {
         if (latest is not null && snapshot.CapturedAt <= latest.CapturedAt) return;
         latest = snapshot;
-        points.Enqueue(new(snapshot.CapturedAt, ValidPercent(snapshot.TotalCpuPercent), MemoryPercent(snapshot.Memory), DiskTotal(snapshot)));
+        points.Enqueue(new(snapshot.CapturedAt, ValidPercent(snapshot.TotalCpuPercent), MemoryPercent(snapshot.Memory), DiskTotal(snapshot), breakBefore));
+        breakBefore = false;
         while (points.Count > Capacity) points.Dequeue();
     }
 
     public OverviewReading? Create(RelationshipSnapshot? relationships, DiagnosticsHistory history,
-        ConsumerRanking ranking = ConsumerRanking.PrivateCommit, string search = "")
+        ConsumerRanking ranking = ConsumerRanking.PrivateCommit, string search = "", Func<ProcessSnapshot, string?>? descriptionLookup = null)
     {
         if (latest is not { } snapshot) return null;
         var query = search.Trim();
         var groups = ProcessGrouping.Create(snapshot.Processes).Where(g => query.Length == 0 || g.Members.Any(p =>
-            $"{p.Name} {p.Identity.Pid} {p.ExecutablePath} {p.UserName}".Contains(query, StringComparison.OrdinalIgnoreCase)));
+            $"{p.Name} {descriptionLookup?.Invoke(p)} {p.Identity.Pid} {p.ExecutablePath} {p.UserName}".Contains(query, StringComparison.OrdinalIgnoreCase)));
         groups = ranking == ConsumerRanking.Cpu
             ? groups.OrderByDescending(g => g.CpuPercent ?? -1).ThenBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ThenBy(g => g.Key.Pid)
             : groups.OrderByDescending(g => g.PrivateBytes.HasValue).ThenByDescending(g => g.PrivateBytes).ThenBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ThenBy(g => g.Key.Pid);
@@ -80,12 +84,12 @@ public sealed class OverviewData
         for (var i = 0; i < samples.Length; i++)
         {
             var value = select(samples[i]);
-            if (value is null || i > 0 && (samples[i].At - samples[i - 1].At).TotalSeconds > 10) segment = null;
+            if (value is null || i > 0 && (samples[i].BreakBefore || (samples[i].At - samples[i - 1].At).TotalSeconds > 10)) segment = null;
             if (value is null) continue;
             if (segment is null) { segment = new(); segments.Add(segment); }
             segment.Add(new(seconds > 0 ? (samples[i].At - samples[0].At).TotalSeconds / seconds : 0.5, value.Value / maximum));
             validSamples++;
         }
-        return new(segments, maximum, validSamples);
+        return new(segments, maximum, validSamples, samples.Select(select).Min(), samples.Select(select).Max());
     }
 }
