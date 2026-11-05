@@ -6,7 +6,7 @@ on:
     branches: [master, feature/systemexplorer-integration]
     paths: ['src/**', 'tests/**', 'tools/Build-SystemExplorer.ps1', '.github/workflows/systemexplorer.yml']
   pull_request:
-    branches: [master]
+    branches: [master, feature/systemexplorer-integration]
     paths: ['src/**', 'tests/**', 'tools/Build-SystemExplorer.ps1', '.github/workflows/systemexplorer.yml']
 
 permissions:
