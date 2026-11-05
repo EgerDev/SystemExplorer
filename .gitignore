@@ -159,6 +159,7 @@ target/
 tools/thirdparty/vcpkg_installed/*
 
 bin-cmake/
+/artifacts/
 build-*/
 cmake-build-*/
 **/node_modules/
