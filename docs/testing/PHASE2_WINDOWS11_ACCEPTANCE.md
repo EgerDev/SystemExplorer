@@ -51,8 +51,10 @@ Provide a private test handoff, not a public release:
    `SystemExplorer.App.pri`, localization/resources, notices and licenses. Do not
    cherry-pick files or trim dependencies for this test. No target SDK install.
 2. Record source commit, build command and exit code, SDK version, builder OS,
-   artifact name, archive SHA-256, executable SHA-256, and independently supplied
-   SHA-256 of `SHA256SUMS.txt`. Include `BUILD-METADATA.json`,
+   artifact name, handoff format (directory or archive), executable SHA-256, and
+   independently supplied SHA-256 of `SHA256SUMS.txt`. For an archive, also record
+   its SHA-256; for a directory, record archive SHA-256 as `N/A - directory handoff`,
+   not PASS. Include `BUILD-METADATA.json`,
    `dependency-versions.json`, `README-TEST-BUILD.txt`, `LICENSE.txt`,
    `COPYRIGHT.txt`, `licenses/` and the complete `SHA256SUMS.txt`.
 3. Inspect metadata: `SourceRevision` must equal the parent-approved revision,
@@ -84,15 +86,26 @@ Provide a private test handoff, not a public release:
 
 ### Target-side integrity verification
 
-Before launch, compare archive and hash-list SHA-256 with the independent handoff
-using `Get-FileHash -Algorithm SHA256 -LiteralPath <path>`. Extract into a new,
-empty, current-user-writable directory, never over an older build. Keep the full
-tree, including hidden files. Do not launch from the ZIP viewer. If extracted
-through a GUI, record the extraction tool and destination.
+Choose the path matching the recorded handoff format before launch:
+
+- **Archive:** compare its SHA-256 with the independent handoff using
+  `Get-FileHash -Algorithm SHA256 -LiteralPath <path>`, then extract into a new,
+  empty, current-user-writable directory, never over an older build. Do not launch
+  from the ZIP viewer. Record the extraction tool and destination.
+- **Directory:** copy the complete supplied tree into a new, empty,
+  current-user-writable directory, never merge it with an older build. Record the
+  transfer method and destination. No archive creation, archive hash or extraction
+  is required; record those archive-only steps as `N/A - directory handoff`.
+
+For **both** formats, preserve the full tree including hidden files, set `$portable`
+to the received portable root, and compare the SHA-256 of its `SHA256SUMS.txt` with
+the independently supplied hash using `Get-FileHash -Algorithm SHA256 -LiteralPath
+<path>`. A directory handoff does not skip this hash-list authentication or the
+complete file verification below.
 
 For **every** line in `SHA256SUMS.txt`, compare the SHA-256 of the corresponding
-relative path in the extracted root. Use literal paths, reject rooted/parent
-traversal paths, and reject duplicate entries. Inventory the whole extracted tree
+relative path in the received portable root. Use literal paths, reject rooted/parent
+traversal paths, and reject duplicate entries. Inventory the whole received tree
 with `Get-ChildItem -LiteralPath $portable -Recurse -Force -File`; require exact
 path-set equality with the hash list plus `SHA256SUMS.txt` itself. Missing,
 additional or changed files block launch. Record the comparison log and counts,
@@ -179,13 +192,13 @@ managed session to manufacture offline conditions. "Did not use the browser"
 does not establish offline operation. If offline state cannot be demonstrated,
 mark this case BLOCKED and keep online diagnostics testing separate.
 
-After hashes and preflight, launch the EXE from its complete extracted folder
+After hashes and preflight, launch the EXE from its complete verified portable folder
 using the same normal-user context. Record first launch through usable live
 Processes/Memory/Services/Network views, then ordinary close and relaunch. Require
 no install, runtime download, UAC prompt or missing PRI/DLL error. Capture any
 policy warning without bypassing it. Verify live refresh and theme/resource
 loading while offline. Repeat from a current-user path containing spaces. This
-tests extraction-and-run portability, not an installer or uninstall procedure.
+tests portable directory execution, not an installer or uninstall procedure.
 If a dependency is missing, capture the exact error and leave the clean image
 unchanged: installing it would invalidate the claim being tested.
 
@@ -239,7 +252,8 @@ Case ID / configuration:
 Status: NOT RUN | BLOCKED | FAIL | PASS
 Tester / UTC start and end / actual elapsed duration:
 Source commit / source dirty state + diff hash if any:
-Archive SHA256 / EXE SHA256 / SHA256SUMS.txt SHA256:
+Handoff format (archive/directory) / transfer method / target root:
+Archive SHA256 (or N/A - directory handoff) / EXE SHA256 / SHA256SUMS.txt SHA256:
 Windows caption / version / build / ProductType / architecture:
 Token elevation / admin-enabled / integrity / account category:
 Driverless and clean-image provenance / offline evidence:
