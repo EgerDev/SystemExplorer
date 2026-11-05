@@ -21,6 +21,7 @@ public sealed class ProcessRow : INotifyPropertyChanged
     public ProcessIdentity Identity => process.Identity;
     public ProcessSnapshot Process => process;
     public bool IsChild { get; }
+    public double RowHeight => IsChild ? 32 : 44;
     public bool IsExpanded { get; private set; }
     public bool HasChildren => group is { Members.Count: > 1 };
     public string Chevron => HasChildren ? IsExpanded ? "\uE70D" : "\uE76C" : "";

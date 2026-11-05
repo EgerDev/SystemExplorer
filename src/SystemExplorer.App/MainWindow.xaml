@@ -177,7 +177,7 @@
                                             </ListView.ItemContainerStyle>
                                             <ListView.ItemTemplate>
                                                 <DataTemplate x:DataType="local:ProcessRow">
-                                                    <Grid Width="{Binding ContentWidth, Source={StaticResource ProcessColumns}, Mode=OneWay}" MinHeight="44" ToolTipService.ToolTip="{x:Bind GroupingReason}">
+                                                    <Grid Width="{Binding ContentWidth, Source={StaticResource ProcessColumns}, Mode=OneWay}" MinHeight="{x:Bind RowHeight}" ToolTipService.ToolTip="{x:Bind GroupingReason}">
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="{Binding Name, Source={StaticResource ProcessColumns}, Mode=OneWay}"/>
                                                             <ColumnDefinition Width="{Binding Memory, Source={StaticResource ProcessColumns}, Mode=OneWay}"/>
