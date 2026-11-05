@@ -8,6 +8,8 @@ public sealed class ProcessRow : INotifyPropertyChanged
 {
     private ProcessSnapshot process;
     private ProcessGroup? group;
+    private string? description;
+    private bool selected;
     public ProcessRow(ProcessSnapshot process, ProcessGroup? group, bool child, bool expanded)
     {
         this.process = process;
@@ -22,7 +24,12 @@ public sealed class ProcessRow : INotifyPropertyChanged
     public bool IsExpanded { get; private set; }
     public bool HasChildren => group is { Members.Count: > 1 };
     public string Chevron => HasChildren ? IsExpanded ? "\uE70D" : "\uE76C" : "";
-    public string Name => group is { Members.Count: > 1 } ? $"{group.Name} ({group.Members.Count})" : process.Name;
+    public string Name => !IsChild && description is not null ? description : process.Name;
+    public string RawName => process.Name;
+    public string Count => group?.Members.Count.ToString() ?? "";
+    public Microsoft.UI.Xaml.Visibility SelectionVisibility => selected ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
+    public Microsoft.UI.Xaml.Visibility DescriptionVisibility => !IsChild && description is not null && description != process.Name ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
+    public string IdentityHelp => $"{process.Name} · PID {process.Identity.Pid}\n{(description is null ? "Executable name from the process snapshot." : $"Local file description: {description}. File metadata is not verified publisher or application identity.")}";
     public string Pid => group is { Members.Count: > 1 } ? "Group" : process.Identity.Pid.ToString();
     public string Memory => Display.Bytes(group is null ? process.PrivateBytes : group.PrivateBytes);
     public string Cpu => Display.Percent(group is null ? process.CpuPercent : group.CpuPercent);
@@ -39,10 +46,23 @@ public sealed class ProcessRow : INotifyPropertyChanged
 
     public void Update(ProcessRow other)
     {
+        if (process.Identity != other.process.Identity || !string.Equals(process.ExecutablePath, other.process.ExecutablePath, StringComparison.OrdinalIgnoreCase)) description = null;
         process = other.process;
         group = other.group;
         IsExpanded = other.IsExpanded;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
+    }
+    public void SetDescription(string? value)
+    {
+        if (description == value) return;
+        description = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
+    }
+    public void SetSelected(bool value)
+    {
+        if (selected == value) return;
+        selected = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectionVisibility)));
     }
     public event PropertyChangedEventHandler? PropertyChanged;
 }
@@ -53,6 +73,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     private MonitorSnapshot? snapshot;
     public ObservableCollection<ProcessRow> Rows { get; } = new();
     public DiagnosticsHistory History { get; } = new();
+    public ApplicationDescriptions Descriptions { get; } = new();
+    public bool IsRebuilding { get; private set; }
+    public event EventHandler? RowsRebuilt;
     public MonitorSnapshot? Snapshot => snapshot;
     public RelationshipSnapshot? Relationships { get; set; }
     public string Search { get; set; } = "";
@@ -87,7 +110,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     {
         if (snapshot is null) return;
         bool Matches(ProcessSnapshot p) => string.IsNullOrWhiteSpace(Search) ||
-            $"{p.Name} {p.Identity.Pid} {p.ExecutablePath} {p.UserName}".Contains(Search.Trim(), StringComparison.OrdinalIgnoreCase);
+            $"{p.Name} {p.Identity.Pid} {p.ExecutablePath} {p.UserName} {Descriptions.GetCached(p)}".Contains(Search.Trim(), StringComparison.OrdinalIgnoreCase);
         var desired = new List<ProcessRow>();
         if (Grouped)
         {
@@ -109,20 +132,28 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         }
         else desired.AddRange(SortProcesses(snapshot.Processes.Where(Matches)).Select(p => new ProcessRow(p, null, false, false)));
 
-        var wanted = desired.Select(r => r.RowKey).ToHashSet();
-        for (var i = Rows.Count - 1; i >= 0; i--) if (!wanted.Contains(Rows[i].RowKey)) Rows.RemoveAt(i);
-        var existing = Rows.ToDictionary(r => r.RowKey);
-        for (var i = 0; i < desired.Count; i++)
+        IsRebuilding = true;
+        try
         {
-            var row = desired[i];
-            if (existing.TryGetValue(row.RowKey, out var current))
+            var wanted = desired.Select(r => r.RowKey).ToHashSet();
+            for (var i = Rows.Count - 1; i >= 0; i--) if (!wanted.Contains(Rows[i].RowKey)) Rows.RemoveAt(i);
+            var existing = Rows.ToDictionary(r => r.RowKey);
+            for (var i = 0; i < desired.Count; i++)
             {
-                current.Update(row);
-                var old = Rows.IndexOf(current);
-                if (old != i) Rows.Move(old, i);
+                var row = desired[i];
+                row.SetDescription(Descriptions.GetCached(row.Process));
+                if (existing.TryGetValue(row.RowKey, out var current))
+                {
+                    current.Update(row);
+                    current.SetDescription(Descriptions.GetCached(current.Process));
+                    var old = Rows.IndexOf(current);
+                    if (old != i) Rows.Move(old, i);
+                }
+                else Rows.Insert(i, row);
             }
-            else Rows.Insert(i, row);
         }
+        finally { IsRebuilding = false; }
+        RowsRebuilt?.Invoke(this, EventArgs.Empty);
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EmptyVisibility)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EmptyMessage)));
     }
