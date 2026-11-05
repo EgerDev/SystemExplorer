@@ -1,0 +1,31 @@
+# Windows relationships provider
+
+`new SystemExplorer.Relationships.WindowsRelationshipProvider()` implements the unchanged Core `IRelationshipProvider` contract. It requires Windows and .NET 10. Calls are serialized per instance and run off the caller's synchronization context; no elevation, driver, plugins, DNS, upload, registry writes or process-control APIs are used.
+
+## Observations and limitations
+
+- Four owner-PID tables: TCP/UDP, IPv4/IPv6. TCP listeners and UDP endpoints have null remote fields. Ports and IPv6 scope IDs are decoded from network byte order. Tables are bounded to 16 MiB and four allocation attempts; failed families produce explicit `Limitations`, not fabricated empty-success claims.
+- Windows services are enumerated read-only with `SC_MANAGER_ENUMERATE_SERVICE`, a 256 KiB page and at most 16 pages. Service start type is unqueried/null. Windows may silently omit services for which the token lacks query access. Service strings/counts are bounded against the native buffer; partial/error observations are reported.
+- `CapturedAt` is capture **start**, not atomic-snapshot time. A supplied stable identity is joined only if a newly opened query-limited process handle has the same creation FILETIME, has not exited, and creation is no later than capture start. Duplicate conflicting supplied identities do not join. Unknown/denied/exited/reused/newer PIDs retain `OwnerIdentity = null`. A process can still exit after verification; these are observations, not authorization for actions.
+- Startup inventory includes current-user/machine Run and RunOnce keys in both registry views plus current/common Startup folder entries. Commands remain unexpanded; shortcuts/reparse entries are listed without opening/resolving/executing targets. This is not a comprehensive startup manager: no tasks, drivers, logon scripts, enabled/disabled state or StartupApproved interpretation. Folder `Command` is the inventory entry path, not a claimed resolved target command. Registry views can expose duplicate logical entries; source view remains explicit. Missing keys/folders are empty; denied/unsupported/error sources fail the call instead of returning silently incomplete inventory (Core has no startup limitations field). Limit: 4096 entries.
+- Publisher verification is on demand via `WinVerifyTrust`, embedded-signature Authenticode policy, UI disabled, chain-excluding-root revocation checking and `WTD_CACHE_ONLY_URL_RETRIEVAL`. Only status **zero** is verified. The publisher display name is read from that verified provider state, never inferred from a file's certificate subject independently. All trust state and buffers are released. No catalog search is implemented; no embedded signature is not a claim that the file has no catalog signature. Cache misses can prevent offline verification. Successful verification is explicitly cache-only, not proof of fresh online revocation status or safe program behavior.
+- Publisher inputs must be fully qualified fixed local-drive paths, <=512 MiB, without reparse components or alternate data streams. UNC/device/mapped-network paths are rejected. The file stays open with no write/delete sharing through verification. Local path checks are not a sandbox against an administrator racing directory changes.
+- Cancellation is checked before/after synchronous Windows calls and throughout enumeration/parsing, but cannot preempt a synchronous native call already executing. Dispose rejects queued/new work and suppresses publication of in-flight results; native resources are scoped to calls and cleaned in `finally`/safe handles. No background poller is retained.
+
+## Verification
+
+```powershell
+dotnet run --project tests/SystemExplorer.Relationships.Smoke -c Release
+dotnet build src/SystemExplorer.Relationships -c Release -warnaserror
+```
+
+The zero-package smoke executable uses failure-producing Release assertions. It distinguishes deterministic malformed-buffer/identity fixtures from real current-process IPv4/IPv6 loopback TCP listeners/UDP sockets, joins each exact local port to its creation identity, checks mismatched identity rejection, observes services/startup inventory without executing entries, tests cancellation/disposal and offline publisher outcomes. It prints counts/status only, not paths, registry values or endpoint addresses. IPv6 is reported unsupported if the host lacks it. Tests neither upload a file nor modify trust settings; cache-only trust may legitimately remain unverified.
+
+## Official API references
+
+- [GetExtendedTcpTable](https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getextendedtcptable), [GetExtendedUdpTable](https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getextendedudptable)
+- [MIB_TCP6ROW_OWNER_PID](https://learn.microsoft.com/en-us/windows/win32/api/tcpmib/ns-tcpmib-mib_tcp6row_owner_pid), [MIB_UDP6ROW_OWNER_PID](https://learn.microsoft.com/en-us/windows/win32/api/udpmib/ns-udpmib-mib_udp6row_owner_pid)
+- [EnumServicesStatusExW](https://learn.microsoft.com/en-us/windows/win32/api/winsvc/nf-winsvc-enumservicesstatusexw), [ENUM_SERVICE_STATUS_PROCESSW](https://learn.microsoft.com/en-us/windows/win32/api/winsvc/ns-winsvc-enum_service_status_processw)
+- [WinVerifyTrust](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/nf-wintrust-winverifytrust), [WINTRUST_DATA](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_data)
+- [CRYPT_PROVIDER_SGNR](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-crypt_provider_sgnr), [CRYPT_PROVIDER_CERT](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-crypt_provider_cert), [CertGetNameStringW](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certgetnamestringw)
+- [Run and RunOnce registry keys](https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys)
