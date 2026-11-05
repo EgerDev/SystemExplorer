@@ -5,7 +5,8 @@
 This matrix is pinned to **`9101b5580d10531f49ec566e0837c7f28339a3dd`**, including
 the original System Informer source preserved in this fork. It is not a claim
 about a different upstream release, a successful native build, or runtime visual
-acceptance. Reviewed 2026-11-05. Only this document is changed at this checkpoint.
+acceptance. Reviewed 2026-11-05. The original checkpoint changed only this document;
+the follow-up below fixes one documented grouping discrepancy.
 The existing WinUI 3 / .NET 10 boundary and upstream notices remain intact.
 
 **Status vocabulary:** **Implemented** = source contains collection and a consuming
@@ -31,6 +32,17 @@ controlled for this documentation task.
 Parent update: private-working-set implementation is being developed separately
 on `feature/phase2-private-working-set`. It is **pending review/integration**, not
 implemented at this matrix's frozen baseline. Do not duplicate that work.
+
+## Follow-up implementation
+
+The accompanying Core change requires a known session before inferring an
+application group. Two unavailable sessions no longer compare as evidence of
+shared ownership. Known session zero remains valid, and existing positive
+ancestry/path/SID grouping behavior is preserved. The regression test covers
+unknown/unknown, known/unknown, and known session-zero pairs. Matrix entries
+below intentionally describe the pinned pre-fix baseline, not full Phase 2 parity.
+
+Verification receipt (2026-11-05): `dotnet run --project tests/SystemExplorer.Core.Tests -c Release` passed (16/16); `dotnet build src/SystemExplorer.Core -c Release -warnaserror` passed with 0 warnings and 0 errors on Windows Server 2022 Standard, build 20348. This is not Windows 11 runtime/UI acceptance.
 
 ## Current implementation source map
 

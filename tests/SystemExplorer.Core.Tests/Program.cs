@@ -13,6 +13,14 @@ var tests = new (string Name, Action Run)[]
     }),
     ("Reused parent PID is not related", () => Check(ProcessGrouping.Create([P(10, 300), P(11, 200, 10)]).Count == 2)),
     ("Missing metadata remains singleton", () => Check(ProcessGrouping.Create([P(10, 100), P(11, 200, 10) with { UserSid = null }]).Count == 2)),
+    ("Unknown sessions are not evidence of shared ownership", () =>
+    {
+        Check(ProcessGrouping.Create([P(10, 100) with { SessionId = null },
+            P(11, 200, 10) with { SessionId = null }]).Count == 2);
+        Check(ProcessGrouping.Create([P(10, 100), P(11, 200, 10) with { SessionId = null }]).Count == 2);
+        Check(ProcessGrouping.Create([P(10, 100) with { SessionId = 0 },
+            P(11, 200, 10) with { SessionId = 0 }]).Single().Members.Count == 2);
+    }),
     ("Group memory is private commit, not working set", () =>
     {
         var group = ProcessGrouping.Create([P(10, 100), P(11, 200, 10)]).Single();
