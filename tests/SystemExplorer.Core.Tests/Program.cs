@@ -1,7 +1,79 @@
 using SystemExplorer.Core;
+using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Application descriptions reject unsafe labels and uncertain attribution", () =>
+    {
+        Check(ApplicationDescriptions.Normalize(" Example app ") == "Example app");
+        Check(ApplicationDescriptions.Normalize("Example\napp") is null);
+        Check(ApplicationDescriptions.Normalize("Example\u202Eapp") is null);
+        var descriptions = new ApplicationDescriptions();
+        Check(descriptions.LoadAsync(P(10, 100) with { Identity = new(10, null) }, default).GetAwaiter().GetResult() is null);
+        Check(descriptions.LoadAsync(P(10, 100) with { Name = "example.exe", ExecutablePath = @"\\server\share\example.exe" }, default).GetAwaiter().GetResult() is null);
+    }),
+    ("Overview preserves physical/private and zero/unavailable distinctions", () =>
+    {
+        var data = new OverviewData();
+        var history = new DiagnosticsHistory();
+        Check(data.Create(null, history) is null);
+        data.Observe(Snapshot(0, P(10, 100) with { PrivateBytes = 10_000 }) with
+        {
+            Memory = new() { PhysicalTotalBytes = 100, PhysicalAvailableBytes = 25 },
+            TotalCpuPercent = 0, DiskReadBytesPerSecond = 0, DiskWriteBytesPerSecond = 0
+        });
+        var reading = data.Create(null, history)!;
+        Equal(75d, reading.PhysicalMemoryPercent);
+        Equal(0d, reading.CpuPercent);
+        Equal(0d, reading.DiskTotalBytesPerSecond);
+        Check(reading.ObservedEndpointCount is null && reading.Consumers.Single().PrivateBytes == 10_000);
+        Check(reading.DiskTrend.SampleCount == 1 && reading.DiskTrend.Segments.Single().Single().Y == 0);
+    }),
+    ("Overview partial groups stay unavailable and rank after known zero", () =>
+    {
+        var data = new OverviewData();
+        data.Observe(Snapshot(0, P(10, 100), P(11, 200, 10) with { PrivateBytes = null }, P(20, 300) with { PrivateBytes = 0 }));
+        var reading = data.Create(null, new())!;
+        Check(reading.Consumers.Count == 2 && reading.Consumers[0].Key.Pid == 20 && reading.Consumers[1].PrivateBytes is null);
+        Check(data.Create(null, new(), search: "11")!.Consumers.Single().Members.Count == 2);
+        Check(data.Create(null, new(), search: "no-such-app")!.Consumers.Count == 0);
+    }),
+    ("Overview history is bounded and does not duplicate rerenders", () =>
+    {
+        var data = new OverviewData();
+        for (var i = 0; i < 250; i++) data.Observe(Snapshot(i * 2, P(10, 100)) with { TotalCpuPercent = 10 });
+        data.Observe(Snapshot(498, P(10, 100)) with { TotalCpuPercent = 90 });
+        data.Observe(Snapshot(0, P(10, 100)) with { TotalCpuPercent = 90 });
+        var reading = data.Create(null, new())!;
+        Check(reading.CpuTrend.SampleCount == 180 && reading.CpuPercent == 10);
+        Check(data.Create(null, new(), ConsumerRanking.Cpu)!.CpuTrend.SampleCount == 180);
+    }),
+    ("Overview charts use elapsed time and break on missing samples and pauses", () =>
+    {
+        var data = new OverviewData();
+        foreach (var (at, cpu) in new (int, double?)[] { (0, 10), (2, 20), (4, null), (6, 30), (20, 40) })
+            data.Observe(Snapshot(at, P(10, 100)) with { TotalCpuPercent = cpu });
+        var trend = data.Create(null, new())!.CpuTrend;
+        Check(trend.Segments.Count == 3 && trend.Segments[0].Count == 2 && trend.Segments[1].Count == 1);
+        Equal(0.1, trend.Segments[0][1].X);
+        Equal(0.3, trend.Segments[1][0].X);
+        Equal(1d, trend.Segments[2][0].X);
+        Equal(100d, trend.Maximum);
+    }),
+    ("Overview validates rates and timestamps without estimating network bandwidth", () =>
+    {
+        var data = new OverviewData();
+        var snapshot = Snapshot(0, P(10, 100)) with { TotalCpuPercent = double.NaN, DiskReadBytesPerSecond = 5, DiskWriteBytesPerSecond = null };
+        data.Observe(snapshot);
+        var relationships = new RelationshipSnapshot { CapturedAt = snapshot.CapturedAt };
+        var reading = data.Create(relationships, new())!;
+        Check(reading.CpuPercent is null && reading.DiskTotalBytesPerSecond is null && reading.DiskReadBytesPerSecond == 5);
+        Check(reading.ObservedEndpointCount == 0);
+        Check(data.Create(relationships with { CapturedAt = snapshot.CapturedAt.AddSeconds(-11) }, new())!.ObservedEndpointCount is null);
+        Check(data.Create(relationships with { CapturedAt = snapshot.CapturedAt.AddSeconds(11) }, new())!.ObservedEndpointCount is null);
+        data.Observe(snapshot with { CapturedAt = snapshot.CapturedAt.AddSeconds(2), DiskReadBytesPerSecond = double.PositiveInfinity, DiskWriteBytesPerSecond = 2 });
+        Check(data.Create(null, new())!.DiskTotalBytesPerSecond is null);
+    }),
     ("PID reuse resets CPU", () => Equal(null, Sampling.CpuPercent(new(20, 10), new(20, 30), 0, 100, 1, 4))),
     ("CPU normalized to total machine", () => Equal(25d, Sampling.CpuPercent(new(20, 10), new(20, 10), 0, 10_000_000, 1, 4))),
     ("Unknown identity cannot sample", () => Equal(null, Sampling.CpuPercent(new(20, null), new(20, null), 0, 100, 1, 4))),
@@ -101,12 +173,19 @@ return failures == 0 ? 0 : 1;
 
 static ProcessSnapshot P(int pid, long started, int? parent = null) => new()
 {
-    Identity = new(pid, started), ParentPid = parent, Name = "example", ExecutablePath = @"C:\Apps\example.exe",
-    UserSid = "S-1-5-21-example", SessionId = 1, PrivateBytes = 100, WorkingSetBytes = 500
+    Identity = new(pid, started),
+    ParentPid = parent,
+    Name = "example",
+    ExecutablePath = @"C:\Apps\example.exe",
+    UserSid = "S-1-5-21-example",
+    SessionId = 1,
+    PrivateBytes = 100,
+    WorkingSetBytes = 500
 };
 static void Check(bool condition) { if (!condition) throw new InvalidOperationException("Assertion failed"); }
 static void Equal(double? expected, double? actual) => Check(expected == actual);
-static MonitorSnapshot Snapshot(int seconds, ProcessSnapshot process) => new()
+static MonitorSnapshot Snapshot(int seconds, params ProcessSnapshot[] processes) => new()
 {
-    CapturedAt = DateTimeOffset.UnixEpoch.AddSeconds(seconds), Processes = [process]
+    CapturedAt = DateTimeOffset.UnixEpoch.AddSeconds(seconds),
+    Processes = processes
 };
