@@ -20,6 +20,48 @@ if (!(Test-Path -LiteralPath (Join-Path $output 'SystemExplorer.App.exe')) -or
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE.txt') -Destination $output
 Copy-Item -LiteralPath (Join-Path $root 'COPYRIGHT.txt') -Destination $output
 Copy-Item -LiteralPath (Join-Path $root 'src\SystemExplorer.App\packages.lock.json') -Destination (Join-Path $output 'dependency-versions.json')
+$assets = Get-Content -LiteralPath (Join-Path $root 'src\SystemExplorer.App\obj\project.assets.json') -Raw | ConvertFrom-Json
+$packages = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($library in $assets.libraries.PSObject.Properties) {
+    if ($library.Value.type -eq 'package') { [void]$packages.Add($library.Value.path) }
+}
+foreach ($framework in $assets.project.frameworks.PSObject.Properties) {
+    foreach ($dependency in $framework.Value.downloadDependencies) {
+        if ($dependency.version -notmatch '^\[([^,\]]+),\s*([^\]]+)\]$' -or $Matches[1] -ne $Matches[2]) {
+            throw "Expected an exact restored runtime-pack version: $($dependency.name)"
+        }
+        [void]$packages.Add(($dependency.name + '/' + $Matches[1]).ToLowerInvariant())
+    }
+}
+foreach ($package in ($packages | Sort-Object)) {
+    $packagePath = $null
+    foreach ($folder in $assets.packageFolders.PSObject.Properties.Name) {
+        $candidate = Join-Path $folder $package
+        if (Test-Path -LiteralPath $candidate -PathType Container) { $packagePath = $candidate; break }
+    }
+    if (!$packagePath) { throw "Restored package not found for notice collection: $package" }
+    $noticeFiles = @(Get-ChildItem -LiteralPath $packagePath -Recurse -File | Where-Object {
+        $_.Name -match '(?i)(license|notice|copyright)' -or $_.Extension -eq '.nuspec'
+    })
+    if (!$noticeFiles.Count) { throw "No license metadata found for $package" }
+    foreach ($file in $noticeFiles) {
+        $relative = $file.FullName.Substring($packagePath.TrimEnd('\', '/').Length + 1)
+        $destination = Join-Path (Join-Path (Join-Path $output 'licenses') $package) $relative
+        [void](New-Item -ItemType Directory -Force -Path (Split-Path $destination -Parent))
+        Copy-Item -LiteralPath $file.FullName -Destination $destination
+    }
+}
+$revision = & git -C $root rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw 'Cannot identify source revision.' }
+$dirty = & git -C $root status --porcelain --untracked-files=normal
+if ($LASTEXITCODE -ne 0) { throw 'Cannot identify source worktree state.' }
+[ordered]@{
+    SourceRevision = $revision
+    SourceDirty = [bool]$dirty
+    DotnetSdk = (& $dotnet --version)
+    Runtime = (Get-Content -LiteralPath (Join-Path $output 'SystemExplorer.App.runtimeconfig.json') -Raw | ConvertFrom-Json).runtimeOptions
+    UnsignedTestBuild = $true
+} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'BUILD-METADATA.json') -Encoding UTF8
 @'
 SystemExplorer unsigned test build
 
@@ -31,9 +73,12 @@ public release or a claim of completed Windows 11 standard-user acceptance.
 The original System Informer source tree is preserved separately. Its advanced
 features are not all exposed here. LICENSE.txt/COPYRIGHT.txt retain upstream notices;
 they do not imply that every original-tree component is linked into this application.
-dependency-versions.json records managed package versions. Runtime notices shipped
-by the SDK remain in this directory. See the repository release-readiness report
-for supported features, missing measurements and remaining license review gates.
+dependency-versions.json records managed package versions. licenses/ preserves
+package license/notice files and NuGet metadata, including build-only dependencies
+and downloaded runtime packs; this inventory does not assert every package is linked.
+BUILD-METADATA.json identifies the source revision and whether it was dirty.
+See src/README.md and docs/testing/QUALITY_GATES.md in the source repository for
+supported features, missing measurements and remaining license review gates.
 '@ | Set-Content -LiteralPath (Join-Path $output 'README-TEST-BUILD.txt') -Encoding UTF8
 $manifest = Get-ChildItem -LiteralPath $output -Recurse -File | Sort-Object FullName | ForEach-Object {
     $relative = $_.FullName.Substring($output.TrimEnd('\').Length + 1)

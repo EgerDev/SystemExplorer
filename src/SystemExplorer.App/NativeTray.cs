@@ -2,6 +2,8 @@ using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
 using SystemExplorer.Core;
 
+[assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+
 namespace SystemExplorer.App;
 
 public sealed class NativeTray : IDisposable
