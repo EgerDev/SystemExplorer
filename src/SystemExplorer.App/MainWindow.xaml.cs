@@ -46,6 +46,7 @@ public sealed partial class MainWindow : Window
         Model.RowsRebuilt += (_, _) => RestoreSelection();
         tray = new NativeTray(this);
         ready = true;
+        InitializeOverview();
         var work = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(Math.Min(1440, work.Width), Math.Min(920, work.Height)));
         AppWindow.Move(new global::Windows.Graphics.PointInt32(work.X + Math.Max(0, (work.Width - AppWindow.Size.Width) / 2), work.Y + Math.Max(0, (work.Height - AppWindow.Size.Height) / 2)));
@@ -69,36 +70,55 @@ public sealed partial class MainWindow : Window
         var cycle = 0;
         while (!shutdown.IsCancellationRequested)
         {
+            var generation = observationGeneration;
             try
             {
                 if (!paused)
                 {
                     var next = await monitor.CaptureAsync(shutdown.Token);
                     if (shutdown.IsCancellationRequested) break;
-                    if (paused) continue;
+                    if (paused || generation != observationGeneration) continue;
+                    if (Model.Snapshot is { } previous && next.CapturedAt <= previous.CapturedAt)
+                        throw new InvalidOperationException("An out-of-order observation was ignored.");
                     Model.Apply(next);
+                    overviewData.Observe(next);
+                    overviewStale = false;
                     tray.Update(next);
                     if (cycle++ % 3 == 0)
                     {
                         try
                         {
                             var related = await relationships.CaptureAsync(next.Processes, shutdown.Token);
-                            if (!paused && !shutdown.IsCancellationRequested) Model.Relationships = related;
+                            if (shutdown.IsCancellationRequested) break;
+                            if (paused || generation != observationGeneration) continue;
+                            Model.Relationships = related;
                             relationshipError = null;
                         }
                         catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { break; }
-                        catch (Exception ex) { Model.Relationships = null; relationshipError = $"Relationship data unavailable: {ex.Message}"; }
+                        catch (Exception ex)
+                        {
+                            if (paused || generation != observationGeneration) continue;
+                            Model.Relationships = null;
+                            relationshipError = $"Relationship data unavailable: {ex.Message}";
+                        }
                     }
                     if (cycle % 30 == 1)
                     {
                         try
                         {
-                            startup = await relationships.GetStartupItemsAsync(shutdown.Token);
+                            var observedStartup = await relationships.GetStartupItemsAsync(shutdown.Token);
+                            if (shutdown.IsCancellationRequested) break;
+                            if (paused || generation != observationGeneration) continue;
+                            startup = observedStartup;
                             startupCapturedAt = DateTimeOffset.UtcNow;
                             startupError = null;
                         }
                         catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { break; }
-                        catch (Exception ex) { startupError = $"Startup inventory unavailable: {ex.Message}"; }
+                        catch (Exception ex)
+                        {
+                            if (paused || generation != observationGeneration) continue;
+                            startupError = $"Startup inventory unavailable: {ex.Message}";
+                        }
                     }
                     RefreshInspector();
                     RefreshDiagnostics();
@@ -111,6 +131,10 @@ public sealed partial class MainWindow : Window
             catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { break; }
             catch (Exception ex)
             {
+                if (paused || generation != observationGeneration) continue;
+                overviewData.BreakContinuity();
+                overviewStale = true;
+                RefreshOverview();
                 StatusText.Text = $"Refresh failed; previous data is stale: {ex.Message}";
                 try { await Task.Delay(2000, shutdown.Token); }
                 catch (OperationCanceledException) { break; }
@@ -125,6 +149,7 @@ public sealed partial class MainWindow : Window
         PageTitle.Text = section;
         PageSubtitle.Text = section switch
         {
+            "Overview" => "Live resource use, top consumers, and system insights.",
             "Processes" => "See what's using your system and explore related processes.",
             "Memory" => "Physical memory, private commit and reclaimable categories are different views—not additive totals.",
             "Network" => "Observed TCP connections and UDP endpoints. No inferred bandwidth, DNS or geography.",
@@ -134,8 +159,9 @@ public sealed partial class MainWindow : Window
             _ => "Read-only diagnostics from your local Windows system. Unavailable measurements are explicit."
         };
         ProcessesPanel.Visibility = section == "Processes" ? Visibility.Visible : Visibility.Collapsed;
+        OverviewPanel.Visibility = section == "Overview" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPanel.Visibility = section == "Settings" ? Visibility.Visible : Visibility.Collapsed;
-        DiagnosticsPanel.Visibility = section is "Processes" or "Settings" ? Visibility.Collapsed : Visibility.Visible;
+        DiagnosticsPanel.Visibility = section is "Processes" or "Overview" or "Settings" ? Visibility.Collapsed : Visibility.Visible;
         if (section == "Processes") ProcessSearch.Text = GlobalSearch.Text;
         RefreshDiagnostics();
     }
@@ -175,7 +201,14 @@ public sealed partial class MainWindow : Window
     private void ProcessContainerChanged(ListViewBase sender, ContainerContentChangingEventArgs args)
     {
         if (args.InRecycleQueue) args.ItemContainer.ClearValue(Microsoft.UI.Xaml.Automation.AutomationProperties.NameProperty);
-        else if (args.Item is ProcessRow row) Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(args.ItemContainer, row.AutomationName);
+        else if (args.Item is ProcessRow row)
+            args.ItemContainer.SetBinding(Microsoft.UI.Xaml.Automation.AutomationProperties.NameProperty,
+                new Microsoft.UI.Xaml.Data.Binding
+                {
+                    Source = row,
+                    Path = new PropertyPath(nameof(ProcessRow.AutomationName)),
+                    Mode = Microsoft.UI.Xaml.Data.BindingMode.OneWay
+                });
     }
     private async void ProcessIconLoaded(object sender, RoutedEventArgs args) => await LoadProcessIconAsync((Image)sender);
     private async void ProcessIconChanged(FrameworkElement sender, DataContextChangedEventArgs args) => await LoadProcessIconAsync((Image)sender);
@@ -404,7 +437,10 @@ public sealed partial class MainWindow : Window
 
     private void PauseClicked(object sender, RoutedEventArgs args)
     {
+        observationGeneration++;
         paused = !paused;
+        if (paused) overviewData.BreakContinuity();
+        RefreshOverview();
         if (Model.Snapshot is { } snapshot) tray.Update(snapshot, paused);
         PauseButton.Content = paused ? "Resume" : "Pause";
         StatusText.Text = paused ? "Paused · displayed measurements are frozen" : "Resuming live local monitoring…";
@@ -441,16 +477,13 @@ public sealed partial class MainWindow : Window
     private void RefreshDiagnostics()
     {
         if (!ready || section is "Processes" or "Settings") return;
+        if (section == "Overview") { RefreshOverview(); return; }
         var snapshot = Model.Snapshot;
         if (snapshot is null) { DetailsList.ItemsSource = new[] { "Waiting for the first real Windows sample…" }; return; }
         var mem = snapshot.Memory;
         var rows = new List<string>();
         switch (section)
         {
-            case "Overview":
-                rows.Add($"CPU {Display.Percent(snapshot.TotalCpuPercent)}\nPhysical memory {Display.Bytes(mem.PhysicalUsedBytes)} used / {Display.Bytes(mem.PhysicalTotalBytes)} total\n{snapshot.Processes.Count} observed processes");
-                rows.AddRange(Model.History.Explain(snapshot, Model.Relationships).Take(4).Select(i => $"{i.Title}\n{i.Evidence}"));
-                break;
             case "Memory":
                 rows.Add($"Physical: {Display.Bytes(mem.PhysicalUsedBytes)} used · {Display.Bytes(mem.PhysicalAvailableBytes)} available · {Display.Bytes(mem.PhysicalTotalBytes)} total");
                 rows.Add($"System commit: {Display.Bytes(mem.CommitTotalBytes)} / {Display.Bytes(mem.CommitLimitBytes)} limit\nCommit is not resident RAM.");
@@ -498,14 +531,14 @@ public sealed partial class MainWindow : Window
         var query = GlobalSearch.Text?.Trim() ?? "";
         var filtered = rows.Where(r => query.Length == 0 || r.Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray();
         DetailsList.ItemsSource = filtered.Length > 0 ? filtered : new[] { query.Length > 0 ? "No displayed observations match this search. Clear search to show this section." : "No observations are available for this section yet." };
-        ChartCard.Visibility = section is "Overview" or "Memory" or "CPU" ? Visibility.Visible : Visibility.Collapsed;
+        ChartCard.Visibility = section is "Memory" or "CPU" ? Visibility.Visible : Visibility.Collapsed;
         DrawHistory();
     }
 
     private void ChartSizeChanged(object sender, SizeChangedEventArgs args) => DrawHistory();
     private void DrawHistory()
     {
-        if (!ready) return;
+        if (!ready || section is not ("Memory" or "CPU")) return;
         HistoryChart.Children.Clear();
         var points = Model.History.System;
         var cpu = section == "CPU";

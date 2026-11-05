@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:SystemExplorer.App"
     xmlns:controls="using:SystemExplorer.App.Controls"
+    xmlns:views="using:SystemExplorer.App.Views"
     Title="SystemExplorer">
     <Grid x:Name="Root" Background="{ThemeResource PageSurface}" RequestedTheme="Light" KeyboardAcceleratorPlacementMode="Hidden">
         <Grid.Resources>
@@ -296,6 +297,7 @@
                         </Border>
                     </Grid>
                 </Grid>
+                <views:OverviewView x:Name="OverviewPanel" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed"/>
                 <Grid x:Name="DiagnosticsPanel" Grid.Row="2" Visibility="Collapsed" RowSpacing="10">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
