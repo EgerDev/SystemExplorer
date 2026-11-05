@@ -27,9 +27,16 @@ internal static class NativeMethods
     internal static extern SafeServiceHandle OpenSCManagerW(string? machine, string? database, uint access);
 
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern SafeServiceHandle OpenServiceW(SafeServiceHandle manager, string serviceName, uint desiredAccess);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool EnumServicesStatusExW(SafeServiceHandle manager, int level, uint type, uint state,
         IntPtr services, uint bufferSize, out uint bytesNeeded, out uint returned, ref uint resume, string? group);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool QueryServiceConfigW(SafeServiceHandle service, IntPtr buffer, uint bufferSize, out uint bytesNeeded);
 
     [DllImport("advapi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -54,6 +61,15 @@ internal static class NativeMethods
     {
         internal IntPtr Name, DisplayName;
         internal uint Type, State, ControlsAccepted, Win32ExitCode, ServiceExitCode, CheckPoint, WaitHint, Pid, Flags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct QueryServiceConfig
+    {
+        internal uint ServiceType, StartType, ErrorControl;
+        internal IntPtr BinaryPathName, LoadOrderGroup;
+        internal uint TagId;
+        internal IntPtr Dependencies, ServiceStartName, DisplayName;
     }
 
     [StructLayout(LayoutKind.Sequential)]
