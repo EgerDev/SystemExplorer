@@ -19,7 +19,43 @@ var tests = new (string Name, Action Run)[]
         Check(group.PrivateBytes == 200);
         Check(ProcessGrouping.Create([P(10, 100), P(11, 200, 10) with { PrivateBytes = null }]).Single().PrivateBytes is null);
     }),
-    ("Physical accounting rejects invalid available", () => Check(new MemorySnapshot { PhysicalTotalBytes = 10, PhysicalAvailableBytes = 11 }.PhysicalUsedBytes is null))
+    ("Physical accounting rejects invalid available", () => Check(new MemorySnapshot { PhysicalTotalBytes = 10, PhysicalAvailableBytes = 11 }.PhysicalUsedBytes is null)),
+    ("History bounded to 180 samples", () =>
+    {
+        var history = new DiagnosticsHistory();
+        for (var i = 0; i < 250; i++) history.Add(Snapshot(i * 2, P(10, 100)));
+        Check(history.System.Count == 180);
+    }),
+    ("Growth evidence needs sustained same-lifetime samples", () =>
+    {
+        var history = new DiagnosticsHistory();
+        MonitorSnapshot sample = Snapshot(0, P(10, 100));
+        for (var i = 0; i <= 30; i++)
+        {
+            sample = Snapshot(i * 2, P(10, 100) with { PrivateBytes = (100UL + (ulong)i * 2) * 1024 * 1024 });
+            history.Add(sample);
+        }
+        Check(history.Explain(sample).Any(i => i.Title.StartsWith("Sustained")));
+        sample = Snapshot(62, P(10, 200) with { PrivateBytes = 200UL * 1024 * 1024 });
+        history.Add(sample);
+        Check(!history.Explain(sample).Any(i => i.Title.StartsWith("Sustained")));
+    }),
+    ("Unavailable memory breaks trend continuity", () =>
+    {
+        var history = new DiagnosticsHistory();
+        for (var i = 0; i <= 30; i++) history.Add(Snapshot(i * 2, P(10, 100) with { PrivateBytes = (100UL + (ulong)i * 2) * 1024 * 1024 }));
+        history.Add(Snapshot(62, P(10, 100) with { PrivateBytes = null }));
+        var sample = Snapshot(64, P(10, 100) with { PrivateBytes = 300UL * 1024 * 1024 });
+        history.Add(sample);
+        Check(!history.Explain(sample).Any(i => i.Title.StartsWith("Sustained")));
+    }),
+    ("Duplicate timestamps do not grow history", () =>
+    {
+        var history = new DiagnosticsHistory();
+        history.Add(Snapshot(0, P(10, 100)));
+        history.Add(Snapshot(0, P(10, 100)));
+        Check(history.System.Count == 1);
+    })
 };
 var failures = 0;
 foreach (var (name, run) in tests)
@@ -37,3 +73,7 @@ static ProcessSnapshot P(int pid, long started, int? parent = null) => new()
 };
 static void Check(bool condition) { if (!condition) throw new InvalidOperationException("Assertion failed"); }
 static void Equal(double? expected, double? actual) => Check(expected == actual);
+static MonitorSnapshot Snapshot(int seconds, ProcessSnapshot process) => new()
+{
+    CapturedAt = DateTimeOffset.UnixEpoch.AddSeconds(seconds), Processes = [process]
+};
