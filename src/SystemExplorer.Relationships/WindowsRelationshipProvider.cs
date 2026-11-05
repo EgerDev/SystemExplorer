@@ -7,6 +7,7 @@ namespace SystemExplorer.Relationships;
 public sealed class WindowsRelationshipProvider : IRelationshipProvider
 {
     private readonly SemaphoreSlim gate = new(1, 1);
+    private readonly ServiceConfigReader serviceConfigReader = new();
     private int disposed;
     private const uint MaximumTableBytes = 16 * 1024 * 1024;
 
@@ -54,7 +55,7 @@ public sealed class WindowsRelationshipProvider : IRelationshipProvider
         {
             "Endpoint and service observations are not an atomic snapshot; CapturedAt marks capture start.",
             "PID-only owners are unverified unless matched to a live handle creation time from the supplied process snapshot.",
-            "Services inaccessible to this token can be silently omitted by Windows; service start types are not queried.",
+            "Services inaccessible to this token can be silently omitted by Windows; configured base start types do not include delayed/trigger modes or runtime behavior.",
             "UDP rows are local endpoints, not connections. DNS, geography and bandwidth are not collected."
         };
         var endpoints = new List<ConnectionSnapshot>();
@@ -137,13 +138,26 @@ public sealed class WindowsRelationshipProvider : IRelationshipProvider
     private List<ServiceSnapshot> ReadServices(List<string> limitations, CancellationToken token)
     {
         var result = new List<ServiceSnapshot>();
-        using var manager = NativeMethods.OpenSCManagerW(null, null, 4);
+        Check(token);
+        using var manager = NativeMethods.OpenSCManagerW(null, null, 0x5);
+        Check(token);
         if (manager.IsInvalid)
         {
             int error = Marshal.GetLastWin32Error();
             limitations.Add($"Services: {ErrorKind(error)} (Win32 {error}).");
             return result;
         }
+        result = EnumerateServices(manager, limitations, token);
+        serviceConfigReader.Enrich(manager, result, limitations, token);
+        return result;
+    }
+
+    private List<ServiceSnapshot> EnumerateServices(
+        SafeServiceHandle manager,
+        List<string> limitations,
+        CancellationToken token)
+    {
+        var result = new List<ServiceSnapshot>();
         const int capacity = 256 * 1024;
         IntPtr buffer = Marshal.AllocHGlobal(capacity);
         try

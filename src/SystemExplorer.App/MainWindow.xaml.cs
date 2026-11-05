@@ -147,7 +147,7 @@ public sealed partial class MainWindow : Window
     {
         if (!ready) return;
         Model.Grouped = Grouping.SelectedIndex == 0;
-        Model.Sort = Sorting.SelectedItem?.ToString() ?? "Private memory";
+        Model.Sort = Sorting.SelectedIndex switch { 1 => "CPU", 2 => "Name", 3 => "PID", _ => "Private memory" };
         Model.Rebuild();
     }
     private void ReverseSortClicked(object sender, RoutedEventArgs args) { Model.Descending = !Model.Descending; Model.Rebuild(); }
@@ -157,7 +157,7 @@ public sealed partial class MainWindow : Window
         var sort = button.Tag?.ToString() ?? "Private memory";
         if (Model.Sort == sort) Model.Descending = !Model.Descending;
         Model.Sort = sort;
-        Sorting.SelectedItem = sort;
+        Sorting.SelectedIndex = sort switch { "CPU" => 1, "Name" => 2, "PID" => 3, _ => 0 };
         Model.Rebuild();
     }
     private void ExpandClicked(object sender, RoutedEventArgs args) { if (sender is Button { Tag: ProcessRow row }) Model.Toggle(row); }
@@ -197,7 +197,7 @@ public sealed partial class MainWindow : Window
         detailsOpen = true;
         try
         {
-            await new ContentDialog { XamlRoot = Root.XamlRoot, Title = SelectedName.Text, Content = new ScrollViewer { Content = new TextBlock { Text = $"{SelectedIdentity.Text}\n\n{SelectedPath.Text}\n\n{SelectedMemory.Text}\n\n{SelectedServices.Text}\n{SelectedNetwork.Text}", TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } }, CloseButtonText = "Close" }.ShowAsync();
+            await new ContentDialog { XamlRoot = Root.XamlRoot, RequestedTheme = Root.RequestedTheme, Title = SelectedName.Text, Content = new ScrollViewer { Content = new TextBlock { Text = $"{SelectedStatus.Text}\n{SelectedIdentity.Text}\n{SelectedAvailability.Text}\n\nExecutable path\n{SelectedPath.Text}\n\nCommand line\n{SelectedCommandLine.Text}\n\nOwnership\n{SelectedOwner.Text}\n\nParent process\n{SelectedParent.Text}\n\nMemory\n{SelectedMemory.Text}\n\nAssociated services\n{SelectedServices.Text}\n\nNetwork endpoints\n{SelectedNetwork.Text}", TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } }, CloseButtonText = "Close" }.ShowAsync();
         }
         catch (Exception ex) { if (!shutdown.IsCancellationRequested) StatusText.Text = $"Details unavailable: {ex.Message}"; }
         finally { detailsOpen = false; }
@@ -229,6 +229,7 @@ public sealed partial class MainWindow : Window
     }
 
     private ProcessSnapshot? SelectedProcess => selectedIdentity is { } identity ? Model.Snapshot?.Processes.FirstOrDefault(p => p.Identity == identity) : null;
+    private async void DetailsClicked(object sender, RoutedEventArgs args) => await ShowDetailsAsync();
     private void RefreshInspector()
     {
         var process = SelectedProcess;
@@ -238,12 +239,18 @@ public sealed partial class MainWindow : Window
             SelectedIdentity.Text = "Select a current process to inspect its live measurements.";
             SelectedPath.Text = SelectedCommandLine.Text = SelectedParent.Text = SelectedMemory.Text = SelectedServices.Text = SelectedNetwork.Text = "—";
             SelectedAvailability.Text = "";
+            SelectedStatus.Text = selectedIdentity is null ? "No selection" : "Unavailable";
+            SelectedOwner.Text = "—";
+            DetailsButton.IsEnabled = false;
             PublisherText.Text = "";
             OpenLocation.IsEnabled = CopyPath.IsEnabled = PublisherButton.IsEnabled = false;
             return;
         }
         SelectedName.Text = process.Name;
-        SelectedIdentity.Text = $"PID {process.Identity.Pid} · {process.ThreadCount?.ToString() ?? "?"} threads · {process.HandleCount?.ToString() ?? "?"} handles\n{process.UserName ?? "User unavailable"}\nSelected member; group totals are in the table.";
+        SelectedStatus.Text = "Observed";
+        SelectedOwner.Text = process.UserName ?? "Unavailable (permission or process lifetime)";
+        DetailsButton.IsEnabled = true;
+        SelectedIdentity.Text = $"PID {process.Identity.Pid} · {process.ThreadCount?.ToString() ?? "?"} threads · {process.HandleCount?.ToString() ?? "?"} handles\nSelected member; group totals are in the table.";
         SelectedPath.Text = process.ExecutablePath ?? "Unavailable (permission or process lifetime)";
         SelectedCommandLine.Text = process.CommandLine ?? "Unavailable from this documented-API provider";
         var byPid = Model.Snapshot!.Processes.ToDictionary(p => p.Identity.Pid);
@@ -323,7 +330,8 @@ public sealed partial class MainWindow : Window
         if (!ready) return;
         var show = args.NewSize.Width >= 1000;
         Inspector.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        InspectorColumn.Width = new GridLength(show ? 290 : 0);
+        InspectorColumn.Width = new GridLength(show ? 320 : 0);
+        DetailsButton.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void RefreshDiagnostics()
