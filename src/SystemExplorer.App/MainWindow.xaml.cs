@@ -28,6 +28,8 @@ public sealed partial class MainWindow : Window
     private bool detailsOpen;
     private string section = "Processes";
     private ProcessIdentity? selectedIdentity;
+    private string? selectedRowKey;
+    private bool restoringSelection;
     private IReadOnlyList<StartupItem> startup = Array.Empty<StartupItem>();
     private DateTimeOffset? startupCapturedAt;
     private string? startupError;
@@ -37,10 +39,17 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        ExtendsContentIntoTitleBar = true;
+        SetTitleBar(WindowTitleBar);
+        Root.ActualThemeChanged += (_, _) => UpdateCaptionColors();
         ProcessList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(ProcessKeyDown), true);
+        Model.RowsRebuilt += (_, _) => RestoreSelection();
         tray = new NativeTray(this);
         ready = true;
-        AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1440, 920));
+        var work = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
+        AppWindow.Resize(new global::Windows.Graphics.SizeInt32(Math.Min(1440, work.Width), Math.Min(920, work.Height)));
+        AppWindow.Move(new global::Windows.Graphics.PointInt32(work.X + Math.Max(0, (work.Width - AppWindow.Size.Width) / 2), work.Y + Math.Max(0, (work.Height - AppWindow.Size.Height) / 2)));
+        UpdateCaptionColors();
         var accelerator = new KeyboardAccelerator { Key = VirtualKey.K, Modifiers = VirtualKeyModifiers.Control };
         accelerator.Invoked += (_, args) => { GlobalSearch.Focus(FocusState.Keyboard); args.Handled = true; };
         Root.KeyboardAccelerators.Add(accelerator);
@@ -94,7 +103,8 @@ public sealed partial class MainWindow : Window
                     RefreshInspector();
                     RefreshDiagnostics();
                     var gaps = next.Limitations.Concat(Model.Relationships?.Limitations ?? Array.Empty<string>()).ToArray();
-                    StatusText.Text = paused ? "Paused · displayed measurements are frozen" : $"Updated {next.CapturedAt.LocalDateTime:T} · Local, read-only · {next.Processes.Count} processes · Private commit ≠ physical RAM" + (relationshipError is not null ? $" · {relationshipError}" : gaps.Length > 0 ? $" · {gaps[0]}" : "");
+                    StatusText.Text = paused ? "Paused · displayed measurements are frozen" : $"Updated {next.CapturedAt.LocalDateTime:T} · Local, read-only · {next.Processes.Count} processes" + (relationshipError is not null ? " · Relationship data unavailable" : "");
+                    ToolTipService.SetToolTip(StatusText, string.Join("\n", gaps.Append(relationshipError).Where(g => !string.IsNullOrEmpty(g))));
                 }
                 await Task.Delay(TimeSpan.FromSeconds(2), shutdown.Token);
             }
@@ -115,7 +125,7 @@ public sealed partial class MainWindow : Window
         PageTitle.Text = section;
         PageSubtitle.Text = section switch
         {
-            "Processes" => "Live Windows processes, grouped conservatively by executable and parent chain.",
+            "Processes" => "See what's using your system and explore related processes.",
             "Memory" => "Physical memory, private commit and reclaimable categories are different views—not additive totals.",
             "Network" => "Observed TCP connections and UDP endpoints. No inferred bandwidth, DNS or geography.",
             "Services" => "Read-only Windows service inventory with verified process-lifetime associations.",
@@ -172,15 +182,25 @@ public sealed partial class MainWindow : Window
     private async Task LoadProcessIconAsync(Image image)
     {
         var row = image.DataContext as ProcessRow;
+        var identity = row?.Identity;
         var path = row?.Process.ExecutablePath;
-        if (Equals(image.Tag, path)) return;
-        image.Tag = path;
+        var key = (identity, path);
+        if (Equals(image.Tag, key)) return;
+        image.Tag = key;
         image.Source = null;
         if (path is null) return;
         try
         {
+            if (row is not null)
+            {
+                var description = await Model.Descriptions.LoadAsync(row.Process, shutdown.Token);
+                if (shutdown.IsCancellationRequested || !ReferenceEquals(image.DataContext, row) ||
+                    row.Identity != identity || row.Process.ExecutablePath != path || !Equals(image.Tag, key)) return;
+                row.SetDescription(description);
+            }
             var icon = await icons.LoadAsync(path, shutdown.Token);
-            if (!shutdown.IsCancellationRequested && ReferenceEquals(image.DataContext, row) && Equals(image.Tag, path)) image.Source = icon;
+            if (!shutdown.IsCancellationRequested && ReferenceEquals(image.DataContext, row) && row?.Identity == identity &&
+                row?.Process.ExecutablePath == path && Equals(image.Tag, key)) image.Source = icon;
         }
         catch (OperationCanceledException) { }
         catch (Exception) { /* The generic icon remains available. */ }
@@ -198,7 +218,7 @@ public sealed partial class MainWindow : Window
         detailsOpen = true;
         try
         {
-            var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, RequestedTheme = Root.RequestedTheme, Title = SelectedName.Text, Content = new ScrollViewer { Content = new TextBlock { Text = $"{SelectedStatus.Text}\n{SelectedIdentity.Text}\n{SelectedAvailability.Text}\n\nExecutable path\n{SelectedPath.Text}\n\nCommand line\n{SelectedCommandLine.Text}\n\nOwnership\n{SelectedOwner.Text}\n\nParent process\n{SelectedParent.Text}\n\nMemory\n{SelectedMemory.Text}\n\nAssociated services\n{SelectedServices.Text}\n\nNetwork endpoints\n{SelectedNetwork.Text}", TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } }, PrimaryButtonText = "Copy PID", CloseButtonText = "Close", DefaultButton = ContentDialogButton.Close };
+            var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, RequestedTheme = Root.RequestedTheme, Title = SelectedName.Text, Content = new ScrollViewer { Content = new TextBlock { Text = $"{SelectedRawName.Text}\n{SelectedStatus.Text}\n{SelectedIdentity.Text}\n{SelectedAvailability.Text}\n\nExecutable path\n{SelectedPath.Value}\n\nCommand line\n{SelectedCommandLine.Text}\n\nOwnership\n{SelectedOwner.Value}\n\nParent process\n{SelectedParent.Value}\n\nMemory\n{SelectedMemory.Text}\n\nAssociated services\n{SelectedServices.Value}\n\nNetwork endpoints\n{SelectedNetwork.Value}", TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } }, PrimaryButtonText = "Copy PID", CloseButtonText = "Close", DefaultButton = ContentDialogButton.Close };
             dialog.PrimaryButtonClick += (_, args) =>
             {
                 args.Cancel = true;
@@ -225,13 +245,36 @@ public sealed partial class MainWindow : Window
     }
     private void ProcessSelectionChanged(object sender, SelectionChangedEventArgs args)
     {
-        if (!ready) return;
+        if (!ready || Model.IsRebuilding || restoringSelection) return;
+        foreach (var current in Model.Rows) current.SetSelected(ReferenceEquals(ProcessList.SelectedItem, current));
         if (ProcessList.SelectedItem is ProcessRow row)
         {
             if (selectedIdentity != row.Identity) { publisherGeneration++; PublisherText.Text = ""; }
             selectedIdentity = row.Identity;
+            selectedRowKey = row.RowKey;
         }
-        else selectedIdentity = null;
+        else { selectedIdentity = null; selectedRowKey = null; }
+        RefreshInspector();
+    }
+
+    private void RestoreSelection()
+    {
+        if (selectedRowKey is null) return;
+        var row = Model.Rows.FirstOrDefault(r => r.RowKey == selectedRowKey);
+        restoringSelection = true;
+        try
+        {
+            ProcessList.SelectedItem = row;
+            foreach (var current in Model.Rows) current.SetSelected(ReferenceEquals(row, current));
+            if (row is null && SelectedProcess is not null)
+            {
+                selectedIdentity = null;
+                selectedRowKey = null;
+                publisherGeneration++;
+                PublisherText.Text = "";
+            }
+        }
+        finally { restoringSelection = false; }
         RefreshInspector();
     }
 
@@ -244,35 +287,61 @@ public sealed partial class MainWindow : Window
         {
             SelectedName.Text = selectedIdentity is null ? "Process inspector" : "Process no longer observed";
             SelectedIdentity.Text = "Select a current process to inspect its live measurements.";
-            SelectedPath.Text = SelectedCommandLine.Text = SelectedParent.Text = SelectedMemory.Text = SelectedServices.Text = SelectedNetwork.Text = "—";
+            SelectedPath.Value = SelectedCommandLine.Text = SelectedParent.Value = SelectedMemory.Text = SelectedServices.Value = SelectedNetwork.Value = "—";
+            SelectedRawName.Text = "";
+            SelectedCommit.Text = SelectedCpu.Text = "—";
+            SelectedIcon.Source = null;
+            SelectedIcon.Tag = null;
             SelectedAvailability.Text = "";
             SelectedStatus.Text = selectedIdentity is null ? "No selection" : "Unavailable";
-            SelectedOwner.Text = "—";
+            SelectedOwner.Value = "—";
             DetailsButton.IsEnabled = false;
             PublisherText.Text = "";
             OpenLocation.IsEnabled = CopyPath.IsEnabled = CopyPid.IsEnabled = PublisherButton.IsEnabled = false;
             return;
         }
-        SelectedName.Text = process.Name;
+        SelectedName.Text = Model.Descriptions.GetCached(process) ?? process.Name;
+        SelectedRawName.Text = process.Name;
+        ToolTipService.SetToolTip(SelectedName, $"{process.Name}. Display name may use local file description; this is not verified publisher or application identity.");
+        SelectedCommit.Text = Display.Bytes(process.PrivateBytes);
+        SelectedCpu.Text = Display.Percent(process.CpuPercent);
+        RefreshSelectedIcon(process);
         SelectedStatus.Text = "Observed";
-        SelectedOwner.Text = process.UserName ?? "Unavailable (permission or process lifetime)";
+        SelectedOwner.Value = process.UserName ?? "Unavailable";
         DetailsButton.IsEnabled = true;
         CopyPid.IsEnabled = true;
-        SelectedIdentity.Text = $"PID {process.Identity.Pid} · {process.ThreadCount?.ToString() ?? "?"} threads · {process.HandleCount?.ToString() ?? "?"} handles\nSelected member; group totals are in the table.";
-        SelectedPath.Text = process.ExecutablePath ?? "Unavailable (permission or process lifetime)";
+        SelectedIdentity.Text = $"Selected member · PID {process.Identity.Pid}";
+        SelectedPath.Value = process.ExecutablePath ?? "Unavailable";
         SelectedCommandLine.Text = process.CommandLine ?? "Unavailable from this documented-API provider";
         var byPid = Model.Snapshot!.Processes.ToDictionary(p => p.Identity.Pid);
         var parent = ProcessGrouping.VerifiedParent(process, byPid);
-        SelectedParent.Text = parent is null ? "Unverified or no longer observed" : $"{parent.Name} (PID {parent.Identity.Pid}) · observed ancestry";
+        SelectedParent.Value = parent is null ? "Unverified or no longer observed" : $"{parent.Name} · PID {parent.Identity.Pid}";
         SelectedMemory.Text = $"Private commit: {Display.Bytes(process.PrivateBytes)}\nWorking set (includes shared): {Display.Bytes(process.WorkingSetBytes)}\nPrivate working set: {Display.Bytes(process.PrivateWorkingSetBytes)}";
         var rel = Model.Relationships;
         var fresh = rel is not null && Math.Abs((Model.Snapshot.CapturedAt - rel.CapturedAt).TotalSeconds) <= 10;
-        SelectedServices.Text = !fresh ? "Unavailable or stale" : string.Join("\n", rel!.Services.Where(s => s.OwnerIdentity == process.Identity && process.Identity.IsStable).Select(s => $"{s.DisplayName} ({s.Name})").DefaultIfEmpty("No verified associations observed"));
-        SelectedNetwork.Text = !fresh ? "Unavailable or stale" : $"{rel!.Connections.Count(c => c.OwnerIdentity == process.Identity && process.Identity.IsStable)} verified TCP/UDP entries · throughput unavailable";
-        SelectedAvailability.Text = process.UnavailableReason ?? (process.Identity.IsStable ? "Read-only observation. Some fields may be unavailable." : "Creation time unavailable; history and associations are not trusted.");
+        SelectedServices.Value = !fresh || !process.Identity.IsStable ? "Unavailable or stale" : string.Join("\n", rel!.Services.Where(s => s.OwnerIdentity == process.Identity).Select(s => $"{s.DisplayName} ({s.Name})").DefaultIfEmpty("None observed"));
+        SelectedNetwork.Value = !fresh || !process.Identity.IsStable ? "Unavailable or stale" : $"{rel!.Connections.Count(c => c.OwnerIdentity == process.Identity)} verified TCP/UDP entries";
+        SelectedAvailability.Text = $"{process.ThreadCount?.ToString() ?? "—"} threads · {process.HandleCount?.ToString() ?? "—"} handles\n{process.UnavailableReason ?? (process.Identity.IsStable ? "Read-only observation. Some fields may be unavailable." : "Creation time unavailable; history and associations are not trusted.")}";
         var local = IsLocalFile(process.ExecutablePath);
         OpenLocation.IsEnabled = PublisherButton.IsEnabled = local;
         CopyPath.IsEnabled = process.ExecutablePath is not null;
+    }
+
+    private async void RefreshSelectedIcon(ProcessSnapshot process)
+    {
+        var key = (process.Identity, process.ExecutablePath);
+        if (Equals(SelectedIcon.Tag, key)) return;
+        SelectedIcon.Tag = key;
+        SelectedIcon.Source = null;
+        if (process.ExecutablePath is not { } path) return;
+        try
+        {
+            var icon = await icons.LoadAsync(path, shutdown.Token);
+            if (!shutdown.IsCancellationRequested && SelectedProcess?.Identity == process.Identity &&
+                SelectedProcess.ExecutablePath == path && Equals(SelectedIcon.Tag, key)) SelectedIcon.Source = icon;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception) { /* Keep the generic process icon. */ }
     }
 
     private static bool IsLocalFile(string? path)
@@ -349,10 +418,24 @@ public sealed partial class MainWindow : Window
     private void ProcessesSizeChanged(object sender, SizeChangedEventArgs args)
     {
         if (!ready) return;
-        var show = args.NewSize.Width >= 1000;
+        var width = Root.ActualWidth;
+        MemorySummaryColumn.Width = new GridLength(width < 1200 ? 1.4 : 1, GridUnitType.Star);
+        var show = width >= 1040;
         Inspector.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        InspectorColumn.Width = new GridLength(show ? 320 : 0);
+        InspectorColumn.Width = new GridLength(show ? width >= 1320 ? 320 : 280 : 0);
         DetailsButton.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void TableSizeChanged(object sender, SizeChangedEventArgs args) =>
+        ((Controls.ProcessColumns)Root.Resources["ProcessColumns"]).FitViewport(args.NewSize.Width - 2);
+
+    private void UpdateCaptionColors()
+    {
+        var dark = Root.ActualTheme == ElementTheme.Dark;
+        AppWindow.TitleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
+        AppWindow.TitleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+        AppWindow.TitleBar.ButtonForegroundColor = dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
+        AppWindow.TitleBar.ButtonInactiveForegroundColor = dark ? Microsoft.UI.Colors.LightGray : Microsoft.UI.Colors.DimGray;
     }
 
     private void RefreshDiagnostics()
