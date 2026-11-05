@@ -28,6 +28,7 @@ public sealed partial class MainWindow : Window
     private bool detailsOpen;
     private string section = "Processes";
     private ProcessIdentity? selectedIdentity;
+    private DateTimeOffset? selectedCapturedAt;
     private string? selectedRowKey;
     private bool restoringSelection;
     private IReadOnlyList<StartupItem> startup = Array.Empty<StartupItem>();
@@ -251,24 +252,27 @@ public sealed partial class MainWindow : Window
         {
             if (selectedIdentity != row.Identity) { publisherGeneration++; PublisherText.Text = ""; }
             selectedIdentity = row.Identity;
+            selectedCapturedAt = Model.Snapshot?.CapturedAt;
             selectedRowKey = row.RowKey;
         }
-        else { selectedIdentity = null; selectedRowKey = null; }
+        else { selectedIdentity = null; selectedCapturedAt = null; selectedRowKey = null; }
         RefreshInspector();
     }
 
     private void RestoreSelection()
     {
         if (selectedRowKey is null) return;
-        var row = Model.Rows.FirstOrDefault(r => r.RowKey == selectedRowKey);
+        var expired = selectedIdentity is { IsStable: false } && Model.Snapshot?.CapturedAt != selectedCapturedAt;
+        var row = expired ? null : Model.Rows.FirstOrDefault(r => r.RowKey == selectedRowKey);
         restoringSelection = true;
         try
         {
             ProcessList.SelectedItem = row;
             foreach (var current in Model.Rows) current.SetSelected(ReferenceEquals(row, current));
-            if (row is null && SelectedProcess is not null)
+            if (expired || row is null && SelectedProcess is not null)
             {
                 selectedIdentity = null;
+                selectedCapturedAt = null;
                 selectedRowKey = null;
                 publisherGeneration++;
                 PublisherText.Text = "";
