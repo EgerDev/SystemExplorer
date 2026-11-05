@@ -62,7 +62,8 @@ All three exited **0**. Format emitted a workspace-loading warning but no format
 
 - Passed on build01: chevron and row Left/Right/Enter expansion; stable selected process identity/path/UIA container name across refresh; Ctrl+K and synchronized search; no-match empty state and clearing; grouping and Name sort/reverse; pause/resume; pointer column drag; keyboard Right/Left, Home minimum 180px and End maximum 600px for Name; shared header/row alignment; horizontal PID reachability and vertical scrolling; light/dark Processes and dark Memory cards; narrow Enter/Details dialog.
 - Passed on final build02: initial Private commit order; Name and Private commit header/dropdown synchronization; CPU and Private commit dropdown order; expanded selected group in light/dark; narrow inspector collapse and matching member-details dialog. Prior full regression was not repeated for this label/index-mapping-only delta.
-- Remaining nonblocking presentation issue: a native Ctrl+K tooltip can briefly appear away from the search box after window restoration, clearing when the pointer moves. Group/sort selectors have accessibility names but no visible Group by/Sort by captions. Parent retains final visual acceptance.
+- Build02 exposed a native Ctrl+K tooltip away from the search box after restoration. The follow-up disables the root accelerator's automatic tooltip while retaining its shortcut, visible search hint and UIA accelerator key; native re-verification is pending. Group/sort selectors still have accessibility names but no visible Group by/Sort by captions.
+- The follow-up adds Copy PID for the observed member in the wide inspector and the PID captured by the narrow Details dialog. No selection disables copying; grouped rows do not imply copying every member. Clipboard failures are reported without crashing the app. Native re-verification is pending.
 
 The available VM is Windows Server 2022 build 20348 with an inherited high-integrity Administrator token. It is not Windows 11 standard-user acceptance. Windows 11, non-elevated operation, Narrator, clean-machine portability and 100/125/150/200% DPI remain independent acceptance gates unless explicitly verified elsewhere.
 
@@ -73,7 +74,7 @@ The available VM is Windows Server 2022 build 20348 with an inherited high-integ
 - Private commit replaces Total RAM; process I/O is not labeled disk-only or network bandwidth.
 - The real inspector contains permission, lifetime and unsupported-provider explanations and may need vertical scrolling.
 - Horizontal scrolling protects readable numeric fields at smaller widths; no essential columns are silently hidden.
-- There are no destructive actions. Publisher verification, copying the local path and opening a local file location remain read-only actions.
+- There are no destructive actions. Publisher verification, copying a PID or local path and opening a local file location remain read-only actions.
 
 ## Documentation consulted
 
