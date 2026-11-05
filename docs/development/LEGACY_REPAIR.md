@@ -183,6 +183,68 @@ CLA run failed because of a missing or invalid secret. The parent should correla
 the failed step's log with those requirements. No CLA bypass, allowlist expansion,
 automatic legal signature, workflow permission edit, or gate removal was made.
 
+## Follow-up: CI entrypoint target tokenization
+
+The first receipt above used direct solution builds and the CMake wrappers. It
+did not exercise the original `build_debug.cmd` / `build_release.cmd` entrypoints.
+Those entrypoints use CustomBuildTool's graph-build command generator, which
+contained `/t:All/nologo` rather than separate `/t:All` and `/nologo` arguments.
+The sequential command generator likewise contained `/t:Rebuild/nologo`.
+MSBuild treats the joined text as a target name, causing MSB4057 rather than
+selecting the intended target plus the no-logo option.
+
+Both malformed literals are also present in the original `origin/master`
+baseline. The parent separately confirmed the same `All/nologo` failure in base
+CI jobs `127226724005` / `127226724437`; this child did not poll those jobs. This
+is a preexisting invocation defect, not a regression from the native repairs.
+
+The follow-up behavior change is exactly two inserted spaces in
+`tools/CustomBuildTool/Build.cs`: `/t:Rebuild /nologo` and `/t:All /nologo`. Target
+selection, matrix configuration, compiler flags, security settings and CI gates
+are otherwise unchanged. CustomBuildTool must be rebuilt for the fix to take
+effect; invoking the existing cached executable would still exercise old code.
+
+Verification uses the existing VS/MSVC/.NET/SDK install and caches, rebuilding
+only the build tool with `build\build_tools.cmd INIT`, then running the actual
+`build\build_debug.cmd` and `build\build_release.cmd` entrypoints. The wrappers
+recognize `GITHUB_ACTIONS=true` to suppress interactive pauses. No application or
+driver is launched, no signing credentials are supplied, and no new architecture
+toolchain is installed. These entrypoints and the final results are recorded in
+a separate follow-up evidence archive so the earlier build receipt stays intact.
+
+### Follow-up command receipt
+
+| Command / check | Exit | Observed result |
+| --- | ---: | --- |
+| `call build\build_tools.cmd INIT` | 0 | Rebuilt the changed CustomBuildTool with the existing installed toolchain. |
+| `call build\build_debug.cmd` | 0 | Actual Debug entrypoint built SystemInformer and Plugins for Win32 and x64. |
+| `call build\build_release.cmd` | 1 | SystemInformer and Plugins completed for Win32 and x64, then local archive packaging failed; this is not a complete release-workflow pass. |
+| `call build\build_msbuild.cmd SystemInformer.sln /m /p:Configuration=Release /p:Platform=x64` | 0 | Bounded direct-solution fallback: zero warnings and zero errors. |
+| Source argument-token assertions | 0 | Both targets and `/nologo` are separate tokens; neither malformed joined literal remains in `Build.cs`. |
+| `git diff --check` | 0 | No whitespace errors. |
+
+The Release packaging error is separate from the fixed MSBuild invocation:
+7-Zip was unavailable, and the existing fallback reported
+`libarchive compression failed (-25): 'lzma1' compression not supported on this platform`.
+No new prerequisites or packaging changes were introduced. The Debug entrypoint
+completed, so a redundant direct Debug solution build was not repeated. The
+captured output contains no `MSB4057`, joined `All/nologo` / `Rebuild/nologo`
+argument, or SignTool invocation.
+
+Both wrappers explicitly list `Win32;x64` for their SystemInformer and Plugins
+builds. No ARM64 build is claimed: copies into `ReleaseARM64\x86` staging paths
+come from Release32 and do not constitute an ARM64 build. Release installer
+production was not reached after the packaging failure. Earlier runtime,
+Windows 11/standard-user, driver and CLA limitations remain unchanged.
+
+Full native stdout/stderr and exact command/exit records are in the separate
+`legacy-argument-fix-evidence` archive, including `build-tools-init.*`,
+`build-debug-wrapper.*`, `build-release-wrapper.*`,
+`systeminformer-release-x64-fallback.*`, `argument-tokenization-assertion.txt`,
+`actual-msbuild-argument-audit.txt` and `final-repo-check.*`. The receipt preserves
+the failed Release check rather than treating a direct-solution pass as a full
+wrapper pass. No CI was monitored, and the parent retains PR updates and CI review.
+
 ## References
 
 - [MSVC C4090 documentation](https://learn.microsoft.com/en-us/cpp/error-messages/compiler-warnings/compiler-warning-level-1-c4090)
