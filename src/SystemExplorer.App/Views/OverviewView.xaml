@@ -4,10 +4,10 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:views="using:SystemExplorer.App.Views"
     xmlns:controls="using:SystemExplorer.App.Controls">
-    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" IsTabStop="False">
+    <ScrollViewer x:Name="DashboardScroller" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" IsTabStop="False">
         <Grid x:Name="Dashboard" SizeChanged="DashboardSizeChanged">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-            <Grid x:Name="ResourcesGrid" Grid.Row="1" ColumnSpacing="12" RowSpacing="12" Margin="0,0,0,16">
+            <Grid x:Name="ResourcesGrid" Grid.Row="1" ColumnSpacing="12" Margin="0,0,0,16">
                 <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <controls:MetricCard x:Name="CpuCard" Label="CPU" Glyph="&#xE9D9;">
@@ -27,9 +27,9 @@
                 <Grid.ColumnDefinitions><ColumnDefinition Width="1.6*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Border x:Name="ConsumersPanel" Style="{StaticResource Card}">
-                    <Grid RowSpacing="10">
-                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                        <Grid ColumnSpacing="8">
+                    <Grid x:Name="ConsumersLayout" RowSpacing="10">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <Grid x:Name="ConsumerHeader" ColumnSpacing="8">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <StackPanel Spacing="4">
                                 <TextBlock Text="Top Resource Consumers" Style="{StaticResource SectionLabel}"/>
@@ -39,19 +39,19 @@
                                 <x:String>Private commit</x:String><x:String>CPU</x:String>
                             </ComboBox>
                         </Grid>
-                        <Grid Grid.Row="1" Background="{ThemeResource HeaderSurface}" Padding="10,8,42,8" ColumnSpacing="8">
+                        <Grid x:Name="ConsumerTableHeader" Grid.Row="1" Background="{ThemeResource HeaderSurface}" Padding="10,8,42,8" ColumnSpacing="8">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="106"/><ColumnDefinition Width="62"/></Grid.ColumnDefinitions>
                             <TextBlock Text="Application / process" FontSize="{StaticResource CaptionSize}"/>
                             <TextBlock Grid.Column="1" Text="Private commit" FontSize="{StaticResource CaptionSize}" HorizontalAlignment="Right"/>
                             <TextBlock Grid.Column="2" Text="CPU" FontSize="{StaticResource CaptionSize}" HorizontalAlignment="Right"/>
                         </Grid>
-                        <ListView x:Name="ConsumersList" Grid.Row="2" ItemsSource="{x:Bind Rows}" SelectionMode="Single" MaxHeight="440" KeyDown="ConsumerKeyDown" AutomationProperties.Name="Ranked resource consumers" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListView x:Name="ConsumersList" Grid.Row="2" ItemsSource="{x:Bind Rows}" SelectionMode="Single" MaxHeight="80" KeyDown="ConsumerKeyDown" AutomationProperties.Name="Ranked resource consumers" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                             <ListView.ItemContainerStyle>
                                 <Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0"/></Style>
                             </ListView.ItemContainerStyle>
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="views:OverviewConsumerRow">
-                                    <Grid Padding="4,7" ColumnSpacing="8" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="0,0,0,1" ToolTipService.ToolTip="{x:Bind IdentityExplanation, Mode=OneWay}" AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}">
+                                    <Grid Padding="4,4" ColumnSpacing="8" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="0,0,0,1" ToolTipService.ToolTip="{x:Bind IdentityExplanation, Mode=OneWay}" AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="106"/><ColumnDefinition Width="62"/><ColumnDefinition Width="30"/></Grid.ColumnDefinitions>
                                         <Grid ColumnSpacing="8" Margin="{x:Bind Indent}">
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -75,8 +75,11 @@
                             </ListView.ItemTemplate>
                         </ListView>
                         <TextBlock x:Name="EmptyConsumers" Grid.Row="2" Text="Waiting for the first live sample…" Style="{StaticResource Muted}" Margin="8,20"/>
-                        <TextBlock Grid.Row="3" Text="Private commit is virtual memory, not physical RAM. — means unavailable." Style="{StaticResource Muted}"/>
-                        <HyperlinkButton Grid.Row="4" Content="View all processes" Click="ViewProcessesClicked" Padding="0,4" HorizontalAlignment="Left"/>
+                        <Grid x:Name="ConsumerFooter" Grid.Row="3" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBlock Text="Private commit is not physical RAM." Style="{StaticResource Muted}" VerticalAlignment="Center" ToolTipService.ToolTip="Private commit is virtual memory, not physical RAM. — means unavailable." AutomationProperties.HelpText="Private commit is virtual memory, not physical RAM. — means unavailable."/>
+                            <HyperlinkButton Grid.Column="1" Content="View all processes" Click="ViewProcessesClicked" Padding="0,4" VerticalAlignment="Center"/>
+                        </Grid>
                     </Grid>
                 </Border>
                 <Border x:Name="InsightsPanel" Grid.Column="1" Style="{StaticResource Card}" VerticalAlignment="Stretch">
