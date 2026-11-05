@@ -18,7 +18,7 @@
 // Required includes
 #include <ole2.h>                       // Definitions of OLE types.
 #include <specstrings.h>
-#include "corerror.h"
+#include "CorError.h"
 
 //*****************************************************************************
 

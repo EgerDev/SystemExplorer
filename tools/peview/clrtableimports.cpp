@@ -27,14 +27,14 @@
 #include <cor.h>
 #else
 #define _WINDOWS_UPDATES_
-#include "metahost/corhdr.h"
+#include "metahost/CorHdr.h"
 #include "metahost/cor.h"
 #endif
 
 #include <mapclr.h>
 #else
 #define _WINDOWS_UPDATES_
-#include "metahost/corhdr.h"
+#include "metahost/CorHdr.h"
 #include "metahost/cor.h"
 #endif
 

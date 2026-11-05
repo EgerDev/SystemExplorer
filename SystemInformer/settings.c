@@ -332,6 +332,9 @@ VOID PhAddDefaultSettings(
     PhpAddStringSetting(SETTING_THREAD_STACK_TREE_LIST_COLUMNS, L"");
     PhpAddIntegerPairSetting(SETTING_THREAD_STACK_WINDOW_POSITION, L"0,0");
     PhpAddScalableIntegerPairSetting(SETTING_THREAD_STACK_WINDOW_SIZE, L"@96|420,400");
+    PhpAddStringSetting(SETTING_THREAD_SHADOW_STACK_LISTVIEW_COLUMNS, L"");
+    PhpAddIntegerPairSetting(SETTING_THREAD_SHADOW_STACK_WINDOW_POSITION, L"0,0");
+    PhpAddScalableIntegerPairSetting(SETTING_THREAD_SHADOW_STACK_WINDOW_SIZE, L"@96|0,0");
     PhpAddIntegerPairSetting(SETTING_TOKEN_WINDOW_POSITION, L"0,0");
     PhpAddScalableIntegerPairSetting(SETTING_TOKEN_WINDOW_SIZE, L"@96|0,0");
     PhpAddStringSetting(SETTING_TOKEN_GROUPS_LIST_VIEW_COLUMNS, L"");
