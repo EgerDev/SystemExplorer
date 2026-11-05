@@ -8,6 +8,8 @@ public sealed class DiagnosticsHistory
     private const int Capacity = 180;
     private readonly Queue<HistoryPoint> system = new();
     private readonly Dictionary<ProcessIdentity, Queue<(DateTimeOffset At, ulong Bytes)>> memory = new();
+    private Dictionary<string, ProcessIdentity> singleInstances = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Queue<(DateTimeOffset At, string Key, string Path)> replacements = new();
     private DateTimeOffset? latest;
 
     public IReadOnlyList<HistoryPoint> System => system.ToArray();
@@ -15,9 +17,27 @@ public sealed class DiagnosticsHistory
     public void Add(MonitorSnapshot snapshot)
     {
         if (latest is { } last && snapshot.CapturedAt <= last) return;
+        if (latest is { } previous && snapshot.CapturedAt - previous > TimeSpan.FromSeconds(10))
+        {
+            singleInstances.Clear();
+            replacements.Clear();
+        }
         latest = snapshot.CapturedAt;
         system.Enqueue(new(snapshot.CapturedAt, snapshot.Memory.PhysicalUsedBytes, snapshot.Memory.CommitTotalBytes, snapshot.TotalCpuPercent));
         while (system.Count > Capacity) system.Dequeue();
+        var currentInstances = new Dictionary<string, ProcessIdentity>(StringComparer.OrdinalIgnoreCase);
+        var candidates = snapshot.Processes.Where(p => p.Identity.IsStable && p.ExecutablePath is not null && p.UserSid is not null && p.SessionId.HasValue)
+            .GroupBy(p => $"{p.ExecutablePath}\0{p.UserSid}\0{p.SessionId}", StringComparer.OrdinalIgnoreCase);
+        foreach (var group in candidates)
+        {
+            if (group.Count() != 1) continue;
+            var process = group.Single();
+            currentInstances[group.Key] = process.Identity;
+            if (singleInstances.TryGetValue(group.Key, out var previousIdentity) && previousIdentity != process.Identity)
+                replacements.Enqueue((snapshot.CapturedAt, group.Key, process.ExecutablePath!));
+        }
+        singleInstances = currentInstances;
+        while (replacements.Count > Capacity || replacements.Count > 0 && replacements.Peek().At < system.Peek().At) replacements.Dequeue();
         var live = snapshot.Processes.Where(p => p.Identity.IsStable).Select(p => p.Identity).ToHashSet();
         foreach (var key in memory.Keys.Where(k => !live.Contains(k)).ToArray()) memory.Remove(key);
         foreach (var process in snapshot.Processes.Where(p => p.Identity.IsStable))
@@ -52,6 +72,10 @@ public sealed class DiagnosticsHistory
         }
         if (mem.CommitTotalBytes is { } commit && mem.CommitLimitBytes is > 0)
             result.Add(new("Commit headroom", $"{MiB(commit)} / {MiB(mem.CommitLimitBytes.Value)} MiB committed. Commit is backed by RAM and paging capacity; it is not resident memory."));
+
+        foreach (var group in replacements.GroupBy(r => r.Key, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() >= 3))
+            result.Add(new("Repeated process-lifetime replacements",
+                $"{group.First().Path}: {group.Count()} single-instance identity changes observed for the same executable, owner and session within the retained history. Each change used consecutive samples no more than 10 seconds apart. This may indicate restarts, not a crash diagnosis; parallel instances and unknown identities are excluded.", "Heuristic"));
 
         foreach (var process in snapshot.Processes)
         {

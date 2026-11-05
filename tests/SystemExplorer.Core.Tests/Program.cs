@@ -49,6 +49,31 @@ var tests = new (string Name, Action Run)[]
         history.Add(sample);
         Check(!history.Explain(sample).Any(i => i.Title.StartsWith("Sustained")));
     }),
+    ("Replacement heuristic uses distinct lifetimes and resets after gaps", () =>
+    {
+        var history = new DiagnosticsHistory();
+        MonitorSnapshot sample = Snapshot(0, P(10, 100));
+        for (var i = 0; i < 4; i++) { sample = Snapshot(i * 2, P(10, 100 + i)); history.Add(sample); }
+        Check(history.Explain(sample).Any(i => i.Title.StartsWith("Repeated")));
+        sample = Snapshot(30, P(10, 200)); history.Add(sample);
+        Check(!history.Explain(sample).Any(i => i.Title.StartsWith("Repeated")));
+    }),
+    ("Parallel and unknown processes do not imply restarts", () =>
+    {
+        var history = new DiagnosticsHistory();
+        MonitorSnapshot sample = Snapshot(0, P(10, 100));
+        for (var i = 0; i < 8; i++)
+        {
+            sample = Snapshot(i * 2, P(10, 100 + i)) with { Processes = [P(10, 100 + i), P(11, 200 + i)] };
+            history.Add(sample);
+        }
+        Check(!history.Explain(sample).Any(i => i.Title.StartsWith("Repeated")));
+        for (var i = 8; i < 16; i++)
+        {
+            sample = Snapshot(i * 2, P(10, 100 + i) with { Identity = new(10, null) }); history.Add(sample);
+        }
+        Check(!history.Explain(sample).Any(i => i.Title.StartsWith("Repeated")));
+    }),
     ("Duplicate timestamps do not grow history", () =>
     {
         var history = new DiagnosticsHistory();
