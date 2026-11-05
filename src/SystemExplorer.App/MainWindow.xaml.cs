@@ -36,6 +36,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        ProcessList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(ProcessKeyDown), true);
         tray = new NativeTray(this);
         ready = true;
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1440, 920));
@@ -124,6 +125,7 @@ public sealed partial class MainWindow : Window
         ProcessesPanel.Visibility = section == "Processes" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPanel.Visibility = section == "Settings" ? Visibility.Visible : Visibility.Collapsed;
         DiagnosticsPanel.Visibility = section is "Processes" or "Settings" ? Visibility.Collapsed : Visibility.Visible;
+        if (section == "Processes") ProcessSearch.Text = GlobalSearch.Text;
         RefreshDiagnostics();
     }
 
@@ -138,6 +140,7 @@ public sealed partial class MainWindow : Window
     {
         if (!ready) return;
         Model.Search = ProcessSearch.Text;
+        if (GlobalSearch.Text != ProcessSearch.Text) GlobalSearch.Text = ProcessSearch.Text;
         Model.Rebuild();
     }
     private void OptionsChanged(object sender, SelectionChangedEventArgs args)
@@ -196,6 +199,7 @@ public sealed partial class MainWindow : Window
     }
     private async void ProcessKeyDown(object sender, KeyRoutedEventArgs args)
     {
+        if (FocusManager.GetFocusedElement(Root.XamlRoot) is not ListViewItem) return;
         if ((args.Key is VirtualKey.Right or VirtualKey.Left or VirtualKey.Enter) && ProcessList.SelectedItem is ProcessRow row && row.HasChildren)
         {
             if (args.Key == VirtualKey.Enter || args.Key == VirtualKey.Right && !row.IsExpanded || args.Key == VirtualKey.Left && row.IsExpanded) Model.Toggle(row);
@@ -375,7 +379,8 @@ public sealed partial class MainWindow : Window
         rows.AddRange(snapshot.Limitations.Select(l => $"Provider limitation: {l}"));
         if (Model.Relationships is { } rel && (section is "Network" or "Services")) rows.AddRange(rel.Limitations.Select(l => $"Relationship limitation: {l}"));
         var query = GlobalSearch.Text?.Trim() ?? "";
-        DetailsList.ItemsSource = rows.Where(r => query.Length == 0 || r.Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray();
+        var filtered = rows.Where(r => query.Length == 0 || r.Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray();
+        DetailsList.ItemsSource = filtered.Length > 0 ? filtered : new[] { query.Length > 0 ? "No displayed observations match this search. Clear search to show this section." : "No observations are available for this section yet." };
         ChartCard.Visibility = section is "Overview" or "Memory" or "CPU" ? Visibility.Visible : Visibility.Collapsed;
         DrawHistory();
     }
