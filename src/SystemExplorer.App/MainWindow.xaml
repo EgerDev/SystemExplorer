@@ -16,6 +16,9 @@
             <RowDefinition Height="28"/>
         </Grid.RowDefinitions>
         <TitleBar x:Name="WindowTitleBar" Title="SystemExplorer">
+            <TitleBar.Resources>
+                <HorizontalAlignment x:Key="TitleBarContentHorizontalAlignment">Stretch</HorizontalAlignment>
+            </TitleBar.Resources>
             <TitleBar.IconSource><SymbolIconSource Symbol="ShowResults"/></TitleBar.IconSource>
             <TitleBar.Content>
                 <AutoSuggestBox x:Name="GlobalSearch" PlaceholderText="Search this section…  Ctrl+K" QueryIcon="Find" TextChanged="GlobalSearchChanged" AutomationProperties.Name="Search current section" AutomationProperties.AcceleratorKey="Ctrl+K" MaxWidth="600" HorizontalAlignment="Stretch"/>
