@@ -41,11 +41,17 @@ data and do not claim a fresh online revocation check.
 
 ## Current limits
 
-GPU utilization, private working set, standby memory, command lines, service start
-types and catalog signatures are not implemented by the current providers.
+Private working set is independently nullable and reported only when the documented
+PSAPI EX2 API returns complete supported data. It is distinct from private commit
+and total working set. Service base start types are best-effort configuration
+observations; denied, unavailable or budget-skipped values remain unknown. The
+enrichment budget is checked between synchronous calls, not a hard timeout.
+
+GPU utilization, standby memory, command lines and catalog signatures are not
+implemented. Delayed/trigger service startup behavior is not inferred.
 There are no termination, suspension, startup-modification or driver-install actions.
-The umbrella Windows App SDK package includes transitive AI/ML/WebView dependencies;
-their features are not initialized by this application. Dependency footprint and
+Windows App SDK dependencies follow the pinned app lockfile; WebView features are
+not initialized by this application. Dependency footprint and
 exact redistributed notices remain release-review gates, not blanket MIT claims.
 
 See [project status](../docs/development/PROJECT_STATUS.md),
