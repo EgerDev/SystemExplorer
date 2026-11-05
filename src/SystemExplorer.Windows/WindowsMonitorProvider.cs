@@ -78,7 +78,8 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             "Enumeration and per-handle reads are not atomic; relationships require separate lifetime validation.",
             "CPU and process I/O rates require two successful same-lifetime samples; first samples are unavailable.",
             "Process I/O is generic transfer activity, not physical disk or network throughput.",
-            "Private working set, standby memory, GPU, command lines and suspension state are unsupported.",
+            "Private working set requires Windows extended memory counters; unsupported or denied values remain unavailable.",
+            "Standby memory, GPU, command lines and suspension state are unsupported.",
             "Working sets include shared pages; their sum is not distinct physical RAM. Private bytes are committed, not necessarily resident."
         };
         int processors = checked((int)GetActiveProcessorCount(ushort.MaxValue));
@@ -159,11 +160,10 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
         if (QueryFullProcessImageNameW(process, 0, path, ref pathLength)) executable = path.ToString();
         else Error("Executable path", Marshal.GetLastWin32Error());
 
-        var memory = new MemoryCounters { Size = (uint)Marshal.SizeOf<MemoryCounters>() };
-        bool memoryAvailable = GetProcessMemoryInfo(process, ref memory, memory.Size);
+        bool memoryAvailable = ReadProcessMemory(process, out var memory, out var privateWorkingSet,
+            out var privateWorkingSetReason, out int memoryError);
         if (!memoryAvailable)
         {
-            int memoryError = Marshal.GetLastWin32Error();
             if (memoryError == 5)
             {
                 using var readable = OpenProcess(QueryInformationAndRead, false, entry.Pid);
@@ -177,12 +177,13 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
                 }
                 else
                 {
-                    memoryAvailable = GetProcessMemoryInfo(readable, ref memory, memory.Size);
-                    if (!memoryAvailable) memoryError = Marshal.GetLastWin32Error();
+                    memoryAvailable = ReadProcessMemory(readable, out memory, out privateWorkingSet,
+                        out privateWorkingSetReason, out memoryError);
                 }
             }
             if (!memoryAvailable && memoryError != 0) Error("Private bytes and working set", memoryError);
         }
+        if (memoryAvailable && privateWorkingSetReason is not null) errors.Add(privateWorkingSetReason);
 
         cancellationToken.ThrowIfCancellationRequested();
         var (sid, account, session) = ReadOwner(process, Error, cancellationToken);
@@ -214,10 +215,37 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             SessionId = session, HandleCount = handles,
             WorkingSetBytes = memoryAvailable ? memory.WorkingSet.ToUInt64() : null,
             PrivateBytes = memoryAvailable ? memory.PrivateUsage.ToUInt64() : null,
+            PrivateWorkingSetBytes = memoryAvailable ? privateWorkingSet : null,
             CpuPercent = cpu, ReadBytesPerSecond = read, WriteBytesPerSecond = write,
             Availability = denied ? DataAvailability.AccessDenied : errors.Count > 0 ? DataAvailability.Partial : DataAvailability.Available,
             UnavailableReason = errors.Count > 0 ? string.Join("; ", errors) : null
         };
+    }
+
+    private static bool ReadProcessMemory(SafeProcessHandle process, out MemoryCounters memory,
+        out ulong? privateWorkingSet, out string? privateWorkingSetReason, out int error)
+    {
+        var extended = new MemoryCountersEx2
+        {
+            Basic = new MemoryCounters { Size = (uint)Marshal.SizeOf<MemoryCountersEx2>() },
+            PrivateWorkingSet = UIntPtr.MaxValue
+        };
+        bool extendedAvailable = GetProcessMemoryInfo(process, ref extended, extended.Basic.Size);
+        int extendedError = extendedAvailable ? 0 : Marshal.GetLastWin32Error();
+        privateWorkingSet = extendedAvailable ? extended.PrivateWorkingSetBytes : null;
+        privateWorkingSetReason = privateWorkingSet.HasValue ? null : extendedAvailable
+            ? "Private working set unavailable: Windows did not return extended memory counters."
+            : $"Private working set unavailable: GetProcessMemoryInfo(EX2) Win32 {extendedError}.";
+        if (extendedAvailable && extended.Basic.Size >= Marshal.SizeOf<MemoryCounters>())
+        {
+            memory = extended.Basic;
+            error = 0;
+            return true;
+        }
+        memory = new MemoryCounters { Size = (uint)Marshal.SizeOf<MemoryCounters>() };
+        bool available = GetProcessMemoryInfo(process, ref memory, memory.Size);
+        error = available ? 0 : Marshal.GetLastWin32Error();
+        return available;
     }
 
     private static (string? Sid, string? Account, int? Session) ReadOwner(SafeProcessHandle process,

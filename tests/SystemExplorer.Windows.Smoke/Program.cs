@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using SystemExplorer.Core;
 using SystemExplorer.Windows;
+using static SystemExplorer.Windows.NativeMethods;
 
 if (args.Length == 2 && args[0] == "--churn-child" &&
     int.TryParse(args[1], out int childDelay) && childDelay is 1200 or 2200)
@@ -131,6 +132,34 @@ var self = first.Processes.Single(p => p.Identity.Pid == selfPid);
 Check(self.Identity.CreationTimeFileTime == creation, "Self lifetime must match independently observed process creation.");
 Check(self.CpuPercent is null && self.ReadBytesPerSecond is null, "First deltas must be unavailable.");
 Check(self.PrivateBytes > 0 && self.WorkingSetBytes > 0, "Live self memory must be available.");
+Check(Marshal.SizeOf<MemoryCountersEx2>() == (IntPtr.Size == 8 ? 96 : 56), "EX2 native structure size must match psapi.h.");
+Check(Marshal.OffsetOf<MemoryCountersEx2>(nameof(MemoryCountersEx2.PrivateWorkingSet)).ToInt32() ==
+    Marshal.SizeOf<MemoryCounters>(), "EX2 private working set must immediately follow the EX structure.");
+var untouched = new MemoryCountersEx2
+{
+    Basic = new MemoryCounters { Size = (uint)Marshal.SizeOf<MemoryCountersEx2>() },
+    PrivateWorkingSet = UIntPtr.MaxValue
+};
+Check(untouched.PrivateWorkingSetBytes is null, "An unfilled EX2 field must not become a fabricated zero.");
+untouched.PrivateWorkingSet = UIntPtr.Zero;
+Check(untouched.PrivateWorkingSetBytes == 0, "A supported zero reading must remain distinct from unavailable.");
+untouched.Basic.Size = (uint)Marshal.SizeOf<MemoryCounters>();
+Check(untouched.PrivateWorkingSetBytes is null, "An EX-only response must not expose EX2 data.");
+var independentMemory = new ExtendedMemoryProbe.Counters
+{
+    Size = (uint)Marshal.SizeOf<ExtendedMemoryProbe.Counters>(),
+    PrivateWorkingSet = UIntPtr.MaxValue
+};
+bool nativeExtended = ExtendedMemoryProbe.GetProcessMemoryInfo(selfProcess.SafeHandle,
+    ref independentMemory, independentMemory.Size) &&
+    independentMemory.Size >= Marshal.SizeOf<ExtendedMemoryProbe.Counters>() &&
+    independentMemory.PrivateWorkingSet != UIntPtr.MaxValue;
+Check(nativeExtended == self.PrivateWorkingSetBytes.HasValue,
+    "Provider self private working set availability must match an independent live PSAPI query.");
+Check(self.PrivateWorkingSetBytes is { } privateWorkingSet
+    ? privateWorkingSet <= self.WorkingSetBytes
+    : self.UnavailableReason?.Contains("Private working set unavailable") == true,
+    "Private working set must be a resident subset or explicitly unavailable.");
 Check(!string.IsNullOrWhiteSpace(self.ExecutablePath), "Live self path must be available.");
 Check(!string.IsNullOrWhiteSpace(self.UserSid) && !string.IsNullOrWhiteSpace(self.UserName), "Live self owner must be available.");
 Check(self.SessionId is not null && self.ThreadCount > 0 && self.HandleCount > 0, "Live self metadata must be available.");
@@ -139,7 +168,7 @@ Check(first.Memory.PhysicalTotalBytes > 0 && first.Memory.PhysicalAvailableBytes
 Check(first.Memory.CommitTotalBytes is not null && first.Memory.CommitLimitBytes > 0, "Commit metrics must be available.");
 Check(first.TotalCpuPercent is null, "First system CPU sample must be unavailable.");
 Check(first.DiskReadBytesPerSecond is null && first.DiskWriteBytesPerSecond is null, "First PDH rate sample must be unavailable.");
-Check(first.Processes.All(p => p.PrivateWorkingSetBytes is null) && first.Memory.StandbyBytes is null &&
+Check(first.Memory.StandbyBytes is null &&
     first.DiskReadBytesPerSecond is null && first.GpuPercent is null, "Unsupported metrics must stay null.");
 Check(first.Processes.All(p => p.Identity.IsStable ||
     (p.CpuPercent is null && !string.IsNullOrWhiteSpace(p.UnavailableReason))), "Unknown identity must not have CPU history.");
@@ -186,7 +215,23 @@ try
 }
 catch (ObjectDisposedException) { }
 
-Console.WriteLine($"PASS: live self identity/memory/owner/CPU, memory consistency, PDH warmup/availability, null unsupported metrics, cancellation, serialized scans, disposed rejection. rows={second.Processes.Count}; stable={second.Processes.Count(p => p.Identity.IsStable)}; partial={second.Processes.Count(p => p.Availability != DataAvailability.Available)}; physical_disk_available={second.DiskReadBytesPerSecond.HasValue && second.DiskWriteBytesPerSecond.HasValue}");
+Console.WriteLine($"PASS: live self identity/memory/owner/CPU, EX2 layout/fallback/availability, memory consistency, PDH warmup/availability, null unsupported metrics, cancellation, serialized scans, disposed rejection. rows={second.Processes.Count}; stable={second.Processes.Count(p => p.Identity.IsStable)}; partial={second.Processes.Count(p => p.Availability != DataAvailability.Available)}; private_working_set_available={nativeExtended}; physical_disk_available={second.DiskReadBytesPerSecond.HasValue && second.DiskWriteBytesPerSecond.HasValue}");
+
+internal static class ExtendedMemoryProbe
+{
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Counters
+    {
+        internal uint Size, PageFaultCount;
+        internal UIntPtr PeakWorkingSet, WorkingSet, PeakPagedPool, PagedPool,
+            PeakNonpagedPool, NonpagedPool, PagefileUsage, PeakPagefileUsage,
+            PrivateUsage, PrivateWorkingSet;
+        internal ulong SharedCommitUsage;
+    }
+
+    [DllImport("psapi.dll", SetLastError = true)]
+    internal static extern bool GetProcessMemoryInfo(SafeProcessHandle process, ref Counters counters, uint size);
+}
 
 internal static class ChurnProcessTimes
 {

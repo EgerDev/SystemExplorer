@@ -59,6 +59,18 @@ internal static class NativeMethods
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct MemoryCountersEx2
+    {
+        internal MemoryCounters Basic;
+        internal UIntPtr PrivateWorkingSet;
+        internal ulong SharedCommitUsage;
+
+        internal readonly ulong? PrivateWorkingSetBytes =>
+            Basic.Size >= Marshal.SizeOf<MemoryCountersEx2>() && PrivateWorkingSet != UIntPtr.MaxValue
+                ? PrivateWorkingSet.ToUInt64() : null;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct PerformanceInfo
     {
         internal uint Size;
@@ -89,6 +101,8 @@ internal static class NativeMethods
         StringBuilder name, ref uint length);
     [DllImport("psapi.dll", SetLastError = true)]
     internal static extern bool GetProcessMemoryInfo(SafeProcessHandle process, ref MemoryCounters memory, uint size);
+    [DllImport("psapi.dll", SetLastError = true)]
+    internal static extern bool GetProcessMemoryInfo(SafeProcessHandle process, ref MemoryCountersEx2 memory, uint size);
     [DllImport("kernel32.dll", SetLastError = true)]
     internal static extern bool GetProcessIoCounters(SafeProcessHandle process, out IoCounters counters);
     [DllImport("kernel32.dll", SetLastError = true)]
