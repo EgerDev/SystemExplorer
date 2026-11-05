@@ -5,7 +5,7 @@
     xmlns:local="using:SystemExplorer.App"
     xmlns:controls="using:SystemExplorer.App.Controls"
     Title="SystemExplorer">
-    <Grid x:Name="Root" Background="{ThemeResource PageSurface}" RequestedTheme="Light">
+    <Grid x:Name="Root" Background="{ThemeResource PageSurface}" RequestedTheme="Light" KeyboardAcceleratorPlacementMode="Hidden">
         <Grid.Resources>
             <controls:ProcessColumns x:Key="ProcessColumns"/>
         </Grid.Resources>
@@ -26,7 +26,7 @@
                 </Border>
                 <TextBlock Text="SystemExplorer" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
             </StackPanel>
-            <AutoSuggestBox x:Name="GlobalSearch" Grid.Column="1" PlaceholderText="Search processes, services, or connections…  Ctrl+K" QueryIcon="Find" TextChanged="GlobalSearchChanged" AutomationProperties.Name="Search current section" MaxWidth="650" HorizontalAlignment="Stretch" />
+            <AutoSuggestBox x:Name="GlobalSearch" Grid.Column="1" PlaceholderText="Search processes, services, or connections…  Ctrl+K" QueryIcon="Find" TextChanged="GlobalSearchChanged" AutomationProperties.Name="Search current section" AutomationProperties.AcceleratorKey="Ctrl+K" MaxWidth="650" HorizontalAlignment="Stretch" />
             <Button Grid.Column="2" x:Name="PauseButton" Content="Pause" Click="PauseClicked" AutomationProperties.Name="Pause live refresh"/>
         </Grid>
         <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Auto" ExpandedModeThresholdWidth="1100" CompactModeThresholdWidth="640" IsBackButtonVisible="Collapsed" IsSettingsVisible="False" OpenPaneLength="192" CompactPaneLength="48" IsPaneToggleButtonVisible="True" SelectionChanged="NavigationChanged" AlwaysShowHeader="False">
@@ -289,6 +289,7 @@
                             <Border Style="{StaticResource Card}">
                                 <StackPanel Spacing="8">
                                     <TextBlock Text="Read-only actions" Style="{StaticResource SectionLabel}"/>
+                                    <Button x:Name="CopyPid" Content="Copy PID" Click="CopyPidClicked" Style="{StaticResource ReadOnlyAction}" IsEnabled="False" AutomationProperties.HelpText="Copy the observed PID of the selected member, not every grouped process."/>
                                     <Button x:Name="OpenLocation" Content="Open file location" Click="OpenLocationClicked" Style="{StaticResource ReadOnlyAction}" IsEnabled="False"/>
                                     <Button x:Name="CopyPath" Content="Copy executable path" Click="CopyPathClicked" Style="{StaticResource ReadOnlyAction}" IsEnabled="False"/>
                                     <Button x:Name="PublisherButton" Content="Inspect publisher" Click="PublisherClicked" Style="{StaticResource ReadOnlyAction}" IsEnabled="False"/>
