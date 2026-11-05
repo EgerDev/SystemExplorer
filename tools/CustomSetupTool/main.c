@@ -10,6 +10,7 @@
  */
 
 #include "setup.h"
+#include <phconsole.h>
 
 #define SETUP_CMD_INSTALL    1
 #define SETUP_CMD_UNINSTALL  2

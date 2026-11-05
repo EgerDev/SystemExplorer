@@ -245,6 +245,50 @@ Full native stdout/stderr and exact command/exit records are in the separate
 the failed Release check rather than treating a direct-solution pass as a full
 wrapper pass. No CI was monitored, and the parent retains PR updates and CI review.
 
+## Follow-up: setup console declaration
+
+The parent reported that CI job `127471293936` passed archive creation and then
+failed canary setup compilation at `tools/CustomSetupTool/main.c:597`:
+`PhConsoleSetForeground` was undeclared (C4013, promoted by C2220). This child
+did not monitor that CI run. The declaration is owned by `phlib/include/phconsole.h`:
+`NTSTATUS NTAPI PhConsoleSetForeground(HANDLE ProcessHandle, BOOLEAN Foreground)`.
+It matches the existing `PhConsoleSetForeground(NtCurrentProcess(), TRUE)` call.
+`setup.h` does not include this header; `tools/simcp/main.c` demonstrates the
+existing direct-include convention for the same API.
+
+The focused repair adds only `#include <phconsole.h>` immediately after
+`#include "setup.h"` in setup's `main.c`. It preserves the call, compiler warning
+policy and security settings. The missing include and call are present in the
+master source baseline, but no equivalent base CI run was shown to reach this
+stage; source provenance is not baseline execution proof.
+
+Verification is limited to Release Win32 `ClCompile`, using the existing native
+toolchain and outputs. This matches the setup build's release/32-bit compilation
+scope, not its complete packaging/linking workflow. No installer, application or
+driver is launched, and no prerequisite is installed.
+
+The exact requested command was:
+
+```bat
+call build\build_msbuild.cmd tools\CustomSetupTool\CustomSetupTool.vcxproj /t:ClCompile /p:Configuration=Release /p:Platform=Win32
+```
+
+It exited **1**, with **0 warnings and 1 error**. `main.c` appeared in the CL
+source list and compiler output, produced `obj\Release32\main.obj` (1,022,196
+bytes), and emitted no diagnostic. The target failed separately at
+`tools\CustomSetupTool\util.c(31,1)` with C1189:
+`#error: PH_RELEASE_CHANNEL_ID undefined`. The smallest missing build input is
+the release-channel preprocessor definition; no guessed define, generated stub
+or project/source workaround was added. This verifies that the changed source
+compiles, **not** that the entire target, installer or packaging workflow passes.
+
+`git diff --check` exited **0**. Full stdout/stderr and exact command/exit records
+are preserved in `legacy-setup-include-evidence`, under
+`customsetuptool-release-win32-clcompile.*` and `git-diff-check.*`. The error is
+in stdout; compiler stderr is empty. No full matrix was rerun, no executable was
+linked or launched by this compile-only command, and the parent retains PR and
+CI handling.
+
 ## References
 
 - [MSVC C4090 documentation](https://learn.microsoft.com/en-us/cpp/error-messages/compiler-warnings/compiler-warning-level-1-c4090)
