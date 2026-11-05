@@ -161,6 +161,11 @@ public sealed partial class MainWindow : Window
         Model.Rebuild();
     }
     private void ExpandClicked(object sender, RoutedEventArgs args) { if (sender is Button { Tag: ProcessRow row }) Model.Toggle(row); }
+    private void ProcessContainerChanged(ListViewBase sender, ContainerContentChangingEventArgs args)
+    {
+        if (args.InRecycleQueue) args.ItemContainer.ClearValue(Microsoft.UI.Xaml.Automation.AutomationProperties.NameProperty);
+        else if (args.Item is ProcessRow row) Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(args.ItemContainer, row.AutomationName);
+    }
     private async void ProcessIconLoaded(object sender, RoutedEventArgs args) => await LoadProcessIconAsync((Image)sender);
     private async void ProcessIconChanged(FrameworkElement sender, DataContextChangedEventArgs args) => await LoadProcessIconAsync((Image)sender);
     private async Task LoadProcessIconAsync(Image image)

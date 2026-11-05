@@ -30,7 +30,7 @@ public sealed class ProcessRow : INotifyPropertyChanged
     public string Io => !HasChildren && process.ReadBytesPerSecond is { } read && process.WriteBytesPerSecond is { } write ? Display.Rate(read + write) : "—";
     public string User => process.UserName ?? "Unavailable";
     public string Status => HasChildren ? "Observed" : process.Status;
-    public string AutomationName => $"{Name}, {(HasChildren ? "application group" : $"PID {Pid}")}, private commit {Memory}, CPU {Cpu}, {Status}";
+    public string AutomationName => $"{process.Name}, PID {process.Identity.Pid}, {(IsChild ? "group member" : group is null ? "individual process" : "application entry")}";
     public Microsoft.UI.Xaml.GridLength Indent => new(IsChild ? 25 : 0);
     public string GroupingReason => group is null ? "Individual observed process" : "Inferred group: same executable, owner and observed parent chain. Private commit is not physical RAM.";
 

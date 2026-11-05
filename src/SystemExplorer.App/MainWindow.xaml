@@ -88,8 +88,8 @@
                                     <TextBlock Grid.Column="6" Text="Status" FontSize="11" VerticalAlignment="Center"/>
                                     <Button Grid.Column="7" Content="PID" Tag="PID" Click="ColumnSortClicked" FontSize="11" Padding="0" Background="Transparent" BorderThickness="0"/>
                                 </Grid>
-                                <ListView x:Name="ProcessList" Grid.Row="1" ItemsSource="{x:Bind Model.Rows}" SelectionMode="Single" SelectionChanged="ProcessSelectionChanged" DoubleTapped="ProcessDoubleTapped" AutomationProperties.Name="Live process table">
-                                    <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="MinHeight" Value="32"/><Setter Property="Padding" Value="8,1"/><Setter Property="AutomationProperties.Name" Value="{Binding AutomationName}"/></Style></ListView.ItemContainerStyle>
+                                <ListView x:Name="ProcessList" Grid.Row="1" ItemsSource="{x:Bind Model.Rows}" SelectionMode="Single" SelectionChanged="ProcessSelectionChanged" DoubleTapped="ProcessDoubleTapped" ContainerContentChanging="ProcessContainerChanged" AutomationProperties.Name="Live process table">
+                                    <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="MinHeight" Value="32"/><Setter Property="Padding" Value="8,1"/></Style></ListView.ItemContainerStyle>
                                     <ListView.ItemTemplate>
                                         <DataTemplate x:DataType="local:ProcessRow">
                                             <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind GroupingReason}">
