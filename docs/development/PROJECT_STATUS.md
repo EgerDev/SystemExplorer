@@ -14,10 +14,10 @@ Integration branch: `feature/systemexplorer-integration` (base `0a4975a47`).
 | Milestone | Status | Gate |
 | --- | --- | --- |
 | M0 repository / Windows baseline | In progress | Reproducible original user-mode build, logs, driverless scope |
-| M1 architecture / contracts | Core verified; WinUI feasibility pending | Win32 lifetime proof and 13 passing contract/history tests; frontend compile gate remains |
+| M1 architecture / contracts | Core verified; WinUI proof launch failing | Win32 lifetime proof and 13 passing contract/history tests; WinUI proof compiles but does not launch |
 | M2 Processes | Implementation in progress | Live, searchable, sortable grouped process table and inspector |
-| M3 memory | Core history implemented; provider pending | Precise memory categories, attribution and bounded history |
-| M4 network / services | Provider implementation in progress | Real endpoint ownership and verified relationships |
+| M3 memory | Core history and Windows provider verified | Precise memory categories, attribution and bounded history |
+| M4 network / services | Relationships provider verified | Real endpoint ownership and verified relationships |
 | M5 overview / monitors | UI implementation in progress | CPU, supported GPU/disk, startup, tray, themes, history |
 | M6 insights | Core implemented; history regression tests passing | Deterministic evidence-backed local explanations |
 | M7 release validation | Pending functional app | Tests, GUI evidence, performance, security and unsigned binaries |
@@ -48,7 +48,13 @@ before integrating; independent work does not imply acceptance.
 - Native Toolhelp/GetProcessTimes proof compiled and ran: 131 observed rows,
   130 readable creation times, high-integrity Server 2022 token; not standard-user evidence.
 - Core verification: 13/13 tests; Release build with warnings as errors passed.
-  Production UI source files are authored but unbuilt; the frontend compile gate remains.
+  The WinUI feasibility proof compiles but currently fails to launch; production UI
+  source remains unbuilt and no UI success is claimed.
+- Windows provider smoke passed (133 rows, 132 stable identities, 5 partial readings);
+  its Release build passed with warnings as errors and no warnings.
+- Relationships provider smoke passed 43 checks (72 endpoint rows, 219 services,
+  7 startup entries, 4 limitations). Embedded signature verification used offline
+  cached revocation data, not a fresh online revocation check.
 - Original baseline initialization failed: Visual Studio absent. Build child is
   making one official supported minimal toolchain installation attempt.
 - Production provider: native child owns `src/SystemExplorer.Windows` and focused tests.
