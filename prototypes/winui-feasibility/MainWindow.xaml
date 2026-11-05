@@ -1,0 +1,86 @@
+<Window
+    x:Class="SystemExplorer.WinUI.Feasibility.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="SystemExplorer — WinUI feasibility">
+    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="180" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="280" />
+        </Grid.ColumnDefinitions>
+        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" Padding="16,24">
+            <StackPanel Spacing="20">
+                <TextBlock Text="SystemExplorer" FontSize="18" FontWeight="SemiBold" />
+                <TextBlock Text="NATIVE UI PROOF" FontSize="11" />
+                <ListView SelectionMode="Single" SelectedIndex="0" AutomationProperties.Name="Navigation">
+                    <ListViewItem Content="Processes" />
+                    <ListViewItem Content="Memory" IsEnabled="False" />
+                    <ListViewItem Content="CPU" IsEnabled="False" />
+                    <ListViewItem Content="GPU" IsEnabled="False" />
+                    <ListViewItem Content="Disks" IsEnabled="False" />
+                    <ListViewItem Content="Network" IsEnabled="False" />
+                    <ListViewItem Content="Services" IsEnabled="False" />
+                    <ListViewItem Content="Insights" IsEnabled="False" />
+                </ListView>
+            </StackPanel>
+        </Border>
+        <Grid Grid.Column="1" Margin="20,24" RowSpacing="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <StackPanel Spacing="4">
+                <TextBlock Text="Processes" FontSize="28" FontWeight="SemiBold" />
+                <TextBlock Text="Unpackaged C# / XAML / WinUI 3" TextWrapping="Wrap" />
+            </StackPanel>
+            <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Informational"
+                     Title="Static feasibility screen"
+                     Message="No process provider is connected. This is not live telemetry or Processes acceptance." />
+            <TextBox Grid.Row="2" PlaceholderText="Process search — awaiting shared contract"
+                     IsEnabled="False" AutomationProperties.Name="Process search unavailable in feasibility proof" />
+            <Border Grid.Row="3" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="6" Padding="16">
+                <Grid RowSpacing="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="100" />
+                            <ColumnDefinition Width="55" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Process name" FontWeight="SemiBold" />
+                        <TextBlock Grid.Column="1" Text="Private bytes" FontWeight="SemiBold" />
+                        <TextBlock Grid.Column="2" Text="CPU %" FontWeight="SemiBold" />
+                    </Grid>
+                    <StackPanel Grid.Row="1" VerticalAlignment="Center" Spacing="8">
+                        <TextBlock Text="No monitoring data" FontSize="20" FontWeight="SemiBold" />
+                        <TextBlock Text="A future virtualized process tree will occupy this area. No example processes or invented counters are displayed." TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <StackPanel Grid.Row="4" Spacing="8">
+                <Button Content="Verify native interaction" Click="VerifyInteraction" AccessKey="V"
+                        AutomationProperties.Name="Verify native interaction" />
+                <TextBlock x:Name="InteractionResult" Text="Use Tab, then Enter or Space to test the native button."
+                           TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+            </StackPanel>
+        </Grid>
+        <Border Grid.Column="2" Margin="0,24,16,24" Padding="16"
+                BorderThickness="1" CornerRadius="6" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+            <StackPanel Spacing="16">
+                <TextBlock Text="Process inspector" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Text="Awaiting selection" FontWeight="SemiBold" />
+                <TextBlock Text="Executable path, identity, permissions and metric availability will come from the shared native contract." TextWrapping="Wrap" />
+                <TextBlock Text="No process-control actions are implemented in this proof." TextWrapping="Wrap" />
+                <TextBlock Text="M0 / M1 feasibility only" FontSize="12" FontWeight="SemiBold" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
