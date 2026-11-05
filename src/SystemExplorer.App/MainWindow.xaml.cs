@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Path = System.IO.Path;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -193,11 +194,17 @@ public sealed partial class MainWindow : Window
     }
     private async Task ShowDetailsAsync()
     {
-        if (detailsOpen) return;
+        if (detailsOpen || SelectedProcess is not { } process) return;
         detailsOpen = true;
         try
         {
-            await new ContentDialog { XamlRoot = Root.XamlRoot, RequestedTheme = Root.RequestedTheme, Title = SelectedName.Text, Content = new ScrollViewer { Content = new TextBlock { Text = $"{SelectedStatus.Text}\n{SelectedIdentity.Text}\n{SelectedAvailability.Text}\n\nExecutable path\n{SelectedPath.Text}\n\nCommand line\n{SelectedCommandLine.Text}\n\nOwnership\n{SelectedOwner.Text}\n\nParent process\n{SelectedParent.Text}\n\nMemory\n{SelectedMemory.Text}\n\nAssociated services\n{SelectedServices.Text}\n\nNetwork endpoints\n{SelectedNetwork.Text}", TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } }, CloseButtonText = "Close" }.ShowAsync();
+            var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, RequestedTheme = Root.RequestedTheme, Title = SelectedName.Text, Content = new ScrollViewer { Content = new TextBlock { Text = $"{SelectedStatus.Text}\n{SelectedIdentity.Text}\n{SelectedAvailability.Text}\n\nExecutable path\n{SelectedPath.Text}\n\nCommand line\n{SelectedCommandLine.Text}\n\nOwnership\n{SelectedOwner.Text}\n\nParent process\n{SelectedParent.Text}\n\nMemory\n{SelectedMemory.Text}\n\nAssociated services\n{SelectedServices.Text}\n\nNetwork endpoints\n{SelectedNetwork.Text}", TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } }, PrimaryButtonText = "Copy PID", CloseButtonText = "Close", DefaultButton = ContentDialogButton.Close };
+            dialog.PrimaryButtonClick += (_, args) =>
+            {
+                args.Cancel = true;
+                CopyText(process.Identity.Pid.ToString(CultureInfo.InvariantCulture));
+            };
+            await dialog.ShowAsync();
         }
         catch (Exception ex) { if (!shutdown.IsCancellationRequested) StatusText.Text = $"Details unavailable: {ex.Message}"; }
         finally { detailsOpen = false; }
@@ -243,13 +250,14 @@ public sealed partial class MainWindow : Window
             SelectedOwner.Text = "—";
             DetailsButton.IsEnabled = false;
             PublisherText.Text = "";
-            OpenLocation.IsEnabled = CopyPath.IsEnabled = PublisherButton.IsEnabled = false;
+            OpenLocation.IsEnabled = CopyPath.IsEnabled = CopyPid.IsEnabled = PublisherButton.IsEnabled = false;
             return;
         }
         SelectedName.Text = process.Name;
         SelectedStatus.Text = "Observed";
         SelectedOwner.Text = process.UserName ?? "Unavailable (permission or process lifetime)";
         DetailsButton.IsEnabled = true;
+        CopyPid.IsEnabled = true;
         SelectedIdentity.Text = $"PID {process.Identity.Pid} · {process.ThreadCount?.ToString() ?? "?"} threads · {process.HandleCount?.ToString() ?? "?"} handles\nSelected member; group totals are in the table.";
         SelectedPath.Text = process.ExecutablePath ?? "Unavailable (permission or process lifetime)";
         SelectedCommandLine.Text = process.CommandLine ?? "Unavailable from this documented-API provider";
@@ -295,7 +303,20 @@ public sealed partial class MainWindow : Window
     private void CopyPathClicked(object sender, RoutedEventArgs args)
     {
         if (SelectedProcess?.ExecutablePath is not { } path) return;
-        var data = new DataPackage(); data.SetText(path); Clipboard.SetContent(data);
+        CopyText(path);
+    }
+    private void CopyPidClicked(object sender, RoutedEventArgs args)
+    {
+        if (SelectedProcess is not { } process) return;
+        CopyText(process.Identity.Pid.ToString(CultureInfo.InvariantCulture));
+    }
+    private void CopyText(string text)
+    {
+        try
+        {
+            var data = new DataPackage(); data.SetText(text); Clipboard.SetContent(data);
+        }
+        catch (Exception ex) { StatusText.Text = $"Copy unavailable: {ex.Message}"; }
     }
     private async void PublisherClicked(object sender, RoutedEventArgs args)
     {
