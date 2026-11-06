@@ -4,6 +4,13 @@ using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Diagnostic byte units retain small region spans", () =>
+    {
+        Check(DiagnosticData.Bytes(null) == "—" && DiagnosticData.Bytes(0) == "0 B");
+        Check(DiagnosticData.Bytes(512) == "512 B" && DiagnosticData.Bytes(4096) == "4.0 KiB");
+        Check(DiagnosticData.Bytes(64 * 1024) == "64.0 KiB" && DiagnosticData.Bytes(1024 * 1024) == "1.0 MiB");
+        Check(DiagnosticData.Bytes(1024UL * 1024 * 1024 * 1024) == "1.00 TiB");
+    }),
     ("Diagnostic live rows retain objects and order without reset", () =>
     {
         var rows = new DiagnosticRows();

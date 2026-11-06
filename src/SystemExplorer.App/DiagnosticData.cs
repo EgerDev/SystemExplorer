@@ -186,7 +186,15 @@ public static class DiagnosticData
     private static string Endpoint(string address, int? port) => $"{(address.Contains(':') ? $"[{address}]" : address)}:{port?.ToString() ?? "—"}";
     private static decimal? Number(double? number) => number is { } value && double.IsFinite(value) && value >= 0 && value <= (double)decimal.MaxValue ? (decimal)value : null;
     private static string Count(int? count) => count?.ToString() ?? "—";
-    public static string Bytes(ulong? bytes) => bytes is { } value ? value >= 1024UL * 1024 * 1024 ? $"{value / (1024d * 1024 * 1024):F2} GiB" : $"{value / (1024d * 1024):F1} MiB" : "—";
+    public static string Bytes(ulong? bytes) => bytes switch
+    {
+        null => "—",
+        >= 1024UL * 1024 * 1024 * 1024 => $"{bytes.Value / (1024d * 1024 * 1024 * 1024):F2} TiB",
+        >= 1024UL * 1024 * 1024 => $"{bytes.Value / (1024d * 1024 * 1024):F2} GiB",
+        >= 1024UL * 1024 => $"{bytes.Value / (1024d * 1024):F1} MiB",
+        >= 1024UL => $"{bytes.Value / 1024d:F1} KiB",
+        _ => $"{bytes.Value:N0} B"
+    };
     public static string Percent(double? value) => value is { } number ? $"{number:F1}%" : "—";
     public static string Rate(double? value) => value is { } number ? number >= 1024 * 1024 ? $"{number / (1024 * 1024):F1} MiB/s" : $"{number / 1024:F0} KiB/s" : "—";
 }
