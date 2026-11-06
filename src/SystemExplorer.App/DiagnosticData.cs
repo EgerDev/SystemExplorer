@@ -152,9 +152,17 @@ public static class DiagnosticData
         }
         else if (section == "GPU")
         {
-            if (snapshot.GpuPercent is { } gpu && double.IsFinite(gpu) && gpu is >= 0 and <= 100)
+            foreach (var adapter in snapshot.GpuAdapters)
+            {
+                var value = adapter.HeadlineUtilizationPercent;
+                var measured = value.State == CounterValueState.Measured && value.Value is { } utilization && double.IsFinite(utilization) && utilization is >= 0 and <= 100;
+                result.Add(new($"gpu-{adapter.Luid:X}", null, adapter.Description ?? $"Adapter 0x{adapter.Luid:X} (type unavailable)",
+                    $"GPU utilization: {(measured ? Percent(value.Value!.Value) : "unavailable")}. Maximum over engine types, not a sum. Busiest engine: {adapter.HeadlineEngineType ?? "Unavailable"}. CPU and process I/O are not substituted.",
+                    null, measured ? Percent(value.Value!.Value) : "Utilization unavailable", measured ? "Observed" : value.Reason ?? value.State.ToString(), ""));
+            }
+            if (result.Count == 0 && snapshot.GpuPercent is { } gpu && double.IsFinite(gpu) && gpu is >= 0 and <= 100)
                 result.Add(new("gpu", null, $"GPU utilization: {Percent(gpu)}", "Observed provider GPU utilization; no CPU or process-I/O estimate is substituted.", null, "Observed", "", ""));
-            else
+            else if (result.Count == 0)
                 result.Add(new("gpu", null, "GPU utilization unavailable", "No valid GPU utilization reading is available. CPU and process I/O are not substituted.", null, "Unsupported", "", ""));
         }
         else

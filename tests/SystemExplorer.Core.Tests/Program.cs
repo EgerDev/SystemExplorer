@@ -4,6 +4,20 @@ using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("GPU page preserves software adapter measurements and honest unavailable states", () =>
+    {
+        var missing = CounterValue.Unavailable("No counter reading");
+        var adapter = new GpuAdapterRow(1, "Microsoft Basic Render Driver (software adapter)", 0, 100,
+            missing, missing, [new("3D", CounterValue.Measured(23)), new("Copy", CounterValue.Measured(12))], CounterValue.Measured(23), "3D");
+        IReadOnlyList<DiagnosticItem> Rows(params GpuAdapterRow[] adapters) => DiagnosticData.Create("GPU",
+            Snapshot(0) with { GpuAdapters = adapters, TotalCpuPercent = 99, DiskReadBytesPerSecond = 1000 }, null, [], new(), _ => null);
+        var measured = Rows(adapter).Single();
+        Check(measured.Name.Contains("software adapter") && measured.First == "23.0%" && measured.Detail.Contains("GPU utilization: 23.0%") && measured.Detail.Contains("not a sum"));
+        Check(Rows().Single().Name == "GPU utilization unavailable");
+        foreach (var value in new[] { missing, CounterValue.Warmup("First sample"), CounterValue.Measured(double.NaN), CounterValue.Measured(101) })
+            Check(Rows(adapter with { HeadlineUtilizationPercent = value }).Single().First == "Utilization unavailable");
+        Check(Rows(adapter with { HeadlineUtilizationPercent = CounterValue.Measured(0) }).Single().First == "0.0%");
+    }),
     ("Lifecycle timeline separates baseline, starts, disappearance and PID reuse", () =>
     {
         var timeline = new ProcessLifecycleTimeline();

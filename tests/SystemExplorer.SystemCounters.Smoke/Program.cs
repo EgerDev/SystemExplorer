@@ -5,6 +5,23 @@ using SystemExplorer.Core;
 using SystemExplorer.Windows;
 using static SystemExplorer.Windows.WindowsSystemCounterProvider;
 
+if (args.Contains("--monitor-gpu-only"))
+{
+    using var counters = new WindowsSystemCounterProvider();
+    using var monitor = new WindowsMonitorProvider();
+    await counters.CaptureAsync(CancellationToken.None);
+    await monitor.CaptureAsync(CancellationToken.None);
+    await Task.Delay(1500);
+    var observed = await counters.CaptureAsync(CancellationToken.None);
+    var snapshot = await monitor.CaptureAsync(CancellationToken.None);
+    Console.WriteLine($"GPU source: {observed.Gpu.InventoryDetail}; {string.Join(", ", observed.Gpu.Adapters.Select(a => $"{a.Description}: {a.HeadlineUtilizationPercent.Value}% ({a.Engines.Count} engine types)"))}");
+    Check(observed.Gpu.Adapters.Any(a => a.HeadlineUtilizationPercent.State == CounterValueState.Measured), "VM prerequisite: existing provider must have a measured GPU adapter.");
+    Console.WriteLine($"Monitor GPU: {snapshot.GpuPercent?.ToString() ?? "null"}");
+    Check(snapshot.GpuPercent is >= 0 and <= 100, "Monitor must project existing provider GPU data instead of leaving it null.");
+    Console.WriteLine("PASS: monitor GPU projection from live provider (including software adapters).");
+    return;
+}
+
 static void Check(bool condition, string message)
 {
     if (!condition) throw new InvalidOperationException(message);

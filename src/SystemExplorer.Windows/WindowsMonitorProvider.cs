@@ -15,6 +15,7 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
     private readonly SemaphoreSlim scanGate = new(1, 1);
     private readonly object lifetimeLock = new();
     private readonly CancellationTokenSource shutdown = new();
+    private readonly WindowsSystemCounterProvider counters = new();
     private bool disposed;
     private Dictionary<ProcessIdentity, Sample> previous = new();
     private SystemSample? previousSystem;
@@ -41,7 +42,8 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             await scanGate.WaitAsync(linked.Token).ConfigureAwait(false);
             try
             {
-                return await Task.Run(() => Capture(linked.Token), linked.Token).ConfigureAwait(false);
+                var systemCounters = await counters.CaptureAsync(linked.Token).ConfigureAwait(false);
+                return await Task.Run(() => Capture(linked.Token, systemCounters.Gpu), linked.Token).ConfigureAwait(false);
             }
             finally { scanGate.Release(); }
         }
@@ -62,13 +64,14 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             previousSystem = null;
             diskQuery?.Dispose();
             diskQuery = null;
+            counters.Dispose();
             shutdown.Dispose();
         }
         finally { scanGate.Release(); }
         // Keep the managed semaphore alive for already-cancelled WaitAsync continuations.
     }
 
-    private MonitorSnapshot Capture(CancellationToken cancellationToken)
+    private MonitorSnapshot Capture(CancellationToken cancellationToken, GpuCounterSection gpu)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var capturedAt = DateTimeOffset.UtcNow;
@@ -79,7 +82,7 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             "CPU and process I/O rates require two successful same-lifetime samples; first samples are unavailable.",
             "Process I/O is generic transfer activity, not physical disk or network throughput.",
             "Private working set requires Windows extended memory counters; unsupported or denied values remain unavailable.",
-            "Standby memory, GPU, command lines and suspension state are unsupported.",
+            "Standby memory, command lines and suspension state are unsupported.",
             "Working sets include shared pages; their sum is not distinct physical RAM. Private bytes are committed, not necessarily resident."
         };
         int processors = checked((int)GetActiveProcessorCount(ushort.MaxValue));
@@ -112,6 +115,10 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
         {
             CapturedAt = capturedAt, Processes = rows.AsReadOnly(), Memory = memory,
             TotalCpuPercent = systemCpu, DiskReadBytesPerSecond = diskRead, DiskWriteBytesPerSecond = diskWrite,
+            GpuAdapters = gpu.Adapters,
+            GpuPercent = gpu.Adapters.Select(a => a.HeadlineUtilizationPercent)
+                .Where(v => v.State == CounterValueState.Measured && v.Value is { } value && double.IsFinite(value) && value is >= 0 and <= 100)
+                .Select(v => v.Value).Max(),
             Limitations = limitations.AsReadOnly()
         };
     }
