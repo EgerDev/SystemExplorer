@@ -275,11 +275,21 @@ public sealed partial class MainWindow
         await ShowInventoryAsync($"Handles · PID {identity.Pid}", async (view, token) =>
         {
             var r = await handleInventory.CaptureAsync(identity, token);
+            void Summary()
+            {
             view.ShowRows($"{r.Status} · {r.CapturedAt.LocalDateTime:T} · {r.ProcessHandleCount?.ToString("N0") ?? "—"} handles in this process, {r.SystemHandleCount?.ToString("N0") ?? "—"} system-wide · {r.Detail}",
                 r.ProcessCountsByType.Select(c => new InventoryRow(c.TypeName ?? $"Type {c.TypeIndex}", $"Type index {c.TypeIndex}",
                     c.HandleCount.ToString("N0"), r.SystemCountsByType.FirstOrDefault(s => s.TypeIndex == c.TypeIndex)?.HandleCount.ToString("N0") ?? "—", "",
                     c.HandleCount, r.SystemCountsByType.FirstOrDefault(s => s.TypeIndex == c.TypeIndex)?.HandleCount, null)),
-                "Object type", "This process", "System-wide", "", initialSort: 1, reverse: true);
+                "Object type", "This process", "System-wide", "", action: r.Handles.Count > 0 ? "Handle rows" : null, initialSort: 1, reverse: true);
+            }
+            Summary();
+            view.ActionRequested += _ => view.ShowRows($"{r.Status} · {r.Handles.Count:N0} collected rows (provider cap 4,096). Type-only observations; no names are queried. {r.Detail}",
+                r.Handles.Select(h => new InventoryRow($"0x{h.HandleValue:X}", h.TypeName ?? $"Type {h.TypeIndex}",
+                    h.TypeName ?? $"Type {h.TypeIndex}", $"0x{h.GrantedAccess:X8}", $"0x{h.Attributes:X8}",
+                    FullText: $"Handle 0x{h.HandleValue:X}\nType index {h.TypeIndex}: {h.TypeName ?? "Unavailable"}\nGranted access 0x{h.GrantedAccess:X8}\nAttributes 0x{h.Attributes:X8}")),
+                "Handle", "Type", "Access mask", "Attributes", back: true);
+            view.BackRequested += Summary;
         });
     }
 
