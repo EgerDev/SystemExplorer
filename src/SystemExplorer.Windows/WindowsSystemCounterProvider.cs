@@ -13,6 +13,7 @@ internal interface ISystemCounterSampler : IDisposable
 internal interface IPdhCounterQuery : IDisposable
 {
     uint AddCounter(string path);
+    uint RemoveCounter(string path);
     uint Collect();
     PdhArrayResult ReadArray(string path, int maximumItems);
     PdhSingleResult ReadSingle(string path);
@@ -97,6 +98,7 @@ internal sealed class SystemCounterSampler : ISystemCounterSampler
     {
         internal readonly IPdhCounterQuery Query = query;
         internal readonly Dictionary<string, uint> Added = new(StringComparer.Ordinal);
+        internal readonly HashSet<string> PendingWarmup = new(StringComparer.Ordinal);
         internal bool Collected;
         public void Dispose() => Query.Dispose();
     }
@@ -107,8 +109,17 @@ internal sealed class SystemCounterSampler : ISystemCounterSampler
 
     public CounterSample Sample(CounterSection section, CancellationToken token, Func<bool> expired)
     {
-        token.ThrowIfCancellationRequested();
-        if (expired()) return CounterSample.Timeout;
+        if (token.IsCancellationRequested)
+        {
+            if (queries.Remove(section, out var cancelled)) cancelled.Dispose();
+            token.ThrowIfCancellationRequested();
+        }
+        if (expired())
+        {
+            if (queries.Remove(section, out var timedOutQuery)) timedOutQuery.Dispose();
+            return CounterSample.Timeout;
+        }
+        var created = false;
         if (!queries.TryGetValue(section, out var state))
         {
             state = new(createQuery());
@@ -121,6 +132,7 @@ internal sealed class SystemCounterSampler : ISystemCounterSampler
                     state.Added[path] = state.Query.AddCounter(path);
                 }
                 queries.Add(section, state);
+                created = true;
             }
             catch { state.Dispose(); throw; }
         }
@@ -129,37 +141,87 @@ internal sealed class SystemCounterSampler : ISystemCounterSampler
         var singles = new Dictionary<string, PdhSingleResult>(StringComparer.Ordinal);
         var rebuild = false;
         var timedOut = false;
+        var completed = false;
         try
         {
+            token.ThrowIfCancellationRequested();
+            if (!created)
+            {
+                foreach (var path in SystemCounterPaths.Arrays(section).Concat(SystemCounterPaths.Singles(section)))
+                {
+                    if (state.Added[path] == 0) continue;
+                    token.ThrowIfCancellationRequested();
+                    if (expired()) { timedOut = true; break; }
+                    var add = state.Query.AddCounter(path);
+                    state.Added[path] = add;
+                    if (add == 0 && !warmup) state.PendingWarmup.Add(path);
+                }
+            }
+            if (timedOut)
+            {
+                completed = true;
+                return new(warmup, arrays, singles, true);
+            }
             var collect = state.Query.Collect();
             state.Collected = true;
+            if (collect != 0) rebuild = true;
             foreach (var path in SystemCounterPaths.Arrays(section))
             {
                 token.ThrowIfCancellationRequested();
                 if (expired()) { timedOut = true; break; }
                 var add = state.Added[path];
-                var result = add != 0 ? new PdhArrayResult(add, [], false) : collect != 0
-                    ? new PdhArrayResult(collect, [], false) : state.Query.ReadArray(path, section == CounterSection.Gpu ? 65536 : 257);
+                PdhArrayResult result;
+                if (add != 0) result = new(add, [], false);
+                else if (collect != 0) result = new(collect, [], false);
+                else
+                {
+                    result = state.Query.ReadArray(path, section == CounterSection.Gpu ? 65536 : 257);
+                    var counterWarmup = state.PendingWarmup.Contains(path);
+                    if (counterWarmup) result = result with { IsWarmup = true };
+                    if (result.FunctionStatus == 0 && !result.Truncated && result.Items.Any(i => i.CStatus <= 1 && double.IsFinite(i.Value)))
+                        state.PendingWarmup.Remove(path);
+                    if (ShouldRetryCounter(result.FunctionStatus, result.Truncated, warmup || counterWarmup))
+                    {
+                        if (state.Query.RemoveCounter(path) == 0) state.Added[path] = result.FunctionStatus;
+                        else rebuild = true;
+                    }
+                }
                 arrays[path] = result;
-                if (result.FunctionStatus != 0 && !(warmup && WindowsSystemCounterProvider.IsWarmupStatus(result.FunctionStatus)) &&
-                    !(result.FunctionStatus == NativeCounterMethods.PDH_MORE_DATA && result.Truncated)) rebuild = true;
             }
             foreach (var path in SystemCounterPaths.Singles(section))
             {
                 token.ThrowIfCancellationRequested();
                 if (expired()) { timedOut = true; break; }
                 var add = state.Added[path];
-                var single = add != 0 ? new PdhSingleResult(add, add, null) : collect != 0 ? new PdhSingleResult(collect, collect, null) : state.Query.ReadSingle(path);
+                PdhSingleResult single;
+                if (add != 0) single = new(add, add, null);
+                else if (collect != 0) single = new(collect, collect, null);
+                else
+                {
+                    single = state.Query.ReadSingle(path);
+                    var counterWarmup = state.PendingWarmup.Contains(path);
+                    if (counterWarmup) single = single with { IsWarmup = true };
+                    if (single.FunctionStatus == 0 && single.CStatus <= 1 && single.Value is { } value && double.IsFinite(value))
+                        state.PendingWarmup.Remove(path);
+                    if (ShouldRetryCounter(single.FunctionStatus, false, warmup || counterWarmup))
+                    {
+                        if (state.Query.RemoveCounter(path) == 0) state.Added[path] = single.FunctionStatus;
+                        else rebuild = true;
+                    }
+                }
                 singles[path] = single;
-                if (single.FunctionStatus != 0 && !(warmup && WindowsSystemCounterProvider.IsWarmupStatus(single.FunctionStatus))) rebuild = true;
             }
+            completed = true;
             return new(warmup, arrays, singles, timedOut);
         }
         finally
         {
-            if (rebuild || timedOut) { queries.Remove(section); state.Dispose(); }
+            if (rebuild || timedOut || !completed) { queries.Remove(section); state.Dispose(); }
         }
     }
+
+    private static bool ShouldRetryCounter(uint status, bool truncated, bool warmup) => status != 0 &&
+        !(warmup && WindowsSystemCounterProvider.IsWarmupStatus(status)) && !(status == NativeCounterMethods.PDH_MORE_DATA && truncated);
 
     public void Dispose()
     {
@@ -260,7 +322,7 @@ public sealed class WindowsSystemCounterProvider : ISystemCounterProvider
             nextIdentities[pid] = processes.Read(pid);
         }
         var unknownLuid = inputs.AdapterLuids.Any(luid => gpuOnlyInventory is null || !gpuOnlyInventory.Adapters.Any(a => a.Luid == luid));
-        if (!Expired() && (gpuOnlyInventory is null || (unknownLuid && gpuOnlyInventoryTimestamp is { } last && clock.Elapsed(last, clock.Timestamp) >= TimeSpan.FromSeconds(30))))
+        if (!Expired() && ShouldRefreshInventory(gpuOnlyInventory, gpuOnlyInventoryTimestamp, unknownLuid))
         {
             gpuOnlyInventory = inventorySource.Read();
             gpuOnlyInventoryTimestamp = clock.Timestamp;
@@ -273,6 +335,10 @@ public sealed class WindowsSystemCounterProvider : ISystemCounterProvider
         gpuOnlyIdentities = nextIdentities;
         return gpu;
     }
+
+    private bool ShouldRefreshInventory(DxgiAdapterResult? cached, long? lastAttempt, bool unknownLuid) => cached is null ||
+        (lastAttempt is { } last && clock.Elapsed(last, clock.Timestamp) >= TimeSpan.FromSeconds(30) &&
+            (cached.Status != DxgiInventoryStatus.Available || unknownLuid));
 
     private SystemCounterSnapshot Capture(CancellationToken token)
     {
@@ -323,7 +389,7 @@ public sealed class WindowsSystemCounterProvider : ISystemCounterProvider
             nextIdentities[pid] = processes.Read(pid);
         }
         var unknownLuid = gpuInputs.AdapterLuids.Any(luid => inventory is null || !inventory.Adapters.Any(a => a.Luid == luid));
-        if (!Expired() && (inventory is null || (unknownLuid && inventoryTimestamp is { } last && clock.Elapsed(last, clock.Timestamp) >= TimeSpan.FromSeconds(30))))
+        if (!Expired() && ShouldRefreshInventory(inventory, inventoryTimestamp, unknownLuid))
         {
             inventory = inventorySource.Read();
             inventoryTimestamp = clock.Timestamp;
@@ -368,15 +434,15 @@ public sealed class WindowsSystemCounterProvider : ISystemCounterProvider
     private static CounterValue Single(CounterSample sample, string path, bool rate)
     {
         if (sample.TimedOut) return Missing("capture budget exceeded");
-        return sample.Singles.TryGetValue(path, out var value) ? NormalizeValue(value.FunctionStatus, value.CStatus, value.Value, sample.IsWarmup, rate) : Missing("counter not read");
+        return sample.Singles.TryGetValue(path, out var value) ? NormalizeValue(value.FunctionStatus, value.CStatus, value.Value, sample.IsWarmup || value.IsWarmup, rate) : Missing("counter not read");
     }
     private static CounterValue ArrayValue(CounterSample sample, string path, string instance, bool rate)
     {
         if (sample.TimedOut) return Missing("capture budget exceeded");
         if (!sample.Arrays.TryGetValue(path, out var array)) return Missing("counter not read");
-        if (array.FunctionStatus != 0) return NormalizeValue(array.FunctionStatus, 0, null, sample.IsWarmup, rate);
+        if (array.FunctionStatus != 0) return NormalizeValue(array.FunctionStatus, 0, null, sample.IsWarmup || array.IsWarmup, rate);
         var item = array.Items.FirstOrDefault(i => i.Instance == instance);
-        return item is null ? Missing($"instance not present (0x{NativeCounterMethods.PDH_CSTATUS_NO_INSTANCE:X8})") : NormalizeValue(0, item.CStatus, item.Value, sample.IsWarmup, rate);
+        return item is null ? Missing($"instance not present (0x{NativeCounterMethods.PDH_CSTATUS_NO_INSTANCE:X8})") : NormalizeValue(0, item.CStatus, item.Value, sample.IsWarmup || array.IsWarmup, rate);
     }
     private static string[] Instances(CounterSample sample) => sample.Arrays.Values.Where(a => a.FunctionStatus == 0)
         .SelectMany(a => a.Items).Select(i => i.Instance).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
@@ -575,7 +641,7 @@ public sealed class WindowsSystemCounterProvider : ISystemCounterProvider
                     firstMalformed ??= item.Instance;
                     continue;
                 }
-                result.Add(new(parsed, NormalizeValue(0, item.CStatus, item.Value, sample.IsWarmup, rate)));
+                result.Add(new(parsed, NormalizeValue(0, item.CStatus, item.Value, sample.IsWarmup || array.IsWarmup, rate)));
             }
             return result;
         }
@@ -627,8 +693,8 @@ public sealed class WindowsSystemCounterProvider : ISystemCounterProvider
         {
             if (sample.TimedOut) return Missing("capture budget exceeded");
             if (sample.Arrays.TryGetValue(path, out var array) && array.FunctionStatus != 0)
-                return NormalizeValue(array.FunctionStatus, 0, null, sample.IsWarmup, rate);
-            return sample.IsWarmup && rate ? Warmup() : Missing("no counter instances");
+                return NormalizeValue(array.FunctionStatus, 0, null, sample.IsWarmup || array.IsWarmup, rate);
+            return (sample.IsWarmup || sample.Arrays.TryGetValue(path, out array) && array.IsWarmup) && rate ? Warmup() : Missing("no counter instances");
         }
         CounterValue Memory(IReadOnlyList<GpuInput> source, string path, ulong luid, int? pid = null)
         {

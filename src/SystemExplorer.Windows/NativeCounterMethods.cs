@@ -150,8 +150,8 @@ internal enum ProcessCreationStatus { Available, AccessDenied, Exited, Failed }
 internal readonly record struct ProcessCreationResult(ProcessCreationStatus Status, long? CreationFileTime, int Error);
 internal readonly record struct ProcessImageResult(bool HasImagePath, int Error, bool QueryAttempted = true);
 internal sealed record PdhInstanceValue(string Instance, double Value, uint CStatus);
-internal sealed record PdhArrayResult(uint FunctionStatus, IReadOnlyList<PdhInstanceValue> Items, bool Truncated);
-internal readonly record struct PdhSingleResult(uint FunctionStatus, uint CStatus, double? Value);
+internal sealed record PdhArrayResult(uint FunctionStatus, IReadOnlyList<PdhInstanceValue> Items, bool Truncated, bool IsWarmup = false);
+internal readonly record struct PdhSingleResult(uint FunctionStatus, uint CStatus, double? Value, bool IsWarmup = false);
 
 internal sealed class PdhCounterQuery : IPdhCounterQuery
 {
@@ -176,6 +176,15 @@ internal sealed class PdhCounterQuery : IPdhCounterQuery
         if (counters.ContainsKey(path)) return 0;
         var status = NativeCounterMethods.PdhAddEnglishCounterW(query, path, UIntPtr.Zero, out var counter);
         if (status == 0) counters.Add(path, counter);
+        return status;
+    }
+
+    public uint RemoveCounter(string path)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (!counters.TryGetValue(path, out var counter)) return 0;
+        var status = NativeCounterMethods.PdhRemoveCounter(counter);
+        if (status == 0) counters.Remove(path);
         return status;
     }
 

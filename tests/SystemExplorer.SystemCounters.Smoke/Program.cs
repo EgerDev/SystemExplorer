@@ -56,16 +56,22 @@ BinaryPrimitives.WriteUInt64LittleEndian(bytes, 0x123456789abcdef0);
 BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(8), 123);
 Encoding.Unicode.GetBytes(new string('A', 257)).CopyTo(bytes, 28);
 Encoding.Unicode.GetBytes("description\0ignored").CopyTo(bytes, 542);
-foreach (var (offset, value) in new (int, uint)[] { (1128, 6), (1132, 7), (1136, 8), (1156, 5) })
+foreach (var (offset, value) in new (int, uint)[] { (1128, 6), (1132, 0), (1136, 8), (1148, 2), (1156, 2) })
     BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
-bytes[1152] = 7;
+bytes[1152] = 1;
 foreach (var (offset, value) in new (int, ulong)[] { (1192, 1000), (1200, ulong.MaxValue), (1208, 333), (1280, 555) })
     BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(offset), value);
 var parsedRow = NativeCounterMethods.ParseIfRow(bytes);
-Check(parsedRow == new IfRow(0x123456789abcdef0, 123, new string('A', 257), "description", 6, 7, 8, 7, 5, 1000, ulong.MaxValue, 333, 555),
+Check(parsedRow == new IfRow(0x123456789abcdef0, 123, new string('A', 257), "description", 6, 0, 8, 1, 2, 1000, ulong.MaxValue, 333, 555),
     "MIB_IF_ROW2 offsets, 257-character alias bound and first-NUL description must match fixed bytes.");
 Expect<ArgumentException>(() => NativeCounterMethods.ParseIfRow(new byte[1351]));
 var fakeClock = new FakeClock();
+var hardwareRow = parsedRow with { InOctets = 500, OutOctets = 900 };
+var priorHardwareRow = hardwareRow with { InOctets = 300, OutOctets = 500 };
+var parsedHardware = NormalizeNetwork(new(new(0, [hardwareRow], false), 2000), new(new(0, [priorHardwareRow], false), 0), fakeClock);
+Check(parsedHardware.Adapters.Single().Kind == NetworkInterfaceKind.Hardware && parsedHardware.Adapters.Single().IncludedInTotal
+    && parsedHardware.TotalReceiveBytesPerSecond.Value == 100 && parsedHardware.TotalTransmitBytesPerSecond.Value == 200,
+    "SDK-layout DirectionType must not replace HardwareInterface flags or OperStatus.");
 var largeTable = new InterfaceSample(new(0, Enumerable.Range(1, 257).Select(i => parsedRow with { Index = (uint)i }).ToArray(), false), 1000);
 var cappedTable = NormalizeNetwork(largeTable, null, fakeClock);
 Check(cappedTable.Status == InspectionStatus.Truncated && cappedTable.Adapters.Count == 256 && cappedTable.TotalReceiveBytesPerSecond.Value is null,
@@ -173,16 +179,78 @@ Console.WriteLine("PASS: GPU strict parsing, overflow/empty type, engine aggrega
 
 var nativeQueries = new List<FakeQuery>();
 var realSampler = new SystemCounterSampler(() => { var query = new FakeQuery(); nativeQueries.Add(query); return query; });
-Check(realSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false).IsWarmup && realSampler.Sample(CounterSection.Cpu, CancellationToken.None, () => false).IsWarmup,
-    "Each query's first collect must be warmup.");
-nativeQueries[0].ArrayStatus = NativeCounterMethods.PDH_CSTATUS_NO_INSTANCE;
-var churn = realSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false);
-Check(churn.Arrays.Values.All(a => a.FunctionStatus == NativeCounterMethods.PDH_CSTATUS_NO_INSTANCE) && nativeQueries[0].DisposeCount == 1,
-    "Missing-instance wildcard must immediately dispose failed section query.");
-Check(!realSampler.Sample(CounterSection.Cpu, CancellationToken.None, () => false).IsWarmup &&
-    realSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false).IsWarmup && nativeQueries.Count == 3, "Rebuild must warm up only affected section.");
+var firstDisk = realSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false);
+var firstCpu = realSampler.Sample(CounterSection.Cpu, CancellationToken.None, () => false);
+Check(firstDisk.IsWarmup && firstCpu.IsWarmup, "Each query's first collect must be warmup.");
+Check(!realSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false).IsWarmup &&
+    !realSampler.Sample(CounterSection.Cpu, CancellationToken.None, () => false).IsWarmup && nativeQueries.Count == 2,
+    "Healthy section queries must preserve their independent rate baselines.");
 realSampler.Dispose();
 Check(nativeQueries.All(q => q.DisposeCount == 1), "All created queries must be disposed exactly once.");
+
+var missingCompression = new FakeQuery();
+missingCompression.AddStatuses[SystemCounterPaths.CompressionPid] = NativeCounterMethods.PDH_CSTATUS_NO_INSTANCE;
+var memorySampler = new SystemCounterSampler(() => missingCompression);
+var memoryFirst = memorySampler.Sample(CounterSection.Memory, CancellationToken.None, () => false);
+var memorySecond = memorySampler.Sample(CounterSection.Memory, CancellationToken.None, () => false);
+var normalizedMemory = NormalizeMemory(memorySecond, null);
+Check(memoryFirst.IsWarmup && !memorySecond.IsWarmup && missingCompression.DisposeCount == 0 &&
+    missingCompression.AddCounts[SystemCounterPaths.CompressionPid] == 2 && normalizedMemory.CompressionStatus == InspectionStatus.Unsupported &&
+    normalizedMemory.PageFaultsPerSecond.State == CounterValueState.Measured,
+    "A persistently missing optional compression scalar must not keep healthy Memory rates warming.");
+memorySampler.Dispose();
+Check(missingCompression.DisposeCount == 1, "The Memory query must dispose once after optional-counter retries.");
+
+var diskReadsPath = SystemCounterPaths.Disk("Disk Reads/sec");
+var diskQuery = new FakeQuery();
+diskQuery.ArrayStatuses[diskReadsPath] = NativeCounterMethods.PDH_CSTATUS_NO_INSTANCE;
+var diskSampler = new SystemCounterSampler(() => diskQuery);
+var diskWarmup = diskSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false);
+var diskFailure = diskSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false);
+var diskFailureRows = NormalizeDisks(diskFailure);
+var diskFailureTotal = diskFailureRows.Total!;
+Check(diskWarmup.IsWarmup && !diskFailure.IsWarmup && diskQuery.DisposeCount == 0 &&
+    diskQuery.AddCounts[diskReadsPath] == 2 && diskQuery.RemoveCounts[diskReadsPath] == 2 &&
+    diskQuery.RegisteredAtCollect[1].Contains(diskReadsPath) && diskQuery.RegisteredAtCollect[1].Contains(SystemCounterPaths.Disk("Disk Writes/sec")) &&
+    diskFailureTotal.ReadsPerSecond.State == CounterValueState.Unavailable && diskFailureTotal.WritesPerSecond.State == CounterValueState.Measured,
+    "A persistently failing array counter must be retried alone while its healthy sibling reaches measured.");
+diskQuery.ArrayStatuses.Remove(diskReadsPath);
+var recoveredDisk = diskSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false);
+var recoveredDiskRows = NormalizeDisks(recoveredDisk);
+var recoveredDiskTotal = recoveredDiskRows.Total!;
+Check(recoveredDisk.Arrays[diskReadsPath].IsWarmup && diskQuery.RegisteredAtCollect[2].Contains(diskReadsPath) &&
+    recoveredDiskTotal.ReadsPerSecond.State == CounterValueState.Warmup &&
+    recoveredDiskTotal.WritesPerSecond.State == CounterValueState.Measured,
+    "A re-registered array counter's first valid rate must be warmup without warming healthy siblings.");
+var measuredDisk = NormalizeDisks(diskSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false));
+Check(measuredDisk.Total!.ReadsPerSecond.State == CounterValueState.Measured && measuredDisk.Total.WritesPerSecond.State == CounterValueState.Measured,
+    "A recovered counter must become measured after its individual warmup sample.");
+diskSampler.Dispose();
+Check(diskQuery.DisposeCount == 1, "The isolated array query must dispose once.");
+
+var contextPath = SystemCounterPaths.Context;
+var recoveringScalar = new FakeQuery();
+recoveringScalar.AddStatuses[contextPath] = NativeCounterMethods.PDH_CSTATUS_NO_COUNTER;
+recoveringScalar.SingleResults[contextPath] = new Queue<PdhSingleResult>([
+    new(NativeCounterMethods.PDH_CSTATUS_NO_INSTANCE, NativeCounterMethods.PDH_CSTATUS_NO_INSTANCE, null),
+    new(0, 0, 10), new(0, 0, 12)]);
+var scalarSampler = new SystemCounterSampler(() => recoveringScalar);
+var missingScalar = scalarSampler.Sample(CounterSection.Cpu, CancellationToken.None, () => false);
+recoveringScalar.AddStatuses.Remove(contextPath);
+var scalarReadFailure = scalarSampler.Sample(CounterSection.Cpu, CancellationToken.None, () => false);
+var recoveredScalar = scalarSampler.Sample(CounterSection.Cpu, CancellationToken.None, () => false);
+var recoveredCpu = NormalizeCpu(recoveredScalar);
+var measuredCpu = NormalizeCpu(scalarSampler.Sample(CounterSection.Cpu, CancellationToken.None, () => false));
+Check(missingScalar.Singles[contextPath].FunctionStatus == NativeCounterMethods.PDH_CSTATUS_NO_COUNTER &&
+    scalarReadFailure.Singles[contextPath].FunctionStatus == NativeCounterMethods.PDH_CSTATUS_NO_INSTANCE &&
+    recoveringScalar.RegisteredAtCollect[1].Contains(contextPath) && recoveringScalar.RemoveCounts[contextPath] == 1 && recoveringScalar.DisposeCount == 0 &&
+    recoveredScalar.Singles[contextPath].IsWarmup && recoveredCpu.ContextSwitchesPerSecond.State == CounterValueState.Warmup &&
+    recoveredCpu.TotalProcessorUtilityPercent.State == CounterValueState.Measured &&
+    measuredCpu.ContextSwitchesPerSecond.State == CounterValueState.Measured,
+    "A missing scalar must recover independently, suppress its first valid rate, then become measured.");
+scalarSampler.Dispose();
+Check(recoveringScalar.DisposeCount == 1, "The scalar recovery query must dispose once.");
+
 var warmQuery = new FakeQuery { ArrayStatus = 0xC0000BBA };
 using (var warmSampler = new SystemCounterSampler(() => warmQuery))
 {
@@ -191,19 +259,42 @@ using (var warmSampler = new SystemCounterSampler(() => warmQuery))
     Check(!warmSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false).IsWarmup, "Second collect of same query is not warmup.");
 }
 Check(warmQuery.DisposeCount == 1, "Warmup query must close on sampler disposal.");
-foreach (var failure in new uint[] { NativeCounterMethods.PDH_CSTATUS_NO_OBJECT, NativeCounterMethods.PDH_CSTATUS_NO_COUNTER, NativeCounterMethods.PDH_CSTATUS_INVALID_DATA, 0xDEADBEEF })
+
+var collectQueries = new List<FakeQuery>();
+var collectSampler = new SystemCounterSampler(() => { var query = new FakeQuery(); collectQueries.Add(query); return query; });
+collectSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false);
+collectQueries[0].CollectStatus = 0xDEADBEEF;
+collectSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false);
+Check(collectQueries[0].DisposeCount == 1 && collectSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false).IsWarmup && collectQueries.Count == 2,
+    "A whole-query collect failure must dispose and rebuild the affected section.");
+collectSampler.Dispose();
+Check(collectQueries.All(q => q.DisposeCount == 1), "Collect-failed queries must dispose exactly once.");
+
+var timeoutQueries = new List<FakeQuery>();
+var timeoutSampler = new SystemCounterSampler(() => { var query = new FakeQuery(); timeoutQueries.Add(query); return query; });
+timeoutSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false);
+Check(timeoutSampler.Sample(CounterSection.Disk, CancellationToken.None, () => true).TimedOut && timeoutQueries[0].DisposeCount == 1 &&
+    timeoutSampler.Sample(CounterSection.Disk, CancellationToken.None, () => false).IsWarmup && timeoutQueries.Count == 2,
+    "A whole-query timeout must dispose the affected query before the next warmup.");
+timeoutSampler.Dispose();
+Check(timeoutQueries.All(q => q.DisposeCount == 1), "Timed-out queries must dispose exactly once.");
+
+var cancellationQueries = new List<FakeQuery>();
+var cancellationSampler = new SystemCounterSampler(() => { var query = new FakeQuery(); cancellationQueries.Add(query); return query; });
+cancellationSampler.Sample(CounterSection.Cpu, CancellationToken.None, () => false);
+using (var samplingCancellation = new CancellationTokenSource())
 {
-    var queries = new List<FakeQuery>();
-    using var sampler = new SystemCounterSampler(() => { var query = new FakeQuery(); queries.Add(query); return query; });
-    sampler.Sample(CounterSection.Disk, CancellationToken.None, () => false);
-    queries[0].ArrayStatus = failure;
-    sampler.Sample(CounterSection.Disk, CancellationToken.None, () => false);
-    Check(queries[0].DisposeCount == 1 && sampler.Sample(CounterSection.Disk, CancellationToken.None, () => false).IsWarmup && queries.Count == 2,
-        "Missing object/counter and unexpected post-warmup failures must dispose/rebuild the affected query.");
-    sampler.Dispose();
-    Check(queries.All(q => q.DisposeCount == 1), "Rebuilt failure queries must not leak or double-dispose.");
+    cancellationQueries[0].AfterCollect = samplingCancellation.Cancel;
+    var cancellationObserved = false;
+    try { cancellationSampler.Sample(CounterSection.Cpu, samplingCancellation.Token, () => false); }
+    catch (OperationCanceledException) { cancellationObserved = true; }
+    Check(cancellationObserved && cancellationQueries[0].DisposeCount == 1 &&
+        cancellationSampler.Sample(CounterSection.Cpu, CancellationToken.None, () => false).IsWarmup && cancellationQueries.Count == 2,
+        "Cancellation during collection must dispose the partial query before the next warmup.");
 }
-Console.WriteLine("PASS: section query creation/disposal counts, NO_INSTANCE rebuild without leaks, independent query warmup.");
+cancellationSampler.Dispose();
+Check(cancellationQueries.All(q => q.DisposeCount == 1), "Cancelled queries must dispose exactly once.");
+Console.WriteLine("PASS: isolated scalar/array failures, healthy sibling baselines, recovery warmup, and query-level disposal.");
 
 var source = new FakeSampler();
 var tableSource = new FakeInterfaces(fakeClock);
@@ -257,6 +348,50 @@ using (var provider = new WindowsSystemCounterProvider(new FakeSampler(), new Fa
     refreshClock.Ticks = 30000;
     await provider.CaptureAsync(CancellationToken.None);
     Check(refreshInventory.Calls == 2, "Unknown LUID must refresh inventory at 30 seconds.");
+}
+
+var unavailableInventory = new DxgiAdapterResult(DxgiInventoryStatus.Failed, unchecked((int)0x80004005), [], false);
+var recoveredInventory = Inventory(new DxgiAdapter("Recovered adapter", 1, 100, 200, 0));
+var fullRetryClock = new FakeClock();
+var fullRetryInventory = new FakeInventory { Result = unavailableInventory };
+var fullRetrySampler = new FakeSampler { GpuSample = Data.GpuEmpty() };
+using (var provider = new WindowsSystemCounterProvider(fullRetrySampler, new FakeInterfaces(fullRetryClock), new FakeProcesses(), fullRetryInventory, fullRetryClock))
+{
+    var initial = await provider.CaptureAsync(CancellationToken.None);
+    Check(fullRetryInventory.Calls == 1 && initial.Gpu.InventoryStatus == InspectionStatus.Failed,
+        "Full capture must retain the initial failed inventory result when no counter LUIDs exist.");
+    fullRetryInventory.Result = recoveredInventory;
+    fullRetryClock.Ticks = 29999;
+    var early = await provider.CaptureAsync(CancellationToken.None);
+    Check(fullRetryInventory.Calls == 1 && early.Gpu.InventoryStatus == InspectionStatus.Failed,
+        "Full capture must not retry failed inventory before 30 seconds without counter LUIDs.");
+    fullRetryClock.Ticks = 30000;
+    var recovered = await provider.CaptureAsync(CancellationToken.None);
+    Check(fullRetryInventory.Calls == 2 && recovered.Gpu.InventoryStatus == InspectionStatus.Available &&
+        recovered.Gpu.Adapters.Single().Description == "Recovered adapter",
+        "Full capture must retry and publish recovered inventory at 30 seconds without counter LUIDs.");
+}
+
+var gpuOnlyRetryClock = new FakeClock();
+var gpuOnlyRetryInventory = new FakeInventory { Result = unavailableInventory };
+var gpuOnlyRetrySampler = new FakeSampler { GpuSample = Data.GpuEmpty() };
+var unusedFullSampler = new FakeSampler();
+using (var provider = new WindowsSystemCounterProvider(unusedFullSampler, new FakeInterfaces(gpuOnlyRetryClock), new FakeProcesses(),
+    gpuOnlyRetryInventory, gpuOnlyRetryClock, gpuOnlyRetrySampler))
+{
+    var initial = await provider.CaptureGpuAsync(CancellationToken.None);
+    Check(gpuOnlyRetryInventory.Calls == 1 && initial.InventoryStatus == InspectionStatus.Failed && unusedFullSampler.Calls == 0,
+        "GPU-only capture must retain its initial failed inventory result independently of full capture.");
+    gpuOnlyRetryInventory.Result = recoveredInventory;
+    gpuOnlyRetryClock.Ticks = 29999;
+    var early = await provider.CaptureGpuAsync(CancellationToken.None);
+    Check(gpuOnlyRetryInventory.Calls == 1 && early.InventoryStatus == InspectionStatus.Failed,
+        "GPU-only capture must not retry failed inventory before 30 seconds without counter LUIDs.");
+    gpuOnlyRetryClock.Ticks = 30000;
+    var recovered = await provider.CaptureGpuAsync(CancellationToken.None);
+    Check(gpuOnlyRetryInventory.Calls == 2 && recovered.InventoryStatus == InspectionStatus.Available &&
+        recovered.Adapters.Single().Description == "Recovered adapter",
+        "GPU-only capture must retry and publish recovered inventory at 30 seconds without counter LUIDs.");
 }
 Console.WriteLine("PASS: cancellation without publication, disposed rejection, concurrent serialization, fake-clock budget, capped identity reads and inventory refresh throttle.");
 
@@ -386,12 +521,45 @@ sealed class FakeClock : ISystemCounterClock
 sealed class FakeQuery : IPdhCounterQuery
 {
     internal uint ArrayStatus;
+    internal uint CollectStatus;
     internal int DisposeCount;
-    public uint AddCounter(string path) => 0;
-    public uint Collect() => 0;
-    public PdhArrayResult ReadArray(string path, int maximumItems) => new(ArrayStatus, ArrayStatus == 0 ? [new("_Total", 1, 0)] : [], false);
-    public PdhSingleResult ReadSingle(string path) => new(0, 0, 1);
-    public void Dispose() => DisposeCount++;
+    internal Action? AfterCollect;
+    internal readonly Dictionary<string, uint> AddStatuses = new(StringComparer.Ordinal);
+    internal readonly Dictionary<string, uint> ArrayStatuses = new(StringComparer.Ordinal);
+    internal readonly Dictionary<string, Queue<PdhArrayResult>> ArrayResults = new(StringComparer.Ordinal);
+    internal readonly Dictionary<string, Queue<PdhSingleResult>> SingleResults = new(StringComparer.Ordinal);
+    internal readonly Dictionary<string, int> AddCounts = new(StringComparer.Ordinal);
+    internal readonly Dictionary<string, int> RemoveCounts = new(StringComparer.Ordinal);
+    internal readonly HashSet<string> Registered = new(StringComparer.Ordinal);
+    internal readonly List<HashSet<string>> RegisteredAtCollect = [];
+    public uint AddCounter(string path)
+    {
+        AddCounts[path] = AddCounts.GetValueOrDefault(path) + 1;
+        var status = AddStatuses.GetValueOrDefault(path);
+        if (status == 0) Registered.Add(path);
+        return status;
+    }
+    public uint RemoveCounter(string path)
+    {
+        RemoveCounts[path] = RemoveCounts.GetValueOrDefault(path) + 1;
+        Registered.Remove(path);
+        return 0;
+    }
+    public uint Collect()
+    {
+        RegisteredAtCollect.Add(new(Registered, StringComparer.Ordinal));
+        AfterCollect?.Invoke();
+        return CollectStatus;
+    }
+    public PdhArrayResult ReadArray(string path, int maximumItems)
+    {
+        if (ArrayResults.TryGetValue(path, out var queued) && queued.Count != 0) return queued.Dequeue();
+        var status = ArrayStatuses.GetValueOrDefault(path, ArrayStatus);
+        return new(status, status == 0 ? [new("_Total", 1, 0)] : [], false);
+    }
+    public PdhSingleResult ReadSingle(string path) => SingleResults.TryGetValue(path, out var queued) && queued.Count != 0
+        ? queued.Dequeue() : new(0, 0, 1);
+    public void Dispose() { DisposeCount++; Registered.Clear(); }
 }
 sealed class FakeSampler : ISystemCounterSampler
 {
