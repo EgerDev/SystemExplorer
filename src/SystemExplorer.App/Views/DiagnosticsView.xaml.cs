@@ -9,6 +9,8 @@ public sealed partial class DiagnosticsView : UserControl
 {
     public DiagnosticRows Data { get; } = new();
     public event Action<ProcessIdentity>? InspectRequested;
+    public event Action<string>? ServiceRequested;
+    public event Action<string>? InventoryRequested;
     private IReadOnlyList<DiagnosticItem> items = [];
     private IReadOnlyList<HistoryPoint> history = [];
     private MonitorSnapshot? snapshot;
@@ -42,6 +44,8 @@ public sealed partial class DiagnosticsView : UserControl
         var headers = DiagnosticData.Headers(section);
         NameHeader.Content = headers[0]; FirstHeader.Content = headers[1]; SecondHeader.Content = headers[2]; ThirdHeader.Content = headers[3];
         MemorySummary.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
+        PagefilesButton.Visibility = RecentButton.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
+        TasksButton.Visibility = section == "Startup" ? Visibility.Visible : Visibility.Collapsed;
         ChartCard.Visibility = section is "Memory" or "CPU" ? Visibility.Visible : Visibility.Collapsed;
         ChartSeries.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
         var table = DiagnosticData.IsTable(section);
@@ -57,7 +61,7 @@ public sealed partial class DiagnosticsView : UserControl
             "CPU" => $"System CPU {DiagnosticData.Percent(next.TotalCpuPercent)} · Process CPU is normalized across all logical processors; first samples are unavailable.",
             "Disks" => $"Physical disk read {DiagnosticData.Rate(next.DiskReadBytesPerSecond)} · write {DiagnosticData.Rate(next.DiskWriteBytesPerSecond)}\nThe table is generic process I/O, not physical disk or network attribution. Unknown values are not zero.",
             "Network" => $"TCP/UDP observation: {relationships?.CapturedAt.LocalDateTime.ToString("T") ?? "Unavailable"}. UDP has no remote peer. Endpoints are not bandwidth; Inspect requires a current verified lifetime.",
-            "Services" => $"Win32 service observation: {relationships?.CapturedAt.LocalDateTime.ToString("T") ?? "Unavailable"}. Driver services are not included; Inspect requires a current verified lifetime.",
+            "Services" => $"Win32 service observation: {relationships?.CapturedAt.LocalDateTime.ToString("T") ?? "Unavailable"}. Click a row for configuration and dependencies. Driver services are not listed; Inspect requires a current verified process lifetime.",
             "Startup" => $"Run/RunOnce keys and startup-folder entries, not a complete autostart inventory. Targets are not resolved or executed. {startupStatus}",
             _ => "Observations are not causal diagnoses. Unavailable measurements are not zero."
         };
@@ -117,6 +121,7 @@ public sealed partial class DiagnosticsView : UserControl
     private async void RowClicked(object sender, ItemClickEventArgs args)
     {
         if (detailsOpen || args.ClickedItem is not DiagnosticRow row) return;
+        if (section == "Services") { ServiceRequested?.Invoke(row.Key); return; }
         detailsOpen = true;
         try
         {
@@ -132,6 +137,10 @@ public sealed partial class DiagnosticsView : UserControl
         finally { detailsOpen = false; }
     }
     private void TableLoaded(object sender, RoutedEventArgs args) => scroll = FindScroll(Table);
+    private void InventoryClicked(object sender, RoutedEventArgs args)
+    {
+        if (sender is Button { Tag: string kind }) InventoryRequested?.Invoke(kind);
+    }
     private static ScrollViewer? FindScroll(DependencyObject parent)
     {
         if (parent is ScrollViewer viewer) return viewer;

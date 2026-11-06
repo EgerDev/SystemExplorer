@@ -32,6 +32,14 @@ jobs:
         run: dotnet run --project tests/SystemExplorer.Windows.Smoke -c Release
       - name: Endpoint, service and offline trust checks
         run: dotnet run --project tests/SystemExplorer.Relationships.Smoke -c Release
+      - name: Pagefile inventory checks
+        run: dotnet run --project tests/SystemExplorer.Pagefiles.Smoke -c Release
+      - name: Service configuration and startup checks
+        run: dotnet run --project tests/SystemExplorer.ServiceInspection.Smoke -c Release
+      - name: Thread timing, wait-chain and lifetime checks
+        run: dotnet run --project tests/SystemExplorer.Threads.Smoke -c Release
+      - name: Read-only scheduled task checks
+        run: dotnet run --project tests/SystemExplorer.ScheduledTasks.Smoke -c Release
       - name: Publish unsigned portable test build
         shell: pwsh
         run: ./tools/Build-SystemExplorer.ps1

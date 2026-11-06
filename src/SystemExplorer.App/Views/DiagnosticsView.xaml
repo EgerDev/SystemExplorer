@@ -93,8 +93,16 @@
                 <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/></Style></ListView.ItemContainerStyle>
             </ListView>
         </Grid>
-        <Expander Grid.Row="4" Header="Measurement definitions and collection limits" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+        <Grid Grid.Row="4" ColumnSpacing="8">
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <Expander Header="Measurement definitions and collection limits" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
             <ScrollViewer MaxHeight="100"><TextBlock x:Name="LimitsText" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True"/></ScrollViewer>
         </Expander>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
+                <Button x:Name="PagefilesButton" Content="Pagefiles" Tag="Pagefiles" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="RecentButton" Content="Recent history" Tag="History" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="TasksButton" Content="Scheduled tasks" Tag="Tasks" Click="InventoryClicked" Visibility="Collapsed"/>
+            </StackPanel>
+        </Grid>
     </Grid>
 </UserControl>

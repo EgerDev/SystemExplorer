@@ -23,7 +23,7 @@ public sealed partial class MainWindow
                         DiagnosticData.Bytes(p.PrivateBytes), DiagnosticData.Bytes(p.WorkingSetBytes), DiagnosticData.Bytes(p.PrivateWorkingSetBytes),
                         p.PrivateBytes, p.WorkingSetBytes, p.PrivateWorkingSetBytes,
                         $"{p.At:O}\nPID {history.Identity.Pid} · creation {history.Identity.CreationTimeFileTime}\n{(p.Observed ? "Observed" : "Not observed; this does not establish exit")} · Gap before: {p.BreakBefore}\nPrivate commit: {DiagnosticData.Bytes(p.PrivateBytes)}\nWorking set: {DiagnosticData.Bytes(p.WorkingSetBytes)}\nPrivate working set: {DiagnosticData.Bytes(p.PrivateWorkingSetBytes)}\nCPU (machine normalized): {(p.CpuPercent is { } cpu ? $"{cpu:F2}%" : "Unavailable")}\nPrivate commit is not physical RAM; shared resident pages are not additive.")),
-                    "Sample time", "Private commit", "Working set", "Private WS");
+                    "Sample time", "Private commit", "Working set", "Private WS", reverse: true);
             });
             if (histories.Count == 0) view.ShowMessage("Select a stable current process to start retaining its history.");
             return Task.CompletedTask;

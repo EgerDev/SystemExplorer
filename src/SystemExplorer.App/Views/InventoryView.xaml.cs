@@ -15,10 +15,17 @@ public sealed partial class InventoryView : UserControl
     public event Action? BackRequested;
     public InventoryView() { InitializeComponent(); ready = true; }
 
-    public void ShowRows(string message, IEnumerable<InventoryRow> rows, string name, string first, string second, string third, string? action = null, bool back = false)
+    public void ShowRows(string message, IEnumerable<InventoryRow> rows, string name, string first, string second, string third, string? action = null, bool back = false, int initialSort = 0, bool reverse = false)
     {
-        source = rows.ToArray(); status = message; sort = 0; descending = false;
+        source = rows.ToArray(); status = message; sort = initialSort; descending = reverse;
         NameHeader.Content = name; FirstHeader.Content = first; SecondHeader.Content = second; ThirdHeader.Content = third;
+        var labels = new[] { first, second, third };
+        var buttons = new[] { FirstHeader, SecondHeader, ThirdHeader };
+        for (var i = 0; i < labels.Length; i++)
+        {
+            Headers.ColumnDefinitions[i + 1].Width = new GridLength(labels[i].Length == 0 ? 0 : 112);
+            buttons[i].Visibility = labels[i].Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        }
         ActionButton.Content = action; ActionButton.Visibility = action is null ? Visibility.Collapsed : Visibility.Visible;
         Back.Visibility = back ? Visibility.Visible : Visibility.Collapsed;
         Search.Text = "";
@@ -41,12 +48,15 @@ public sealed partial class InventoryView : UserControl
     {
         var filtered = source.Where(r => r.Description.Contains(Search.Text.Trim(), StringComparison.OrdinalIgnoreCase));
         decimal? Number(InventoryRow row) => sort switch { 1 => row.Number1, 2 => row.Number2, _ => row.Number3 };
-        var ordered = sort == 0 ? descending ? filtered.OrderByDescending(r => r.Name, StringComparer.OrdinalIgnoreCase) : filtered.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+        string Text(InventoryRow row) => sort switch { 1 => row.First, 2 => row.Second, 3 => row.Third, _ => row.Name };
+        var numeric = sort > 0 && source.Any(r => Number(r) is not null);
+        var ordered = !numeric ? descending ? filtered.OrderByDescending(Text, StringComparer.OrdinalIgnoreCase) : filtered.OrderBy(Text, StringComparer.OrdinalIgnoreCase)
             : descending ? filtered.OrderBy(r => Number(r) is null).ThenByDescending(Number) : filtered.OrderBy(r => Number(r) is null).ThenBy(Number);
         var displayed = ordered.ToArray();
         Rows.ItemsSource = displayed;
         Detail.Text = "Select an observation for full, copyable details."; ActionButton.IsEnabled = false;
-        Status.Text = $"{status}\n{displayed.Length} of {source.Count} observations{(displayed.Length == 0 ? " · No matching observations" : "")}";
+        var header = new[] { NameHeader, FirstHeader, SecondHeader, ThirdHeader }[sort].Content;
+        Status.Text = $"{status}\n{displayed.Length} of {source.Count} observations · {header}: {(descending ? "descending" : "ascending")}{(displayed.Length == 0 ? source.Count == 0 ? " · No observations returned" : " · No matching observations" : "")}";
     }
     private void SelectionChanged(object sender, SelectionChangedEventArgs args)
     {

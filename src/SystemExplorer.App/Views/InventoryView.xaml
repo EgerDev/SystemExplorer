@@ -6,7 +6,7 @@
         <TextBlock x:Name="Status" Text="Collecting a bounded read-only observation… Close to cancel." TextWrapping="Wrap" FontSize="12"/>
         <ComboBox x:Name="Targets" Grid.Row="1" Visibility="Collapsed" HorizontalAlignment="Stretch" SelectionChanged="TargetChanged" AutomationProperties.Name="Retained process lifetime"/>
         <TextBox x:Name="Search" Grid.Row="2" PlaceholderText="Filter this frozen inventory…" TextChanged="FilterChanged" AutomationProperties.Name="Filter diagnostic inventory"/>
-        <Grid Grid.Row="3" Padding="8,0">
+        <Grid x:Name="Headers" Grid.Row="3" Padding="8,0">
             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="112"/><ColumnDefinition Width="112"/><ColumnDefinition Width="112"/></Grid.ColumnDefinitions>
             <Button x:Name="NameHeader" Content="Name" Tag="0" Click="SortClicked" Background="Transparent" BorderThickness="0"/>
             <Button x:Name="FirstHeader" Grid.Column="1" Tag="1" Click="SortClicked" Background="Transparent" BorderThickness="0"/>
@@ -16,7 +16,7 @@
         <ListView x:Name="Rows" Grid.Row="4" SelectionMode="Single" SelectionChanged="SelectionChanged" AutomationProperties.Name="Diagnostic observations">
             <ListView.ItemTemplate><DataTemplate>
                 <Grid Padding="8,5" ToolTipService.ToolTip="{Binding Description}">
-                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="112"/><ColumnDefinition Width="112"/><ColumnDefinition Width="112"/></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="{Binding FirstWidth}"/><ColumnDefinition Width="{Binding SecondWidth}"/><ColumnDefinition Width="{Binding ThirdWidth}"/></Grid.ColumnDefinitions>
                     <StackPanel Margin="0,0,8,0">
                         <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
                         <TextBlock Text="{Binding Detail}" FontSize="11" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Style="{StaticResource Muted}"/>

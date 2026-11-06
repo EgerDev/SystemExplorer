@@ -50,6 +50,8 @@ public sealed partial class MainWindow : Window
         ready = true;
         InitializeOverview();
         DiagnosticsPanel.InspectRequested += InspectOverviewProcess;
+        DiagnosticsPanel.ServiceRequested += InspectService;
+        DiagnosticsPanel.InventoryRequested += ShowExtraInventory;
         var work = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(Math.Min(1440, work.Width), Math.Min(920, work.Height)));
         AppWindow.Move(new global::Windows.Graphics.PointInt32(work.X + Math.Max(0, (work.Width - AppWindow.Size.Width) / 2), work.Y + Math.Max(0, (work.Height - AppWindow.Size.Height) / 2)));
@@ -339,7 +341,7 @@ public sealed partial class MainWindow : Window
     private void RefreshInspector()
     {
         HistoryButton.IsEnabled = selectedHistory.HasHistory;
-        ModulesButton.IsEnabled = RegionsButton.IsEnabled = selectedIdentity is { IsStable: true } identity && Model.Snapshot?.Processes.Any(p => p.Identity == identity) == true;
+        ModulesButton.IsEnabled = RegionsButton.IsEnabled = ThreadsButton.IsEnabled = selectedIdentity is { IsStable: true } identity && Model.Snapshot?.Processes.Any(p => p.Identity == identity) == true;
         var process = SelectedProcess;
         if (process is null)
         {
