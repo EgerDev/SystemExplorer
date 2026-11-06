@@ -179,7 +179,7 @@ public sealed partial class OverviewView : UserControl
             ConsumersLayout.RowSpacing * (ConsumersLayout.RowDefinitions.Count - 1);
         var panelHeight = DashboardScroller.ActualHeight - statusHeight -
             ResourcesGrid.ActualHeight - ResourcesGrid.Margin.Top - ResourcesGrid.Margin.Bottom;
-        InsightsPanel.MaxHeight = Dashboard.ActualWidth >= 820 ? Math.Max(180, Math.Floor(panelHeight)) : double.PositiveInfinity;
+        InsightsPanel.Height = Dashboard.ActualWidth >= 820 ? Math.Max(180, Math.Floor(panelHeight)) : double.NaN;
         var height = Math.Max(80, Math.Floor(panelHeight - chromeHeight));
         if (Math.Abs(ConsumersList.MaxHeight - height) > 1) ConsumersList.MaxHeight = height;
     }
