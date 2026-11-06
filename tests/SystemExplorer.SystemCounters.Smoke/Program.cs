@@ -255,6 +255,58 @@ using (var provider = new WindowsSystemCounterProvider(new FakeSampler(), new Fa
 }
 Console.WriteLine("PASS: cancellation without publication, disposed rejection, concurrent serialization, fake-clock budget, capped identity reads and inventory refresh throttle.");
 
+var isolatedClock = new FakeClock();
+var fullSampler = new FakeSampler();
+var gpuSampler = new FakeSampler();
+var isolatedProcesses = new FakeProcesses();
+var isolatedInterfaces = new FakeInterfaces(isolatedClock);
+var isolatedInventory = new FakeInventory();
+using (var provider = new WindowsSystemCounterProvider(fullSampler, isolatedInterfaces, isolatedProcesses, isolatedInventory, isolatedClock, gpuSampler))
+{
+    using var canceled = new CancellationTokenSource();
+    canceled.Cancel();
+    await ExpectAsync<OperationCanceledException>(() => provider.CaptureGpuAsync(canceled.Token));
+    Check(gpuSampler.Calls == 0, "Canceled GPU-only captures must not sample.");
+    var firstGpu = await provider.CaptureGpuAsync(CancellationToken.None);
+    Check(firstGpu.Adapters.Single().HeadlineUtilizationPercent.State == CounterValueState.Warmup && fullSampler.Calls == 0 && isolatedInterfaces.Calls == 0,
+        "GPU-only capture must warm up without sampling CPU, disks, memory or network.");
+    var firstFull = await provider.CaptureAsync(CancellationToken.None);
+    Check(firstFull.IsWarmup && firstFull.Interval is null, "GPU-only capture must not prime full-capture rates.");
+    isolatedClock.Ticks = 2000;
+    isolatedProcesses.CreationTime = 456;
+    await provider.CaptureAsync(CancellationToken.None);
+    isolatedProcesses.CreationTime = 123;
+    var secondGpu = await provider.CaptureGpuAsync(CancellationToken.None);
+    Check(secondGpu.Adapters.Single().HeadlineUtilizationPercent.Value == 20 && secondGpu.Processes.Single().Identity is not null,
+        "Interleaved full captures must not change GPU-only warmup, engine deltas or identity history.");
+    isolatedClock.Ticks = 4000;
+    var secondFull = await provider.CaptureAsync(CancellationToken.None);
+    Check(secondFull.Interval == TimeSpan.FromSeconds(2) && secondFull.Gpu.Processes.Single().Identity is null,
+        "GPU-only captures must not change full-capture intervals or identity history.");
+    Check(gpuSampler.Sections.All(s => s == CounterSection.Gpu) && isolatedInventory.Calls == 2,
+        "GPU-only sampler must read only GPU counters and maintain its own inventory cache.");
+    provider.Dispose();
+    Check(gpuSampler.DisposeCount == 1 && fullSampler.DisposeCount == 1, "Both independent samplers must be disposed exactly once.");
+    await ExpectAsync<ObjectDisposedException>(() => provider.CaptureGpuAsync(CancellationToken.None));
+}
+Console.WriteLine("PASS: GPU-only sampling excludes other sections and isolates warmup, intervals, identity history and inventory from full captures.");
+
+foreach (var error in new Exception[] { new InvalidOperationException("GPU failure"), new ObjectDisposedException("GPU shutdown"), new OperationCanceledException("Unrelated GPU cancellation") })
+{
+    using var monitor = new WindowsMonitorProvider(_ => Task.FromException<GpuCounterSection>(error));
+    var snapshot = await monitor.CaptureAsync(CancellationToken.None);
+    Check(snapshot.Processes.Count > 0 && snapshot.Memory.PhysicalTotalBytes is > 0 && snapshot.GpuAdapters.Count == 0 && snapshot.GpuPercent is null,
+        "GPU failures must leave the rest of the monitor snapshot available without substituted utilization.");
+}
+using (var canceled = new CancellationTokenSource())
+using (var monitor = new WindowsMonitorProvider(token =>
+{
+    canceled.Cancel();
+    return Task.FromCanceled<GpuCounterSection>(token);
+}))
+    await ExpectAsync<OperationCanceledException>(() => monitor.CaptureAsync(canceled.Token));
+Console.WriteLine("PASS: monitor contains GPU failures including disposed providers and preserves caller cancellation.");
+
 static IEnumerable<CounterValue> CounterValues(object? value)
 {
     if (value is CounterValue counter) { yield return counter; yield break; }
@@ -338,12 +390,14 @@ sealed class FakeQuery : IPdhCounterQuery
 }
 sealed class FakeSampler : ISystemCounterSampler
 {
+    internal readonly List<CounterSection> Sections = [];
     internal Action<CounterSection, CancellationToken>? BeforeSample;
     internal CounterSample? GpuSample;
     internal int DelayMilliseconds, Calls, DisposeCount, MaxActive;
     private int active;
     public CounterSample Sample(CounterSection section, CancellationToken token, Func<bool> expired)
     {
+        Sections.Add(section);
         var current = Interlocked.Increment(ref active);
         MaxActive = Math.Max(MaxActive, current);
         Interlocked.Increment(ref Calls);
@@ -360,12 +414,14 @@ sealed class FakeSampler : ISystemCounterSampler
 }
 sealed class FakeInterfaces(FakeClock clock) : IInterfaceTableSource
 {
-    public InterfaceSample Read() => new(new(0, [new(1, 5, "hardware", "test", 6, 0, 0, 1, 1, 1000, 1000, 0, 0)], false), clock.Timestamp);
+    internal int Calls;
+    public InterfaceSample Read() { Calls++; return new(new(0, [new(1, 5, "hardware", "test", 6, 0, 0, 1, 1, 1000, 1000, 0, 0)], false), clock.Timestamp); }
 }
 sealed class FakeProcesses : IProcessCreationReader
 {
+    internal long CreationTime = 123;
     internal readonly List<int> ReadPids = [];
-    public ProcessCreationResult Read(int pid) { ReadPids.Add(pid); return new(ProcessCreationStatus.Available, 123, 0); }
+    public ProcessCreationResult Read(int pid) { ReadPids.Add(pid); return new(ProcessCreationStatus.Available, CreationTime, 0); }
     public ProcessImageResult ReadImage(int pid) => new(false, 31);
 }
 sealed class FakeInventory : IDxgiInventorySource

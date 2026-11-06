@@ -14,6 +14,9 @@ var tests = new (string Name, Action Run)[]
         var measured = Rows(adapter).Single();
         Check(measured.Name.Contains("software adapter") && measured.First == "23.0%" && measured.Detail.Contains("GPU utilization: 23.0%") && measured.Detail.Contains("not a sum"));
         Check(Rows().Single().Name == "GPU utilization unavailable");
+        Check(Rows(adapter with { Description = "Inventory adapter" }).Single().Name == "Inventory adapter (adapter type unavailable)");
+        Check(Rows(adapter with { Description = null }).Single().Name == "Adapter 0x1 (adapter type unavailable)");
+        Check(!measured.Name.Contains("adapter type unavailable"));
         foreach (var value in new[] { missing, CounterValue.Warmup("First sample"), CounterValue.Measured(double.NaN), CounterValue.Measured(101) })
             Check(Rows(adapter with { HeadlineUtilizationPercent = value }).Single().First == "Utilization unavailable");
         Check(Rows(adapter with { HeadlineUtilizationPercent = CounterValue.Measured(0) }).Single().First == "0.0%");

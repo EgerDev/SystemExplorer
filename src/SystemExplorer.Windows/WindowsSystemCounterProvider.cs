@@ -173,6 +173,7 @@ public sealed class WindowsSystemCounterProvider : ISystemCounterProvider
     internal const int MaximumRows = 256;
     internal const string WarmupDetail = "warmup sample; rates available from the next refresh";
     private readonly ISystemCounterSampler sampler;
+    private readonly ISystemCounterSampler gpuOnlySampler;
     private readonly IInterfaceTableSource interfaces;
     private readonly IProcessCreationReader processes;
     private readonly IDxgiInventorySource inventorySource;
@@ -184,20 +185,28 @@ public sealed class WindowsSystemCounterProvider : ISystemCounterProvider
     private Dictionary<int, ProcessCreationResult> previousIdentities = [];
     private DxgiAdapterResult? inventory;
     private long? inventoryTimestamp;
+    // GPU-only captures have independent PDH deltas, identity history and inventory refresh timing.
+    private bool gpuOnlyPrimed;
+    private Dictionary<int, ProcessCreationResult> gpuOnlyIdentities = [];
+    private DxgiAdapterResult? gpuOnlyInventory;
+    private long? gpuOnlyInventoryTimestamp;
 
     public WindowsSystemCounterProvider()
     {
         clock = new SystemCounterClock();
         sampler = new SystemCounterSampler();
+        gpuOnlySampler = new SystemCounterSampler();
         interfaces = new InterfaceTableSource(clock);
         processes = new ProcessCreationReader();
         inventorySource = new DxgiInventorySource();
     }
 
     internal WindowsSystemCounterProvider(ISystemCounterSampler sampler, IInterfaceTableSource interfaces,
-        IProcessCreationReader processes, IDxgiInventorySource inventory, ISystemCounterClock clock)
+        IProcessCreationReader processes, IDxgiInventorySource inventory, ISystemCounterClock clock,
+        ISystemCounterSampler? gpuOnlySampler = null)
     {
         this.sampler = sampler;
+        this.gpuOnlySampler = gpuOnlySampler ?? new SystemCounterSampler();
         this.interfaces = interfaces;
         this.processes = processes;
         inventorySource = inventory;
@@ -217,6 +226,52 @@ public sealed class WindowsSystemCounterProvider : ISystemCounterProvider
             }
             finally { gate.Release(); }
         }, cancellationToken);
+    }
+
+    public Task<GpuCounterSection> CaptureGpuAsync(CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+        return Task.Run(async () =>
+        {
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+                return CaptureGpu(cancellationToken);
+            }
+            finally { gate.Release(); }
+        }, cancellationToken);
+    }
+
+    private GpuCounterSection CaptureGpu(CancellationToken token)
+    {
+        var start = clock.Timestamp;
+        bool Expired() => clock.Elapsed(start, clock.Timestamp) >= TimeSpan.FromSeconds(3);
+        token.ThrowIfCancellationRequested();
+        var sample = gpuOnlySampler.Sample(CounterSection.Gpu, token, Expired);
+        if (!gpuOnlyPrimed) sample = sample with { IsWarmup = true };
+        var inputs = ParseGpu(sample);
+        var nextIdentities = new Dictionary<int, ProcessCreationResult>();
+        var identityTimedOut = false;
+        foreach (var pid in inputs.ProcessKeys.Take(MaximumRows).Select(k => k.Pid).Distinct())
+        {
+            token.ThrowIfCancellationRequested();
+            if (Expired()) { identityTimedOut = true; break; }
+            nextIdentities[pid] = processes.Read(pid);
+        }
+        var unknownLuid = inputs.AdapterLuids.Any(luid => gpuOnlyInventory is null || !gpuOnlyInventory.Adapters.Any(a => a.Luid == luid));
+        if (!Expired() && (gpuOnlyInventory is null || (unknownLuid && gpuOnlyInventoryTimestamp is { } last && clock.Elapsed(last, clock.Timestamp) >= TimeSpan.FromSeconds(30))))
+        {
+            gpuOnlyInventory = inventorySource.Read();
+            gpuOnlyInventoryTimestamp = clock.Timestamp;
+        }
+        identityTimedOut |= Expired();
+        var gpu = NormalizeGpu(sample, inputs, nextIdentities, gpuOnlyIdentities,
+            gpuOnlyInventory ?? new(DxgiInventoryStatus.Failed, unchecked((int)0x800705B4), [], false), identityTimedOut);
+        token.ThrowIfCancellationRequested();
+        gpuOnlyPrimed = true;
+        gpuOnlyIdentities = nextIdentities;
+        return gpu;
     }
 
     private SystemCounterSnapshot Capture(CancellationToken token)
@@ -294,7 +349,7 @@ public sealed class WindowsSystemCounterProvider : ISystemCounterProvider
     {
         if (Interlocked.Exchange(ref disposed, 1) != 0) return;
         gate.Wait();
-        try { sampler.Dispose(); }
+        try { sampler.Dispose(); gpuOnlySampler.Dispose(); }
         finally { gate.Release(); }
     }
 

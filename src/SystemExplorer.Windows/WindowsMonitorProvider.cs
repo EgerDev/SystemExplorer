@@ -16,6 +16,7 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
     private readonly object lifetimeLock = new();
     private readonly CancellationTokenSource shutdown = new();
     private readonly WindowsSystemCounterProvider counters = new();
+    private readonly Func<CancellationToken, Task<GpuCounterSection>> captureGpu;
     private bool disposed;
     private Dictionary<ProcessIdentity, Sample> previous = new();
     private SystemSample? previousSystem;
@@ -27,7 +28,10 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
     public WindowsMonitorProvider()
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows monitoring requires Windows.");
+        captureGpu = counters.CaptureGpuAsync;
     }
+
+    internal WindowsMonitorProvider(Func<CancellationToken, Task<GpuCounterSection>> captureGpu) : this() => this.captureGpu = captureGpu;
 
     public async Task<MonitorSnapshot> CaptureAsync(CancellationToken cancellationToken)
     {
@@ -42,8 +46,11 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             await scanGate.WaitAsync(linked.Token).ConfigureAwait(false);
             try
             {
-                var systemCounters = await counters.CaptureAsync(linked.Token).ConfigureAwait(false);
-                return await Task.Run(() => Capture(linked.Token, systemCounters.Gpu), linked.Token).ConfigureAwait(false);
+                GpuCounterSection? gpu = null;
+                try { gpu = await captureGpu(linked.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (linked.IsCancellationRequested) { throw; }
+                catch (Exception) { }
+                return await Task.Run(() => Capture(linked.Token, gpu), linked.Token).ConfigureAwait(false);
             }
             finally { scanGate.Release(); }
         }
@@ -71,7 +78,7 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
         // Keep the managed semaphore alive for already-cancelled WaitAsync continuations.
     }
 
-    private MonitorSnapshot Capture(CancellationToken cancellationToken, GpuCounterSection gpu)
+    private MonitorSnapshot Capture(CancellationToken cancellationToken, GpuCounterSection? gpu)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var capturedAt = DateTimeOffset.UtcNow;
@@ -115,8 +122,8 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
         {
             CapturedAt = capturedAt, Processes = rows.AsReadOnly(), Memory = memory,
             TotalCpuPercent = systemCpu, DiskReadBytesPerSecond = diskRead, DiskWriteBytesPerSecond = diskWrite,
-            GpuAdapters = gpu.Adapters,
-            GpuPercent = gpu.Adapters.Select(a => a.HeadlineUtilizationPercent)
+            GpuAdapters = gpu?.Adapters ?? Array.Empty<GpuAdapterRow>(),
+            GpuPercent = gpu?.Adapters.Select(a => a.HeadlineUtilizationPercent)
                 .Where(v => v.State == CounterValueState.Measured && v.Value is { } value && double.IsFinite(value) && value is >= 0 and <= 100)
                 .Select(v => v.Value).Max(),
             Limitations = limitations.AsReadOnly()
