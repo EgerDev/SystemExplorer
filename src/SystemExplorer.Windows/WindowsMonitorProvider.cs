@@ -15,6 +15,8 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
     private readonly SemaphoreSlim scanGate = new(1, 1);
     private readonly object lifetimeLock = new();
     private readonly CancellationTokenSource shutdown = new();
+    private readonly WindowsSystemCounterProvider counters = new();
+    private readonly Func<CancellationToken, Task<GpuCounterSection>> captureGpu;
     private bool disposed;
     private Dictionary<ProcessIdentity, Sample> previous = new();
     private SystemSample? previousSystem;
@@ -26,7 +28,10 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
     public WindowsMonitorProvider()
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows monitoring requires Windows.");
+        captureGpu = counters.CaptureGpuAsync;
     }
+
+    internal WindowsMonitorProvider(Func<CancellationToken, Task<GpuCounterSection>> captureGpu) : this() => this.captureGpu = captureGpu;
 
     public async Task<MonitorSnapshot> CaptureAsync(CancellationToken cancellationToken)
     {
@@ -41,7 +46,11 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             await scanGate.WaitAsync(linked.Token).ConfigureAwait(false);
             try
             {
-                return await Task.Run(() => Capture(linked.Token), linked.Token).ConfigureAwait(false);
+                GpuCounterSection? gpu = null;
+                try { gpu = await captureGpu(linked.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (linked.IsCancellationRequested) { throw; }
+                catch (Exception) { }
+                return await Task.Run(() => Capture(linked.Token, gpu), linked.Token).ConfigureAwait(false);
             }
             finally { scanGate.Release(); }
         }
@@ -62,13 +71,14 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             previousSystem = null;
             diskQuery?.Dispose();
             diskQuery = null;
+            counters.Dispose();
             shutdown.Dispose();
         }
         finally { scanGate.Release(); }
         // Keep the managed semaphore alive for already-cancelled WaitAsync continuations.
     }
 
-    private MonitorSnapshot Capture(CancellationToken cancellationToken)
+    private MonitorSnapshot Capture(CancellationToken cancellationToken, GpuCounterSection? gpu)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var capturedAt = DateTimeOffset.UtcNow;
@@ -78,7 +88,8 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             "Enumeration and per-handle reads are not atomic; relationships require separate lifetime validation.",
             "CPU and process I/O rates require two successful same-lifetime samples; first samples are unavailable.",
             "Process I/O is generic transfer activity, not physical disk or network throughput.",
-            "Private working set, standby memory, GPU, command lines and suspension state are unsupported.",
+            "Private working set requires Windows extended memory counters; unsupported or denied values remain unavailable.",
+            "Standby memory, command lines and suspension state are unsupported.",
             "Working sets include shared pages; their sum is not distinct physical RAM. Private bytes are committed, not necessarily resident."
         };
         int processors = checked((int)GetActiveProcessorCount(ushort.MaxValue));
@@ -111,6 +122,10 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
         {
             CapturedAt = capturedAt, Processes = rows.AsReadOnly(), Memory = memory,
             TotalCpuPercent = systemCpu, DiskReadBytesPerSecond = diskRead, DiskWriteBytesPerSecond = diskWrite,
+            GpuAdapters = gpu?.Adapters ?? Array.Empty<GpuAdapterRow>(),
+            GpuPercent = gpu?.Adapters.Select(a => a.HeadlineUtilizationPercent)
+                .Where(v => v.State == CounterValueState.Measured && v.Value is { } value && double.IsFinite(value) && value is >= 0 and <= 100)
+                .Select(v => v.Value).Max(),
             Limitations = limitations.AsReadOnly()
         };
     }
@@ -159,11 +174,10 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
         if (QueryFullProcessImageNameW(process, 0, path, ref pathLength)) executable = path.ToString();
         else Error("Executable path", Marshal.GetLastWin32Error());
 
-        var memory = new MemoryCounters { Size = (uint)Marshal.SizeOf<MemoryCounters>() };
-        bool memoryAvailable = GetProcessMemoryInfo(process, ref memory, memory.Size);
+        bool memoryAvailable = QueryProcessMemoryCounters(process, out var memory, out var privateWorkingSet,
+            out var privateWorkingSetReason, out int memoryError);
         if (!memoryAvailable)
         {
-            int memoryError = Marshal.GetLastWin32Error();
             if (memoryError == 5)
             {
                 using var readable = OpenProcess(QueryInformationAndRead, false, entry.Pid);
@@ -177,12 +191,13 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
                 }
                 else
                 {
-                    memoryAvailable = GetProcessMemoryInfo(readable, ref memory, memory.Size);
-                    if (!memoryAvailable) memoryError = Marshal.GetLastWin32Error();
+                    memoryAvailable = QueryProcessMemoryCounters(readable, out memory, out privateWorkingSet,
+                        out privateWorkingSetReason, out memoryError);
                 }
             }
             if (!memoryAvailable && memoryError != 0) Error("Private bytes and working set", memoryError);
         }
+        if (memoryAvailable && privateWorkingSetReason is not null) errors.Add(privateWorkingSetReason);
 
         cancellationToken.ThrowIfCancellationRequested();
         var (sid, account, session) = ReadOwner(process, Error, cancellationToken);
@@ -214,10 +229,42 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             SessionId = session, HandleCount = handles,
             WorkingSetBytes = memoryAvailable ? memory.WorkingSet.ToUInt64() : null,
             PrivateBytes = memoryAvailable ? memory.PrivateUsage.ToUInt64() : null,
+            PrivateWorkingSetBytes = memoryAvailable ? privateWorkingSet : null,
+            PeakWorkingSetBytes = memoryAvailable ? memory.PeakWorkingSet.ToUInt64() : null,
+            PageFaultCount = memoryAvailable ? memory.PageFaultCount : null,
+            KernelCpuTimeTicks = kernel.Ticks, UserCpuTimeTicks = user.Ticks,
+            ReadOperationCount = io?.ReadOperations, WriteOperationCount = io?.WriteOperations,
+            OtherOperationCount = io?.OtherOperations, OtherTransferBytes = io?.OtherBytes,
             CpuPercent = cpu, ReadBytesPerSecond = read, WriteBytesPerSecond = write,
             Availability = denied ? DataAvailability.AccessDenied : errors.Count > 0 ? DataAvailability.Partial : DataAvailability.Available,
             UnavailableReason = errors.Count > 0 ? string.Join("; ", errors) : null
         };
+    }
+
+    private static bool QueryProcessMemoryCounters(SafeProcessHandle process, out MemoryCounters memory,
+        out ulong? privateWorkingSet, out string? privateWorkingSetReason, out int error)
+    {
+        var extended = new MemoryCountersEx2
+        {
+            Basic = new MemoryCounters { Size = (uint)Marshal.SizeOf<MemoryCountersEx2>() },
+            PrivateWorkingSet = UIntPtr.MaxValue
+        };
+        bool extendedAvailable = GetProcessMemoryInfo(process, ref extended, extended.Basic.Size);
+        int extendedError = extendedAvailable ? 0 : Marshal.GetLastWin32Error();
+        privateWorkingSet = extendedAvailable ? extended.PrivateWorkingSetBytes : null;
+        privateWorkingSetReason = privateWorkingSet.HasValue ? null : extendedAvailable
+            ? "Private working set unavailable: Windows did not return extended memory counters."
+            : $"Private working set unavailable: GetProcessMemoryInfo(EX2) Win32 {extendedError}.";
+        if (extendedAvailable && extended.Basic.Size >= Marshal.SizeOf<MemoryCounters>())
+        {
+            memory = extended.Basic;
+            error = 0;
+            return true;
+        }
+        memory = new MemoryCounters { Size = (uint)Marshal.SizeOf<MemoryCounters>() };
+        bool available = GetProcessMemoryInfo(process, ref memory, memory.Size);
+        error = available ? 0 : Marshal.GetLastWin32Error();
+        return available;
     }
 
     private static (string? Sid, string? Account, int? Session) ReadOwner(SafeProcessHandle process,
@@ -298,6 +345,8 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             PhysicalAvailableBytes = checked(info.PhysicalAvailable.ToUInt64() * page),
             CommitTotalBytes = checked(info.CommitTotal.ToUInt64() * page),
             CommitLimitBytes = checked(info.CommitLimit.ToUInt64() * page),
+            CommitPeakBytes = checked(info.CommitPeak.ToUInt64() * page),
+            ProcessCount = info.Processes, ThreadCount = info.Threads, HandleCount = info.Handles,
             SystemCacheBytes = checked(info.SystemCache.ToUInt64() * page),
             KernelPagedBytes = checked(info.KernelPaged.ToUInt64() * page),
             KernelNonpagedBytes = checked(info.KernelNonpaged.ToUInt64() * page)

@@ -3,6 +3,8 @@
     <TargetFramework>net10.0-windows</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="4.0.0" />
     <ProjectReference Include="../SystemExplorer.Core/SystemExplorer.Core.csproj" />
+    <InternalsVisibleTo Include="SystemExplorer.Windows.Smoke" />
   </ItemGroup>
 </Project>

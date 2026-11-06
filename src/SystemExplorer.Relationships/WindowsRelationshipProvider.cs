@@ -7,6 +7,7 @@ namespace SystemExplorer.Relationships;
 public sealed class WindowsRelationshipProvider : IRelationshipProvider
 {
     private readonly SemaphoreSlim gate = new(1, 1);
+    private readonly ServiceConfigReader serviceConfigReader = new();
     private int disposed;
     private const uint MaximumTableBytes = 16 * 1024 * 1024;
 
@@ -46,6 +47,9 @@ public sealed class WindowsRelationshipProvider : IRelationshipProvider
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows relationship APIs are required.");
     }
 
+    public static bool IsServiceEnumerationGap(string limitation) =>
+        limitation.StartsWith("Services: ", StringComparison.Ordinal);
+
     private RelationshipSnapshot Capture(ProcessSnapshot[] processes, CancellationToken token)
     {
         Check(token);
@@ -54,7 +58,7 @@ public sealed class WindowsRelationshipProvider : IRelationshipProvider
         {
             "Endpoint and service observations are not an atomic snapshot; CapturedAt marks capture start.",
             "PID-only owners are unverified unless matched to a live handle creation time from the supplied process snapshot.",
-            "Services inaccessible to this token can be silently omitted by Windows; service start types are not queried.",
+            "Services inaccessible to this token can be silently omitted by Windows; configured base start types do not include delayed/trigger modes or runtime behavior.",
             "UDP rows are local endpoints, not connections. DNS, geography and bandwidth are not collected."
         };
         var endpoints = new List<ConnectionSnapshot>();
@@ -79,13 +83,13 @@ public sealed class WindowsRelationshipProvider : IRelationshipProvider
         {
             Check(token);
             if (!candidates.TryGetValue(pid, out var expected)) continue;
-            using var handle = NativeMethods.OpenProcess(0x1000, false, pid);
-            if (handle.IsInvalid || !NativeMethods.GetProcessTimes(handle, out long created, out long exited, out _, out _))
+            using var handle = NativeMethods.OpenProcess(0x1000 | 0x00100000, false, pid);
+            if (handle.IsInvalid || !NativeMethods.GetProcessTimes(handle, out long created, out _, out _, out _))
             {
                 denied++;
                 continue;
             }
-            if (exited == 0 && IdentityMatches(expected, created, capturedAt.UtcDateTime.ToFileTimeUtc())) owners.Add(pid, expected);
+            if (WaitForSingleObject(handle, 0) == 258 && IdentityMatches(expected, created, capturedAt.UtcDateTime.ToFileTimeUtc())) owners.Add(pid, expected);
             else changed++;
         }
         if (denied > 0) limitations.Add($"{denied} candidate owner identities unavailable (process exited or query denied/failed).");
@@ -102,6 +106,9 @@ public sealed class WindowsRelationshipProvider : IRelationshipProvider
 
     internal static bool IdentityMatches(ProcessIdentity expected, long actualCreation, long captureStarted) =>
         expected.IsStable && expected.CreationTimeFileTime == actualCreation && actualCreation <= captureStarted;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint WaitForSingleObject(Microsoft.Win32.SafeHandles.SafeProcessHandle process, uint milliseconds);
 
     private IReadOnlyList<ConnectionSnapshot> ReadEndpoints(bool tcp, bool ipv6, CancellationToken token)
     {
@@ -137,13 +144,26 @@ public sealed class WindowsRelationshipProvider : IRelationshipProvider
     private List<ServiceSnapshot> ReadServices(List<string> limitations, CancellationToken token)
     {
         var result = new List<ServiceSnapshot>();
-        using var manager = NativeMethods.OpenSCManagerW(null, null, 4);
+        Check(token);
+        using var manager = NativeMethods.OpenSCManagerW(null, null, 0x5);
+        Check(token);
         if (manager.IsInvalid)
         {
             int error = Marshal.GetLastWin32Error();
             limitations.Add($"Services: {ErrorKind(error)} (Win32 {error}).");
             return result;
         }
+        result = EnumerateServices(manager, limitations, token);
+        serviceConfigReader.Enrich(manager, result, limitations, token);
+        return result;
+    }
+
+    private List<ServiceSnapshot> EnumerateServices(
+        SafeServiceHandle manager,
+        List<string> limitations,
+        CancellationToken token)
+    {
+        var result = new List<ServiceSnapshot>();
         const int capacity = 256 * 1024;
         IntPtr buffer = Marshal.AllocHGlobal(capacity);
         try

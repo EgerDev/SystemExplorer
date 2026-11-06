@@ -25,7 +25,8 @@ public static class ProcessGrouping
         foreach (var process in processes)
         {
             var root = process;
-            if (process.Identity.IsStable && !string.IsNullOrEmpty(process.ExecutablePath) && !string.IsNullOrEmpty(process.UserSid))
+            if (process.Identity.IsStable && process.SessionId.HasValue &&
+                !string.IsNullOrEmpty(process.ExecutablePath) && !string.IsNullOrEmpty(process.UserSid))
             {
                 var seen = new HashSet<ProcessIdentity> { process.Identity };
                 while (VerifiedParent(root, byPid) is { } parent &&

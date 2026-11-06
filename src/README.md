@@ -15,6 +15,10 @@ From the repository root, with `dotnet` on PATH:
 dotnet run --project tests/SystemExplorer.Core.Tests -c Release
 dotnet run --project tests/SystemExplorer.Windows.Smoke -c Release
 dotnet run --project tests/SystemExplorer.Relationships.Smoke -c Release
+dotnet run --project tests/SystemExplorer.Threads.Smoke -c Release
+dotnet run --project tests/SystemExplorer.Pagefiles.Smoke -c Release
+dotnet run --project tests/SystemExplorer.ServiceInspection.Smoke -c Release
+dotnet run --project tests/SystemExplorer.ScheduledTasks.Smoke -c Release
 ./tools/Build-SystemExplorer.ps1 -OutputDirectory C:\builds\SystemExplorer-test
 C:\builds\SystemExplorer-test\SystemExplorer.App.exe
 ```
@@ -34,6 +38,12 @@ portable test build, not an installer or public release. The manifest requests
 - Overview/Insights: bounded history and deterministic explanations, not cloud AI.
 - Settings: light, dark and system theme; pause freezes live refresh.
 
+The selected-process inspector includes on-demand modules, virtual regions,
+thread CPU/wait chains and bounded recent selected-lifetime history. Memory adds
+pagefile inventory; Services rows open configuration/dependencies; Startup links
+to a separate read-only scheduled-task inventory. See
+[developer diagnostics](../docs/development/DEVELOPER_DIAGNOSTICS.md) for limits.
+
 Use Ctrl+K for search; values shown as `—` are unavailable, never zero. Private
 commit is not physical RAM; working sets include shared resident pages. Growth
 is a trend, not a memory-leak diagnosis. Publisher checks use cached local trust
@@ -41,11 +51,17 @@ data and do not claim a fresh online revocation check.
 
 ## Current limits
 
-GPU utilization, private working set, standby memory, command lines, service start
-types and catalog signatures are not implemented by the current providers.
+Private working set is independently nullable and reported only when the documented
+PSAPI EX2 API returns complete supported data. It is distinct from private commit
+and total working set. Service base start types are best-effort configuration
+observations; denied, unavailable or budget-skipped values remain unknown. The
+enrichment budget is checked between synchronous calls, not a hard timeout.
+
+GPU utilization, standby memory, command lines and catalog signatures are not
+implemented. Delayed/trigger service startup behavior is not inferred.
 There are no termination, suspension, startup-modification or driver-install actions.
-The umbrella Windows App SDK package includes transitive AI/ML/WebView dependencies;
-their features are not initialized by this application. Dependency footprint and
+Windows App SDK dependencies follow the pinned app lockfile; WebView features are
+not initialized by this application. Dependency footprint and
 exact redistributed notices remain release-review gates, not blanket MIT claims.
 
 See [project status](../docs/development/PROJECT_STATUS.md),
