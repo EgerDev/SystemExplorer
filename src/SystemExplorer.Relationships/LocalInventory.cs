@@ -109,7 +109,7 @@ internal static class LocalInventory
                 UnionChoice = 1,
                 FileInfo = infoMemory,
                 StateAction = 1,
-                ProviderFlags = 0x1000 | 0x80 | 0x2000
+                ProviderFlags = 0x1000 | 0x10 | 0x2000
             };
             var action = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
             try
@@ -117,10 +117,10 @@ internal static class LocalInventory
                 int status = NativeMethods.WinVerifyTrust(new IntPtr(-1), ref action, ref data);
                 token.ThrowIfCancellationRequested();
                 if (status == 0)
-                    return new(ReadVerifiedSigner(data.State), "Verified embedded signature (offline cache-only revocation; not a fresh online revocation check).");
+                    return new(ReadVerifiedSigner(data.State), "Verified embedded signature (local cache only; revocation checking and online retrieval disabled).");
                 if (unchecked((uint)status) == 0x800B0100)
                     return new(null, "No embedded signature verified; catalog-signature verification is unsupported.");
-                return new(null, $"Not verified offline (WinVerifyTrust 0x{unchecked((uint)status):X8}); revocation cache may be incomplete.");
+                return new(null, $"Not verified offline (WinVerifyTrust 0x{unchecked((uint)status):X8}); revocation checking and online retrieval disabled.");
             }
             finally
             {
