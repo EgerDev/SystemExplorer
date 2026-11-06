@@ -89,8 +89,8 @@ typedef struct _MEMORY_STRING_BULK_CONTEXT
     PMEMORY_BASIC_INFORMATION Regions;
     ULONG RegionCount;
     ULONG RegionIndex;
-    PULONG ProgressValue;
-    PULONG ProgressMax;
+    volatile ULONG *ProgressValue;
+    volatile ULONG *ProgressMax;
 } MEMORY_STRING_BULK_CONTEXT, *PMEMORY_STRING_BULK_CONTEXT;
 
 /**
@@ -507,7 +507,7 @@ NTSTATUS NTAPI PhpMemoryStringBulkNextBuffer(
         searchContext->ReadRemaning = searchContext->BasicInfo.RegionSize;
 
         if (context->ProgressValue)
-            InterlockedExchange((PLONG)context->ProgressValue, (LONG)context->RegionIndex);
+            InterlockedExchange((volatile LONG *)context->ProgressValue, (LONG)context->RegionIndex);
 
         length = __min(searchContext->BasicInfo.RegionSize, 16 * 1024 * 1024);
 
@@ -582,7 +582,7 @@ VOID PhSearchMemoryString(
         bulkContext.ProgressValue = Options->ProgressValue;
         bulkContext.ProgressMax = Options->ProgressMax;
         if (Options->ProgressMax)
-            InterlockedExchange((PLONG)Options->ProgressMax, (LONG)collectContext.Count);
+            InterlockedExchange((volatile LONG *)Options->ProgressMax, (LONG)collectContext.Count);
 
         PhSearchStrings(
             Options->MinimumLength,

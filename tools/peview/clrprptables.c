@@ -16,10 +16,10 @@
 #if __has_include (<corhdr.h>)
 #include <corhdr.h>
 #else
-#include "metahost/corhdr.h"
+#include "metahost/CorHdr.h"
 #endif
 #else
-#include "metahost/corhdr.h"
+#include "metahost/CorHdr.h"
 #endif
 
 typedef struct _PVP_PE_CLR_CONTEXT
