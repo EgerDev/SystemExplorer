@@ -73,10 +73,16 @@ public sealed partial class DiagnosticsView : UserControl
     {
         var numeric = sortColumn == 1 || sortColumn > 1 && section is "Memory" or "CPU" or "Disks";
         var desired = DiagnosticData.FilterAndSort(items, query, sortColumn, descending, numeric);
+        scroll ??= FindScroll(Table);
         var offset = scroll?.VerticalOffset ?? 0;
         var anchorIndex = Math.Min((int)(offset / 56), Data.Rows.Count - 1);
         var anchor = anchorIndex >= 0 ? Data.Rows[anchorIndex].Key : null;
         Data.Apply(desired, reorder);
+        if (reorder && Data.Rows.Count > 0)
+        {
+            Table.ScrollIntoView(Data.Rows[0], ScrollIntoViewAlignment.Leading);
+            Table.UpdateLayout();
+        }
         if (scroll is not null)
         {
             if (reorder) scroll.ChangeView(null, 0, null, true);

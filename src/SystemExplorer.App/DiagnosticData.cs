@@ -125,8 +125,8 @@ public static class DiagnosticData
                 var local = Endpoint(connection.LocalAddress, connection.LocalPort);
                 var remote = connection.RemoteAddress is null ? "—" : Endpoint(connection.RemoteAddress, connection.RemotePort);
                 var key = $"{connection.Protocol}\0{local}\0{remote}\0{connection.OwningPid}\0{connection.OwnerIdentity}";
-                result.Add(new(key, owner, local, $"{connection.Protocol} · {OwnerName(owner, snapshot)}", connection.OwningPid,
-                    remote, connection.State ?? "UDP endpoint", owner is null ? "Unverified / stale" : "Verified"));
+                result.Add(new(key, owner, local, $"{connection.Protocol} · {(owner is null ? "Owner unverified or stale" : "Owner verified")}", connection.OwningPid,
+                    remote, connection.State ?? "UDP endpoint", owner is null ? "Owner unavailable" : OwnerName(owner, snapshot)));
             }
         }
         else if (section == "Services" && relationships is not null)
@@ -134,8 +134,8 @@ public static class DiagnosticData
             foreach (var service in relationships.Services)
             {
                 var owner = CurrentOwner(service.OwnerIdentity, snapshot, relationships.CapturedAt);
-                result.Add(new(service.Name, owner, service.DisplayName, $"{service.Name} · {OwnerName(owner, snapshot)}", service.ProcessId,
-                    service.State, service.StartType ?? "Unavailable", owner is null ? "Unverified / none" : "Verified"));
+                result.Add(new(service.Name, owner, service.DisplayName, $"{service.Name} · {(owner is null ? "Owner unverified or stale" : "Owner verified")}", service.ProcessId,
+                    service.State, service.StartType ?? "Unavailable", owner is null ? "Owner unavailable" : OwnerName(owner, snapshot)));
             }
         }
         else if (section == "Startup")
@@ -148,10 +148,15 @@ public static class DiagnosticData
         else if (section == "Insights")
         {
             foreach (var insight in history.Explain(snapshot, relationships))
-                result.Add(new(insight.Title, null, insight.Title, insight.Evidence, null, insight.Kind, "", ""));
+                result.Add(new(insight.Key ?? insight.Title, null, insight.Title, insight.Evidence, null, insight.Kind, "", ""));
         }
         else if (section == "GPU")
-            result.Add(new("gpu", null, "GPU utilization unavailable", "No validated GPU engine collector is connected. CPU and process I/O are not substituted.", null, "Unsupported", "", ""));
+        {
+            if (snapshot.GpuPercent is { } gpu && double.IsFinite(gpu) && gpu is >= 0 and <= 100)
+                result.Add(new("gpu", null, $"GPU utilization: {Percent(gpu)}", "Observed provider GPU utilization; no CPU or process-I/O estimate is substituted.", null, "Observed", "", ""));
+            else
+                result.Add(new("gpu", null, "GPU utilization unavailable", "No valid GPU utilization reading is available. CPU and process I/O are not substituted.", null, "Unsupported", "", ""));
+        }
         else
             result.Add(new("help", null, "Read-only Windows diagnostics",
                 "Private commit is not physical RAM. Working sets include shared pages; do not sum them into physical usage. Unknown values are not zero. Sort a column to rank current readings; rows retain their order during live updates. Inspect uses PID plus creation time, never PID alone. No process control, driver installation or automatic elevation.", null, "", "", ""));

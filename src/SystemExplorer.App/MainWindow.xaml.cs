@@ -474,7 +474,7 @@ public sealed partial class MainWindow : Window
             overviewData.BreakContinuity();
             Model.History.BreakContinuity();
         }
-        RefreshOverview();
+        RefreshDiagnostics();
         if (Model.Snapshot is { } snapshot) tray.Update(snapshot, paused);
         PauseButton.Content = paused ? "Resume" : "Pause";
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(PauseButton, paused ? "Resume live refresh" : "Pause live refresh");

@@ -1,7 +1,7 @@
 namespace SystemExplorer.Core;
 
 public sealed record HistoryPoint(DateTimeOffset At, ulong? PhysicalUsedBytes, ulong? CommitBytes, double? CpuPercent, bool BreakBefore = false);
-public sealed record Insight(string Title, string Evidence, string Kind = "Observation");
+public sealed record Insight(string Title, string Evidence, string Kind = "Observation", string? Key = null);
 
 public sealed class DiagnosticsHistory
 {
@@ -81,7 +81,7 @@ public sealed class DiagnosticsHistory
 
         foreach (var group in replacements.GroupBy(r => r.Key, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() >= 3))
             result.Add(new("Repeated process-lifetime replacements",
-                $"{group.First().Path}: {group.Count()} single-instance identity changes observed for the same executable, owner and session within the retained history. Each change used consecutive samples no more than 10 seconds apart. This may indicate restarts, not a crash diagnosis; parallel instances and unknown identities are excluded.", "Heuristic"));
+                $"{group.First().Path}: {group.Count()} single-instance identity changes observed for the same executable, owner and session within the retained history. Each change used consecutive samples no more than 10 seconds apart. This may indicate restarts, not a crash diagnosis; parallel instances and unknown identities are excluded.", "Heuristic", $"replacement:{group.Key}"));
 
         foreach (var process in snapshot.Processes)
         {
@@ -95,7 +95,7 @@ public sealed class DiagnosticsHistory
             var increases = points.Zip(points.Skip(1)).Count(pair => pair.Second.Bytes > pair.First.Bytes);
             if (growth >= 32UL * 1024 * 1024 && growth >= first.Bytes * 0.1 && increases >= (points.Length - 1) * 0.75)
                 result.Add(new($"Sustained private-commit growth: {process.Name} (PID {process.Identity.Pid})",
-                    $"+{MiB(growth)} MiB over {duration:F0} seconds; {increases}/{points.Length - 1} intervals increased for the same creation-time identity. This is a trend, not a memory-leak diagnosis.", "Heuristic"));
+                    $"+{MiB(growth)} MiB over {duration:F0} seconds; {increases}/{points.Length - 1} intervals increased for the same creation-time identity. This is a trend, not a memory-leak diagnosis.", "Heuristic", $"growth:{process.Identity}"));
         }
 
         if (relationships is not null && Math.Abs((snapshot.CapturedAt - relationships.CapturedAt).TotalSeconds) <= 10)

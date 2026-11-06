@@ -31,12 +31,82 @@ var tests = new (string Name, Action Run)[]
     }),
     ("Diagnostic ownership rejects stale and reused lifetimes", () =>
     {
-        var process = P(42, 100);
-        var relationships = new RelationshipSnapshot { CapturedAt = DateTimeOffset.UnixEpoch, Connections = [new() { Protocol = "TCP", LocalAddress = "::1", LocalPort = 80, OwningPid = 42, OwnerIdentity = process.Identity }] };
-        var rows = DiagnosticData.Create("Network", Snapshot(2, process), relationships, [], new(), _ => null);
-        Check(rows.Single().Identity == process.Identity && rows.Single().Name == "[::1]:80");
-        Check(DiagnosticData.Create("Network", Snapshot(12, process), relationships, [], new(), _ => null).Single().Identity is null);
-        Check(DiagnosticData.Create("Network", Snapshot(2, P(42, 200)), relationships, [], new(), _ => null).Single().Identity is null);
+        var alpha = P(42, 100) with { Name = "alpha-owner.exe", ExecutablePath = @"C:\Apps\alpha-owner.exe", UserSid = "S-1-5-21-test", SessionId = 1 };
+        var beta = P(43, 200) with { Name = "beta-owner.exe", ExecutablePath = @"C:\Apps\beta-owner.exe", UserSid = "S-1-5-21-test", SessionId = 1 };
+        var relationships = new RelationshipSnapshot
+        {
+            CapturedAt = DateTimeOffset.UnixEpoch,
+            Connections =
+            [
+                new() { Protocol = "TCP", LocalAddress = "::1", LocalPort = 80, RemoteAddress = "::2", RemotePort = 443, OwningPid = 42, OwnerIdentity = alpha.Identity },
+                new() { Protocol = "TCP", LocalAddress = "::1", LocalPort = 81, RemoteAddress = "::3", RemotePort = 443, OwningPid = 43, OwnerIdentity = beta.Identity }
+            ],
+            Services =
+            [
+                new() { Name = "alpha-service", DisplayName = "Alpha service", State = "Running", ProcessId = 42, OwnerIdentity = alpha.Identity, StartType = "Auto" },
+                new() { Name = "beta-service", DisplayName = "Beta service", State = "Running", ProcessId = 43, OwnerIdentity = beta.Identity, StartType = "Manual" }
+            ]
+        };
+        var snapshot = Snapshot(2, alpha, beta);
+        var network = DiagnosticData.Create("Network", snapshot, relationships, [], new(), _ => null);
+        var alphaConnection = network.Single(row => row.Pid == 42);
+        Check(alphaConnection.Identity == alpha.Identity && alphaConnection.Name == "[::1]:80");
+        Check(alphaConnection.Third == alpha.Name && alphaConnection.Detail.Contains("Owner verified", StringComparison.Ordinal));
+        Check(DiagnosticData.FilterAndSort(network, "", 4, false, false).Select(row => row.Third).SequenceEqual([alpha.Name, beta.Name]));
+        var services = DiagnosticData.Create("Services", snapshot, relationships, [], new(), _ => null);
+        Check(services.Single(row => row.Pid == 42).Third == alpha.Name);
+        Check(services.All(row => row.Detail.Contains("Owner verified", StringComparison.Ordinal)));
+        Check(DiagnosticData.FilterAndSort(services, "", 4, false, false).Select(row => row.Third).SequenceEqual([alpha.Name, beta.Name]));
+
+        var stale = DiagnosticData.Create("Network", Snapshot(12, alpha, beta), relationships, [], new(), _ => null).Single(row => row.Pid == 42);
+        Check(stale.Identity is null && stale.Pid == 42 && stale.Third == "Owner unavailable" &&
+            stale.Detail.Contains("unverified", StringComparison.OrdinalIgnoreCase) && !new DiagnosticRow(stale).CanInspect);
+        var reusedAlpha = alpha with { Identity = new(42, 300) };
+        var reused = DiagnosticData.Create("Services", Snapshot(2, reusedAlpha, beta), relationships, [], new(), _ => null).Single(row => row.Pid == 42);
+        Check(reused.Identity is null && reused.Pid == 42 && reused.Third == "Owner unavailable" &&
+            reused.Detail.Contains("unverified", StringComparison.OrdinalIgnoreCase) && !new DiagnosticRow(reused).CanInspect);
+    }),
+    ("GPU diagnostics show only valid provider readings", () =>
+    {
+        DiagnosticItem Gpu(double? value) => DiagnosticData.Create("GPU",
+            Snapshot(0) with { GpuPercent = value }, null, [], new(), _ => null).Single();
+        var unavailable = Gpu(null);
+        var zero = Gpu(0);
+        var measured = Gpu(42.5);
+        Check(unavailable.Name.Contains("unavailable", StringComparison.OrdinalIgnoreCase));
+        Check(zero.Name.Contains("0.0%", StringComparison.Ordinal) && zero.Detail.Contains("provider", StringComparison.OrdinalIgnoreCase));
+        Check(measured.Name.Contains("42.5%", StringComparison.Ordinal));
+        Check(Gpu(double.NaN).Name.Contains("unavailable", StringComparison.OrdinalIgnoreCase));
+        Check(Gpu(100.1).Name.Contains("unavailable", StringComparison.OrdinalIgnoreCase));
+    }),
+    ("Distinct replacement insights retain stable row identities", () =>
+    {
+        var history = new DiagnosticsHistory();
+        var alpha = P(10, 100) with { Name = "alpha.exe", ExecutablePath = @"C:\Alpha\alpha.exe", UserSid = "S-1-5-21-test", SessionId = 1 };
+        var beta = P(20, 200) with { Name = "beta.exe", ExecutablePath = @"C:\Beta\beta.exe", UserSid = "S-1-5-21-test", SessionId = 1 };
+        var sample = Snapshot(0, alpha, beta);
+        history.Add(sample);
+        for (var i = 1; i <= 3; i++)
+        {
+            alpha = alpha with { Identity = new(10, 100 + i) };
+            beta = beta with { Identity = new(20, 200 + i) };
+            sample = Snapshot(i * 2, alpha, beta);
+            history.Add(sample);
+        }
+        var items = DiagnosticData.Create("Insights", sample, null, [], history, _ => null)
+            .Where(item => item.Name == "Repeated process-lifetime replacements").ToArray();
+        Check(items.Length == 2 && items.Select(item => item.Key).Distinct().Count() == 2);
+        var rows = new DiagnosticRows();
+        rows.Apply(items, true);
+        var original = rows.Rows.ToDictionary(row => row.Key, StringComparer.Ordinal);
+        alpha = alpha with { Identity = new(10, 104) };
+        beta = beta with { Identity = new(20, 204) };
+        sample = Snapshot(8, alpha, beta);
+        history.Add(sample);
+        rows.Apply(DiagnosticData.Create("Insights", sample, null, [], history, _ => null)
+            .Where(item => item.Name == "Repeated process-lifetime replacements"), false);
+        Check(rows.Rows.Count == 2 && rows.Rows.All(row => ReferenceEquals(original[row.Key], row)));
+        Check(rows.Rows.All(row => row.Detail.Contains("4 single-instance", StringComparison.Ordinal)));
     }),
     ("Commit chart uses elapsed time and breaks continuity", () =>
     {
@@ -280,7 +350,8 @@ var tests = new (string Name, Action Run)[]
             sample = Snapshot(i * 2, P(10, 100) with { PrivateBytes = (100UL + (ulong)i * 2) * 1024 * 1024 });
             history.Add(sample);
         }
-        Check(history.Explain(sample).Any(i => i.Title.StartsWith("Sustained")));
+        var insight = history.Explain(sample).Single(i => i.Title.StartsWith("Sustained"));
+        Check(insight.Key == $"growth:{sample.Processes.Single().Identity}");
         sample = Snapshot(62, P(10, 200) with { PrivateBytes = 200UL * 1024 * 1024 });
         history.Add(sample);
         Check(!history.Explain(sample).Any(i => i.Title.StartsWith("Sustained")));
