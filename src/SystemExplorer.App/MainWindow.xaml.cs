@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using Path = System.IO.Path;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -53,6 +54,12 @@ public sealed partial class MainWindow : Window
         DiagnosticsPanel.ServiceRequested += InspectService;
         DiagnosticsPanel.InventoryRequested += ShowExtraInventory;
         var work = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
+        ApplyMinimumWindowSize();
+        Root.Loaded += (_, _) =>
+        {
+            ApplyMinimumWindowSize();
+            Root.XamlRoot.Changed += (_, _) => ApplyMinimumWindowSize();
+        };
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(Math.Min(1440, work.Width), Math.Min(920, work.Height)));
         AppWindow.Move(new global::Windows.Graphics.PointInt32(work.X + Math.Max(0, (work.Width - AppWindow.Size.Width) / 2), work.Y + Math.Max(0, (work.Height - AppWindow.Size.Height) / 2)));
         UpdateCaptionColors();
@@ -69,8 +76,21 @@ public sealed partial class MainWindow : Window
             monitor.Dispose();
             relationships.Dispose();
             systemCounters?.Dispose();
+            shutdown.Dispose();
         };
     }
+
+    private void ApplyMinimumWindowSize()
+    {
+        if (AppWindow.Presenter is not Microsoft.UI.Windowing.OverlappedPresenter presenter) return;
+        var work = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
+        var minimum = WindowSizing.MinimumPhysicalSize(GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)), work.Width, work.Height);
+        if (presenter.PreferredMinimumWidth != minimum.Width) presenter.PreferredMinimumWidth = minimum.Width;
+        if (presenter.PreferredMinimumHeight != minimum.Height) presenter.PreferredMinimumHeight = minimum.Height;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(nint window);
 
     private async Task PollAsync()
     {
