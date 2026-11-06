@@ -12,6 +12,79 @@ static void Check(bool condition, string message)
     if (!condition) throw new InvalidOperationException(message);
 }
 
+Check(Marshal.SizeOf<WindowsIoAttributionCapture.WnodeHeader>() == 48
+    && Marshal.OffsetOf<WindowsIoAttributionCapture.EventTraceProperties>(nameof(WindowsIoAttributionCapture.EventTraceProperties.BufferSize)).ToInt32() == 48
+    && Marshal.OffsetOf<WindowsIoAttributionCapture.EventTraceProperties>(nameof(WindowsIoAttributionCapture.EventTraceProperties.EventsLost)).ToInt32() == 88
+    && Marshal.OffsetOf<WindowsIoAttributionCapture.EventTraceProperties>(nameof(WindowsIoAttributionCapture.EventTraceProperties.LoggerThreadId)).ToInt32() == 104
+    && Marshal.OffsetOf<WindowsIoAttributionCapture.EventTraceProperties>(nameof(WindowsIoAttributionCapture.EventTraceProperties.LogFileNameOffset)).ToInt32() == 112
+    && Marshal.SizeOf<WindowsIoAttributionCapture.EventTraceProperties>() == 120,
+    "EVENT_TRACE_PROPERTIES x64 layout must match the Windows SDK offsets.");
+Console.WriteLine("PASS: ETW stop-statistics structure layout matches Windows SDK offsets.");
+
+var drainRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+var processingStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+long stoppedLossCount = 0;
+long lateLossNotifications = 0;
+var processing = Task.Run(async () =>
+{
+    processingStarted.SetResult(true);
+    await drainRelease.Task;
+    Interlocked.Exchange(ref lateLossNotifications, 5);
+});
+await processingStarted.Task;
+var stopped = 0;
+var lossReads = 0;
+var status = IoAttributionStatus.Completed;
+var drain = WindowsIoAttributionCapture.StopDrainAndReadEventsLostAsync(
+    () =>
+    {
+        Interlocked.Increment(ref stopped);
+        Interlocked.Exchange(ref stoppedLossCount, 5);
+    },
+    processing,
+    () =>
+    {
+        Interlocked.Increment(ref lossReads);
+        return Interlocked.Read(ref stoppedLossCount);
+    },
+    _ => status = IoAttributionStatus.Failed,
+    _ => status = IoAttributionStatus.Failed);
+Check(Volatile.Read(ref stopped) == 1 && !processing.IsCompleted && !drain.IsCompleted && Volatile.Read(ref lossReads) == 0,
+    "Stop once and do not read cached STOP statistics before the processing drain completes.");
+drainRelease.SetResult(true);
+var finalLostEvents = await drain;
+status = WindowsIoAttributionCapture.ApplyFinalStatus(status, finalLostEvents.HasValue, false, finalLostEvents ?? 0, 0);
+Check(finalLostEvents == 5 && Interlocked.Read(ref lateLossNotifications) == 5 && processing.IsCompleted
+    && Volatile.Read(ref lossReads) == 1 && status == IoAttributionStatus.Truncated,
+    "Late loss notifications must drain and final STOP losses must produce Truncated status.");
+Check(WindowsIoAttributionCapture.ApplyFinalStatus(IoAttributionStatus.Completed, true, false, 0, 0) == IoAttributionStatus.Completed,
+    "A valid final STOP with no losses remains Completed.");
+Console.WriteLine("PASS: final STOP loss statistics are read after processing drain; late losses produce Truncated status.");
+
+var missingStatisticsStatus = IoAttributionStatus.Completed;
+var statisticsFailureReported = false;
+var missingStatistics = await WindowsIoAttributionCapture.StopDrainAndReadEventsLostAsync(
+    () => { }, null,
+    () => throw new InvalidOperationException("Synthetic STOP statistics failure."),
+    _ => { },
+    _ => { statisticsFailureReported = true; missingStatisticsStatus = IoAttributionStatus.Failed; });
+missingStatisticsStatus = WindowsIoAttributionCapture.ApplyFinalStatus(missingStatisticsStatus,
+    missingStatistics.HasValue, false, missingStatistics ?? 0, 0);
+Check(missingStatistics is null && statisticsFailureReported && missingStatisticsStatus == IoAttributionStatus.Failed,
+    "Failure to obtain final STOP statistics must not claim Completed.");
+
+var processingFailureStatus = IoAttributionStatus.Completed;
+var statisticsReadAfterProcessingFailure = false;
+var processingFailureCount = await WindowsIoAttributionCapture.StopDrainAndReadEventsLostAsync(
+    () => { }, Task.FromException(new InvalidOperationException("Synthetic processing failure.")),
+    () => { statisticsReadAfterProcessingFailure = true; return 0; },
+    _ => processingFailureStatus = IoAttributionStatus.Failed,
+    _ => processingFailureStatus = IoAttributionStatus.Failed);
+processingFailureStatus = WindowsIoAttributionCapture.ApplyFinalStatus(processingFailureStatus,
+    processingFailureCount.HasValue, false, processingFailureCount ?? 0, 0);
+Check(processingFailureStatus == IoAttributionStatus.Failed && statisticsReadAfterProcessingFailure,
+    "Processing failure must be preserved while final STOP statistics are still read.");
+
 var empty = new IoAttributionAggregator();
 Check(empty.GetRows(_ => (null, null)).Count == 0 && empty.CompletionStatus == IoAttributionStatus.Completed, "Empty capture.");
 Check(IoAttributionAggregator.ClampDuration(TimeSpan.MinValue) == TimeSpan.FromSeconds(1)

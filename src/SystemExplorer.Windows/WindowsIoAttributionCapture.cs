@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
 using Microsoft.Diagnostics.Tracing;
@@ -22,6 +23,48 @@ public sealed class WindowsIoAttributionCapture : IIoAttributionCapture
     private static readonly Guid NetworkProvider = new("7dd42a49-5329-4832-8dfd-43d979153a88");
     private static readonly Guid FileProvider = new("edd08927-9cc4-4e65-b970-c2560fb5c289");
     private const string Limits = "Measured ETW TCP/UDP send/receive bytes and Kernel-File requested read/write IoSize (not physical disk transfers or completed bytes). Cached requests may count; lazy-writer/paging I/O may belong to System or be omitted. Exited/reused/new PIDs have unstable identity. No endpoints or file names retained.";
+    private const int MaxSessionNameSize = 1024;
+    private const int MaxExtensionSize = 256;
+    private const uint EventTraceControlStop = 1;
+    private const uint WnodeFlagTracedGuid = 0x00020000;
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct WnodeHeader
+    {
+        public uint BufferSize;
+        public uint ProviderId;
+        public ulong HistoricalContext;
+        public long TimeStamp;
+        public Guid Guid;
+        public uint ClientContext;
+        public uint Flags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct EventTraceProperties
+    {
+        public WnodeHeader Wnode;
+        public uint BufferSize;
+        public uint MinimumBuffers;
+        public uint MaximumBuffers;
+        public uint MaximumFileSize;
+        public uint LogFileMode;
+        public uint FlushTimer;
+        public uint EnableFlags;
+        public int AgeLimit;
+        public uint NumberOfBuffers;
+        public uint FreeBuffers;
+        public uint EventsLost;
+        public uint BuffersWritten;
+        public uint LogBuffersLost;
+        public uint RealTimeBuffersLost;
+        public IntPtr LoggerThreadId;
+        public uint LogFileNameOffset;
+        public uint LoggerNameOffset;
+    }
+
+    [DllImport("advapi32.dll", EntryPoint = "ControlTraceW", ExactSpelling = true, CharSet = CharSet.Unicode)]
+    private static extern uint ControlTrace(ulong traceHandle, string sessionName, IntPtr properties, uint controlCode);
 
     public async Task<IoAttributionCapture> CaptureAsync(TimeSpan duration, CancellationToken token)
     {
@@ -34,14 +77,22 @@ public sealed class WindowsIoAttributionCapture : IIoAttributionCapture
         long malformed = 0;
         long cutoffUtcTicks = DateTime.MaxValue.Ticks;
         TraceEventSession? session = null;
+        string? sessionName = null;
         Task? processing = null;
         var stopLock = new object();
+        var stopAttempted = false;
+        long? stoppedEventsLost = null;
+        Exception? stopFailure = null;
         void Stop()
         {
             lock (stopLock)
             {
-                try { session?.Stop(); }
-                catch (Exception ex) when (ex is not OutOfMemoryException) { }
+                if (session is null || stopAttempted) return;
+                stopAttempted = true;
+                try { stoppedEventsLost = StopEtwSession(sessionName!); }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { stopFailure = ex; }
+                try { session.Stop(); }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { stopFailure ??= ex; }
             }
         }
         EventHandler exit = (_, _) => Stop();
@@ -54,7 +105,8 @@ public sealed class WindowsIoAttributionCapture : IIoAttributionCapture
             if (token.IsCancellationRequested)
                 return new(started, TimeSpan.Zero, IoAttributionStatus.Cancelled, "Cancelled before session creation.", 0, []);
 
-            session = new TraceEventSession($"SystemExplorer-IO-{Guid.NewGuid():N}") { StopOnDispose = true };
+            sessionName = $"SystemExplorer-IO-{Guid.NewGuid():N}";
+            session = new TraceEventSession(sessionName) { StopOnDispose = true };
             AppDomain.CurrentDomain.ProcessExit += exit;
             Console.CancelKeyPress += cancel;
             session.Source.Dynamic.All += data =>
@@ -113,28 +165,85 @@ public sealed class WindowsIoAttributionCapture : IIoAttributionCapture
         {
             elapsed.Stop();
             Interlocked.Exchange(ref cutoffUtcTicks, started.UtcTicks + elapsed.Elapsed.Ticks);
+            var statisticsRequired = session is not null;
+            var statisticsAvailable = false;
             if (session is not null)
             {
-                try { lost = session.EventsLost; }
-                catch (Exception ex) when (ex is not OutOfMemoryException) { detail += " EventsLost unavailable: " + ex.Message; status = IoAttributionStatus.Failed; }
-                Stop();
-                if (processing is not null)
+                var finalLost = await StopDrainAndReadEventsLostAsync(
+                    Stop,
+                    processing,
+                    () => stoppedEventsLost,
+                    ex => { status = IoAttributionStatus.Failed; detail += " Processing failed: " + ex.Message; },
+                    ex => { stopFailure ??= ex; }).ConfigureAwait(false);
+                if (finalLost is long count)
                 {
-                    try { await processing.ConfigureAwait(false); }
-                    catch (Exception ex) when (ex is not OutOfMemoryException) { status = IoAttributionStatus.Failed; detail += " Processing failed: " + ex.Message; }
+                    lost = count;
+                    statisticsAvailable = true;
                 }
+                if (!statisticsAvailable)
+                    detail += " EventsLost unavailable: " + (stopFailure?.Message ?? "ETW STOP returned no final statistics.");
                 lock (stopLock) { session.Dispose(); session = null; }
             }
             AppDomain.CurrentDomain.ProcessExit -= exit;
             Console.CancelKeyPress -= cancel;
+            status = ApplyFinalStatus(status, !statisticsRequired || statisticsAvailable, aggregate.IsTruncated, lost, malformed);
         }
-        if (status == IoAttributionStatus.Completed && (aggregate.IsTruncated || lost > 0 || malformed > 0)) status = IoAttributionStatus.Truncated;
         if (status != IoAttributionStatus.Completed) detail = $"{status}: partial/unavailable capture. " + detail;
         if (aggregate.IsTruncated) detail += " PID limit reached; new PIDs dropped.";
         if (lost > 0) detail += $" ETW lost {lost} events.";
         if (malformed > 0) detail += $" Skipped {malformed} events missing PID/size fields.";
         var rows = aggregate.GetRows(pid => Resolve(pid, started));
         return new(started, elapsed.Elapsed, status, detail, lost, rows);
+    }
+
+    private static long StopEtwSession(string sessionName)
+    {
+        if (sessionName.Length >= MaxSessionNameSize) throw new ArgumentException("ETW session name exceeds the SDK limit.", nameof(sessionName));
+        var structureSize = Marshal.SizeOf<EventTraceProperties>();
+        var propertiesSize = checked(structureSize + 2 * MaxSessionNameSize * sizeof(char) + MaxExtensionSize);
+        var properties = Marshal.AllocHGlobal(propertiesSize);
+        try
+        {
+            Marshal.Copy(new byte[propertiesSize], 0, properties, propertiesSize);
+            Marshal.StructureToPtr(new EventTraceProperties
+            {
+                Wnode = new WnodeHeader { BufferSize = (uint)propertiesSize, Flags = WnodeFlagTracedGuid },
+                LogFileNameOffset = (uint)(structureSize + MaxSessionNameSize * sizeof(char)),
+                LoggerNameOffset = (uint)structureSize
+            }, properties, false);
+            var name = Encoding.Unicode.GetBytes(sessionName + '\0');
+            Marshal.Copy(name, 0, IntPtr.Add(properties, structureSize), name.Length);
+            var result = ControlTrace(0, sessionName, properties, EventTraceControlStop);
+            if (result != 0) throw new System.ComponentModel.Win32Exception((int)result);
+            return Marshal.PtrToStructure<EventTraceProperties>(properties).EventsLost;
+        }
+        finally { Marshal.FreeHGlobal(properties); }
+    }
+
+    internal static async Task<long?> StopDrainAndReadEventsLostAsync(
+        Action stop,
+        Task? processing,
+        Func<long?> readEventsLost,
+        Action<Exception> processingFailed,
+        Action<Exception> eventsLostFailed)
+    {
+        stop();
+        if (processing is not null)
+        {
+            try { await processing.ConfigureAwait(false); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { processingFailed(ex); }
+        }
+
+        try { return readEventsLost(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { eventsLostFailed(ex); return null; }
+    }
+
+    internal static IoAttributionStatus ApplyFinalStatus(IoAttributionStatus status, bool statisticsAvailable,
+        bool aggregateTruncated, long lost, long malformed)
+    {
+        if (status == IoAttributionStatus.Completed && !statisticsAvailable) return IoAttributionStatus.Failed;
+        if (status == IoAttributionStatus.Completed && (aggregateTruncated || lost > 0 || malformed > 0)) return IoAttributionStatus.Truncated;
+        return status;
     }
 
     internal static (ProcessIdentity? Identity, string? Name) Resolve(int pid, DateTimeOffset started)
