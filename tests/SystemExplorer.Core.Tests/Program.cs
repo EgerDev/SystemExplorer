@@ -4,6 +4,166 @@ using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Inventory identifier keys sort numerically with nulls last in both directions", () =>
+    {
+        var rows = new (string Text, decimal? Key)[] { ("0xFFC", 0xFFC), ("Unavailable", null), ("0x1010", 0x1010) };
+        foreach (var descending in new[] { false, true })
+        {
+            var ordered = InventoryOrdering.Order(rows, r => r.Text, r => r.Key, true, descending).ToArray();
+            Check(ordered[0].Text == (descending ? "0x1010" : "0xFFC"));
+            Check(ordered[1].Text == (descending ? "0xFFC" : "0x1010") && ordered[2].Key is null);
+            var text = InventoryOrdering.Order(rows.Where(r => r.Key is not null), r => r.Text, r => r.Key, false, descending).ToArray();
+            Check(text[0].Text != ordered[0].Text);
+        }
+        Check((decimal)ulong.MaxValue == 18446744073709551615m);
+    }),
+    ("Inventory CPU keys order group and processor number rather than labels", () =>
+    {
+        var rows = new (string Text, decimal? Key)[] { ("CPU 0,10", 10), ("CPU 1,0", 65536), ("CPU 0,2", 2) };
+        var ordered = InventoryOrdering.Order(rows, r => r.Text, r => r.Key, true, false).ToArray();
+        Check(ordered.Select(r => r.Text).SequenceEqual(new[] { "CPU 0,2", "CPU 0,10", "CPU 1,0" }));
+        Check(InventoryOrdering.Order(rows, r => r.Text, r => r.Key, false, false).First().Text == "CPU 0,10");
+    }),
+    ("Inventory ordering preserves empty, missing-key and text-only rows", () =>
+    {
+        foreach (var descending in new[] { false, true })
+        {
+            Check(!InventoryOrdering.Order(Array.Empty<string>(), r => r, _ => null, true, descending).Any());
+            var rows = new[] { "beta", "Alpha" };
+            Check(InventoryOrdering.Order(rows, r => r, _ => null, true, descending).SequenceEqual(rows));
+            Check(InventoryOrdering.Order(rows, r => r, _ => null, false, descending).First() == (descending ? "beta" : "Alpha"));
+        }
+    }),
+    ("Window minimum scales physical pixels and rounds up", () =>
+    {
+        Check(WindowSizing.MinimumPhysicalSize(96, 2000, 2000) == (900, 560));
+        Check(WindowSizing.MinimumPhysicalSize(120, 2000, 2000) == (1125, 700));
+        Check(WindowSizing.MinimumPhysicalSize(144, 2000, 2000) == (1350, 840));
+        Check(WindowSizing.MinimumPhysicalSize(97, 2000, 2000) == (910, 566));
+    }),
+    ("Window minimum clamps each dimension to the work area", () =>
+    {
+        Check(WindowSizing.MinimumPhysicalSize(120, 1000, 600) == (1000, 600));
+        Check(WindowSizing.MinimumPhysicalSize(120, 1000, 1000) == (1000, 700));
+        Check(WindowSizing.MinimumPhysicalSize(120, 2000, 600) == (1125, 600));
+        Check(WindowSizing.MinimumPhysicalSize(96, 0, 0) == (0, 0));
+    }),
+    ("Window minimum rejects invalid DPI and work area", () =>
+    {
+        foreach (var (dpi, width, height) in new[] { (0u, 1000, 800), (96u, -1, 800), (96u, 1000, -1) })
+        {
+            try { WindowSizing.MinimumPhysicalSize(dpi, width, height); }
+            catch (ArgumentOutOfRangeException) { continue; }
+            throw new InvalidOperationException("Invalid window sizing input accepted");
+        }
+    }),
+    ("GPU page preserves software adapter measurements and honest unavailable states", () =>
+    {
+        var missing = CounterValue.Unavailable("No counter reading");
+        var adapter = new GpuAdapterRow(1, "Microsoft Basic Render Driver (software adapter)", 0, 100,
+            missing, missing, [new("3D", CounterValue.Measured(23)), new("Copy", CounterValue.Measured(12))], CounterValue.Measured(23), "3D")
+        { HasCounterInstances = true };
+        IReadOnlyList<DiagnosticItem> Rows(params GpuAdapterRow[] adapters) => DiagnosticData.Create("GPU",
+            Snapshot(0) with { GpuAdapters = adapters, TotalCpuPercent = 99, DiskReadBytesPerSecond = 1000 }, null, [], new(), _ => null);
+        var measured = Rows(adapter).Single();
+        Check(measured.Name.Contains("software adapter") && measured.First == "23.0%" && measured.Detail.Contains("GPU utilization: 23.0%") && measured.Detail.Contains("not a sum"));
+        Check(Rows().Single().Name == "GPU utilization unavailable");
+        Check(Rows(adapter with { Description = "NVIDIA RTX 4090" }).Single().Name == "NVIDIA RTX 4090");
+        Check(Rows(adapter with { Description = "NVIDIA RTX 4090", Engines = [], HeadlineUtilizationPercent = missing }).Single().Name == "NVIDIA RTX 4090");
+        Check(Rows(adapter with { Description = "Inventory adapter", HasCounterInstances = false, Engines = [], HeadlineUtilizationPercent = missing }).Single().Name == "Inventory adapter (adapter type unavailable)");
+        Check(Rows(adapter with { Description = null }).Single().Name == "Adapter 0x1 (adapter type unavailable)");
+        Check(Rows(adapter with { Description = null, HasCounterInstances = false }).Single().Name == "Adapter 0x1 (adapter type unavailable)");
+        Check(Rows(adapter with { HasCounterInstances = false }).Single().Name == adapter.Description);
+        Check(!measured.Name.Contains("adapter type unavailable"));
+        foreach (var value in new[] { missing, CounterValue.Warmup("First sample"), CounterValue.Measured(double.NaN), CounterValue.Measured(101) })
+            Check(Rows(adapter with { HeadlineUtilizationPercent = value }).Single().First == "Utilization unavailable");
+        Check(Rows(adapter with { HeadlineUtilizationPercent = CounterValue.Measured(0) }).Single().First == "0.0%");
+    }),
+    ("Lifecycle timeline separates baseline, starts, disappearance and PID reuse", () =>
+    {
+        var timeline = new ProcessLifecycleTimeline();
+        timeline.Observe(Snapshot(0, P(10, 100)));
+        timeline.Observe(Snapshot(2, P(10, 100) with { PrivateBytes = 900 }, P(11, 300)));
+        timeline.Observe(Snapshot(4, P(10, 200), P(11, 300)));
+        timeline.Observe(Snapshot(4, P(12, 400)));
+        var e = timeline.Events;
+        Check(e.Count == 4);
+        Check(e[0] is { Kind: ProcessLifecycleKind.RunningAtFirstObservation, Identity.Pid: 10, AfterGap: false });
+        Check(e[1] is { Kind: ProcessLifecycleKind.Started, Identity.Pid: 11 });
+        Check(e[2] is { Kind: ProcessLifecycleKind.Started, Identity.CreationTimeFileTime: 200 });
+        Check(e[3] is { Kind: ProcessLifecycleKind.NoLongerObserved, Identity.CreationTimeFileTime: 100, Observations: 2, PeakPrivateBytes: 900 });
+        Check(e[3].LastObserved == DateTimeOffset.UnixEpoch.AddSeconds(2) && e[3].At == DateTimeOffset.UnixEpoch.AddSeconds(4));
+    }),
+    ("Lifecycle timeline excludes unstable identities, marks gaps and bounds events", () =>
+    {
+        var timeline = new ProcessLifecycleTimeline();
+        timeline.Observe(Snapshot(0, P(10, 100), P(20, 0)));
+        Check(timeline.Events.Count == 1 && timeline.UnstableIdentitiesExcluded == 1);
+        timeline.BreakContinuity();
+        timeline.Observe(Snapshot(2, P(11, 300)));
+        Check(timeline.Events.Skip(1).All(x => x.AfterGap));
+        timeline.Observe(Snapshot(30, P(12, 400)));
+        Check(timeline.Events.Last().AfterGap);
+        for (var i = 0; i < ProcessLifecycleTimeline.MaximumEvents; i++) timeline.Observe(Snapshot(32 + i, P(1000 + i, 1000 + i)));
+        Check(timeline.Events.Count == ProcessLifecycleTimeline.MaximumEvents);
+    }),
+    ("Selected history keeps lifetimes separate and absence explicit", () =>
+    {
+        var history = new SelectedProcessHistory();
+        var process = P(10, 100);
+        history.Track(process.Identity, Snapshot(0, process));
+        history.Observe(Snapshot(2, P(10, 200)));
+        history.Observe(Snapshot(4, P(10, 200)));
+        var old = history.Snapshots.Single();
+        Check(old.Points.Count == 2 && !old.Points[1].Observed && old.Points[1].PrivateBytes is null);
+        history.Track(new(10, 200), Snapshot(4, P(10, 200)));
+        Check(history.Snapshots.Count == 2 && history.Snapshots[0].Identity.CreationTimeFileTime == 200);
+    }),
+    ("Selected history preserves nulls and marks pause and missing-sample gaps", () =>
+    {
+        var history = new SelectedProcessHistory();
+        var process = P(10, 100) with { PrivateBytes = null, CpuPercent = null };
+        history.Track(process.Identity, Snapshot(0, process));
+        history.BreakContinuity();
+        history.Observe(Snapshot(2, process));
+        history.Observe(Snapshot(2, process));
+        history.Observe(Snapshot(1, process));
+        Check(history.Snapshots.Single().Points.Count == 2);
+        Check(history.Snapshots.Single().Points[1] is { BreakBefore: true, PrivateBytes: null, CpuPercent: null });
+        history.Observe(Snapshot(4));
+        history.Observe(Snapshot(6, process));
+        Check(history.Snapshots.Single().Points.Last().BreakBefore);
+        history.Observe(Snapshot(30, process));
+        Check(history.Snapshots.Single().Points.Last().BreakBefore);
+    }),
+    ("Selected history retains nullable IO rates across breaks and absence", () =>
+    {
+        var history = new SelectedProcessHistory();
+        var process = P(10, 100) with { ReadBytesPerSecond = 123.5, WriteBytesPerSecond = 0 };
+        history.Track(process.Identity, Snapshot(0, process));
+        Check(history.Snapshots.Single().Points.Single() is { ReadBytesPerSecond: 123.5, WriteBytesPerSecond: 0 });
+        history.Observe(Snapshot(2, process with { ReadBytesPerSecond = null, WriteBytesPerSecond = null }));
+        Check(history.Snapshots.Single().Points.Last() is { Observed: true, ReadBytesPerSecond: null, WriteBytesPerSecond: null });
+        history.BreakContinuity();
+        history.Observe(Snapshot(4, process));
+        Check(history.Snapshots.Single().Points.Last() is { BreakBefore: true, ReadBytesPerSecond: 123.5, WriteBytesPerSecond: 0 });
+        history.Observe(Snapshot(6));
+        Check(history.Snapshots.Single().Points.Last() is { Observed: false, ReadBytesPerSecond: null, WriteBytesPerSecond: null });
+        history.Observe(Snapshot(30, process));
+        Check(history.Snapshots.Single().Points.Last() is { BreakBefore: true, ReadBytesPerSecond: 123.5, WriteBytesPerSecond: 0 });
+    }),
+    ("Selected history bounds points and least-recently-selected lifetimes", () =>
+    {
+        var history = new SelectedProcessHistory();
+        var process = P(10, 100);
+        history.Track(process.Identity, Snapshot(0, process));
+        for (int i = 1; i < 200; i++) history.Observe(Snapshot(i * 2, process));
+        Check(history.Snapshots.Single().Points.Count == SelectedProcessHistory.MaximumPoints);
+        for (int i = 1; i <= 9; i++) history.Track(new(i, i), Snapshot(400, P(i, i)));
+        Check(history.Snapshots.Count == SelectedProcessHistory.MaximumLifetimes && history.Snapshots.All(s => s.Identity.Pid != 10));
+        history.Track(new(99, null), Snapshot(400, P(99, 0) with { Identity = new(99, null) }));
+        Check(history.Snapshots.Count == SelectedProcessHistory.MaximumLifetimes);
+    }),
     ("Diagnostic byte units retain small region spans", () =>
     {
         Check(DiagnosticData.Bytes(null) == "—" && DiagnosticData.Bytes(0) == "0 B");
@@ -341,6 +501,13 @@ var tests = new (string Name, Action Run)[]
         Check(group.PrivateBytes == 200);
         Check(ProcessGrouping.Create([P(10, 100), P(11, 200, 10) with { PrivateBytes = null }]).Single().PrivateBytes is null);
     }),
+    ("Prompt input requires non-blank text and trims it", () =>
+    {
+        Check(!PromptInput.CanSubmit(null) && !PromptInput.CanSubmit("") && !PromptInput.CanSubmit(" \t\r\n "));
+        Check(PromptInput.Normalize("") is null && PromptInput.Normalize("   ") is null);
+        Check(PromptInput.CanSubmit("user32.dll") && PromptInput.Normalize("user32.dll") == "user32.dll");
+        Check(PromptInput.CanSubmit("  user32.dll\t") && PromptInput.Normalize("  user32.dll\t") == "user32.dll");
+    }),
     ("Physical accounting rejects invalid available", () => Check(new MemorySnapshot { PhysicalTotalBytes = 10, PhysicalAvailableBytes = 11 }.PhysicalUsedBytes is null)),
     ("History bounded to 180 samples", () =>
     {
@@ -403,6 +570,21 @@ var tests = new (string Name, Action Run)[]
         history.Add(Snapshot(0, P(10, 100)));
         history.Add(Snapshot(0, P(10, 100)));
         Check(history.System.Count == 1);
+    }),
+    ("Module mappings collapse only exact base, size and case-insensitive path duplicates", () =>
+    {
+        var seen = new HashSet<ModuleObservation>(ModuleMappingComparer.Instance);
+        Check(seen.Count == 0);
+        var module = new ModuleObservation("notepad.exe", @"C:\Windows\SysWOW64\notepad.exe", 0x8B0000, 192512);
+        Check(seen.Add(module));
+        Check(!seen.Add(module with { }));
+        Check(!seen.Add(module with { Name = "other name", Path = module.Path.ToUpperInvariant() }));
+        Check(seen.Add(module with { BaseAddress = 0x9B0000 }));
+        Check(seen.Add(module with { Path = @"C:\Windows\System32\notepad.exe" }));
+        Check(seen.Add(module with { SizeBytes = 233472 }));
+        Check(seen.Count == 4);
+        Check(!ModuleMappingComparer.Instance.Equals(module, null));
+        Check(ModuleMappingComparer.Instance.Equals(null, null));
     })
 };
 var failures = 0;

@@ -6,6 +6,13 @@ using SystemExplorer.Core;
 using SystemExplorer.Windows;
 using static SystemExplorer.Windows.NativeMethods;
 
+if (args.Length == 1 && args[0] == "--inspection-exit-child")
+{
+    Thread.Sleep(1200);
+    Environment.Exit(259);
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--inspection-only")
 {
     using var current = Process.GetCurrentProcess();

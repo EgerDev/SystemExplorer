@@ -11,6 +11,7 @@
             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
+        <Button x:Name="IoAttributionButton" Content="Capture I/O (admin)" Tag="IoAttribution" Click="InventoryClicked" Visibility="Collapsed" HorizontalAlignment="Right"/>
         <Grid x:Name="MemorySummary" ColumnSpacing="10">
             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
             <controls:SummaryCard x:Name="PhysicalCard" Label="Physical memory in use" Glyph="&#xE964;"/>
@@ -93,8 +94,27 @@
                 <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/></Style></ListView.ItemContainerStyle>
             </ListView>
         </Grid>
-        <Expander Grid.Row="4" Header="Measurement definitions and collection limits" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+        <Grid Grid.Row="4" ColumnSpacing="8">
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <Expander Header="Measurement definitions and collection limits" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
             <ScrollViewer MaxHeight="100"><TextBlock x:Name="LimitsText" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True"/></ScrollViewer>
         </Expander>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
+                <Button x:Name="PagefilesButton" Content="Pagefiles" Tag="Pagefiles" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="RecentButton" Content="Recent history" Tag="History" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="DiskButton" Content="Latency / queue" Tag="Disk" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="FileUsersButton" Content="File users" Tag="FileUsers" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="AdaptersButton" Content="Adapters" Tag="Adapters" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="CoresButton" Content="Per core" Tag="Cores" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="GpuButton" Content="GPU" Tag="Gpu" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="DllUsersButton" Content="DLL users" Tag="DllUsers" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="MemoryListsButton" Content="Memory lists" Tag="MemoryLists" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="PoolTagsButton" Content="Pool tags" Tag="PoolTags" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="DriversButton" Content="Driver services" Tag="Drivers" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="PersistenceButton" Content="Persistence" Tag="Persistence" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="TimelineButton" Content="Process timeline" Tag="Timeline" Click="InventoryClicked" Visibility="Collapsed"/>
+            <Button x:Name="TasksButton" Content="Scheduled tasks" Tag="Tasks" Click="InventoryClicked" Visibility="Collapsed"/>
+            </StackPanel>
+        </Grid>
     </Grid>
 </UserControl>

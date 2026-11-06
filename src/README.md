@@ -15,6 +15,10 @@ From the repository root, with `dotnet` on PATH:
 dotnet run --project tests/SystemExplorer.Core.Tests -c Release
 dotnet run --project tests/SystemExplorer.Windows.Smoke -c Release
 dotnet run --project tests/SystemExplorer.Relationships.Smoke -c Release
+dotnet run --project tests/SystemExplorer.Threads.Smoke -c Release
+dotnet run --project tests/SystemExplorer.Pagefiles.Smoke -c Release
+dotnet run --project tests/SystemExplorer.ServiceInspection.Smoke -c Release
+dotnet run --project tests/SystemExplorer.ScheduledTasks.Smoke -c Release
 ./tools/Build-SystemExplorer.ps1 -OutputDirectory C:\builds\SystemExplorer-test
 C:\builds\SystemExplorer-test\SystemExplorer.App.exe
 ```
@@ -33,6 +37,12 @@ portable test build, not an installer or public release. The manifest requests
 - Startup: Run/RunOnce keys and startup folders; no disable action or impact guess.
 - Overview/Insights: bounded history and deterministic explanations, not cloud AI.
 - Settings: light, dark and system theme; pause freezes live refresh.
+
+The selected-process inspector includes on-demand modules, virtual regions,
+thread CPU/wait chains and bounded recent selected-lifetime history. Memory adds
+pagefile inventory; Services rows open configuration/dependencies; Startup links
+to a separate read-only scheduled-task inventory. See
+[developer diagnostics](../docs/development/DEVELOPER_DIAGNOSTICS.md) for limits.
 
 Use Ctrl+K for search; values shown as `—` are unavailable, never zero. Private
 commit is not physical RAM; working sets include shared resident pages. Growth

@@ -37,7 +37,7 @@ public sealed class WindowsProcessInspectionProvider : IProcessInspectionProvide
         if (!identity.IsStable || identity.Pid <= 0)
             return Result(InspectionStatus.Unsupported, "A positive PID and observed creation FILETIME are required. PID alone is never inspected.");
         if (!Enum.IsDefined(kind)) return Result(InspectionStatus.Unsupported, "Unknown inspection kind.");
-        using var process = OpenProcess(kind == ProcessInspectionKind.MemoryRegions ? 0x0400u : QueryLimited, false, (uint)identity.Pid);
+        using var process = OpenProcess((kind == ProcessInspectionKind.MemoryRegions ? 0x0400u : QueryLimited) | 0x00100000u, false, (uint)identity.Pid);
         if (process.IsInvalid)
         {
             var error = Marshal.GetLastWin32Error();
@@ -55,18 +55,23 @@ public sealed class WindowsProcessInspectionProvider : IProcessInspectionProvide
         return Result(outcome.Status, outcome.Detail, outcome.Status is InspectionStatus.Failed or InspectionStatus.AccessDenied or InspectionStatus.Unsupported);
     }
 
-    private static (InspectionStatus Status, string Detail)? Validate(SafeProcessHandle process, ProcessIdentity identity)
+    internal static (InspectionStatus Status, string Detail)? Validate(SafeProcessHandle process, ProcessIdentity identity)
     {
-        if (!GetProcessTimes(process, out var created, out var exited, out _, out _))
+        if (!GetProcessTimes(process, out var created, out _, out _, out _))
         {
             var error = Marshal.GetLastWin32Error();
             return (ErrorStatus(error), $"Lifetime validation unavailable (Windows error {error}); results discarded.");
         }
         if (created.Ticks != (ulong)identity.CreationTimeFileTime!.Value)
             return (InspectionStatus.IdentityMismatch, "The PID belongs to a different creation-time identity; results discarded.");
-        if (exited.Ticks != 0) return (InspectionStatus.Exited, "This process lifetime exited; results discarded.");
+        var wait = WaitForSingleObject(process, 0);
+        if (wait == 0) return (InspectionStatus.Exited, "This process lifetime exited; results discarded.");
+        if (wait != 258) return (InspectionStatus.Failed, "Process liveness could not be verified; results discarded.");
         return null;
     }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint WaitForSingleObject(SafeProcessHandle process, uint milliseconds);
 
     private (InspectionStatus Status, string Detail) ReadModules(uint pid, List<ModuleObservation> rows, Stopwatch clock, CancellationToken token)
     {
@@ -81,6 +86,7 @@ public sealed class WindowsProcessInspectionProvider : IProcessInspectionProvide
                 if (error == 24 && attempt < 2) continue;
                 return (ErrorStatus(error), $"Module snapshot unavailable (Windows error {error}); loader changes may prevent a consistent snapshot.");
             }
+            var seen = new HashSet<ModuleObservation>(ModuleMappingComparer.Instance);
             var entry = new ModuleEntry { Size = (uint)Marshal.SizeOf<ModuleEntry>() };
             var more = Module32FirstW(snapshot, ref entry);
             var lastError = more ? 0 : Marshal.GetLastWin32Error();
@@ -88,9 +94,13 @@ public sealed class WindowsProcessInspectionProvider : IProcessInspectionProvide
             {
                 token.ThrowIfCancellationRequested();
                 if (clock.Elapsed >= budget) return (InspectionStatus.TimedOut, "Partial module inventory: cooperative time budget reached.");
-                if (rows.Count >= maximumRecords) return (InspectionStatus.Truncated, $"Module inventory truncated at {maximumRecords} records.");
                 if (entry.Pid != pid) return (InspectionStatus.Failed, "Snapshot returned an inconsistent module owner.");
-                rows.Add(new(entry.Name, entry.Path, entry.BaseAddress.ToUInt64(), entry.BaseSize));
+                var module = new ModuleObservation(entry.Name, entry.Path, entry.BaseAddress.ToUInt64(), entry.BaseSize);
+                if (seen.Add(module))
+                {
+                    if (rows.Count >= maximumRecords) return (InspectionStatus.Truncated, $"Module inventory truncated at {maximumRecords} records.");
+                    rows.Add(module);
+                }
                 entry.Size = (uint)Marshal.SizeOf<ModuleEntry>();
                 more = Module32NextW(snapshot, ref entry);
                 lastError = more ? 0 : Marshal.GetLastWin32Error();
