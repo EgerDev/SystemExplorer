@@ -155,6 +155,11 @@ foreach (var status in new[] { InspectionStatus.IdentityMismatch, InspectionStat
     Check(native.Validations == 2 && native.CommandCollections == 1, "Final validation must follow actual collection.");
 }
 var independent = await Capture(new() { TokenStatus = InspectionStatus.AccessDenied });
+Check(independent.Token.PrivilegesStatus == InspectionStatus.AccessDenied && independent.Token.Privileges.Count == 0 && !string.IsNullOrWhiteSpace(independent.Token.Detail), "Empty denied privileges must retain status and reason, not imply none reported.");
+var budgetExpired = await Capture(new() { TimeoutMitigations = true });
+Check(budgetExpired.Mitigations.Status == InspectionStatus.TimedOut && budgetExpired.Mitigations.Policies.Count == 0 && !string.IsNullOrWhiteSpace(budgetExpired.Mitigations.Detail) &&
+    budgetExpired.Runtime.Status == InspectionStatus.TimedOut && budgetExpired.Runtime.Modules.Count == 0 && !string.IsNullOrWhiteSpace(budgetExpired.Runtime.Detail), "Budget expiry must retain explicit reasons for empty mitigation and runtime sections.");
+Console.WriteLine("PASS: empty denied privileges and timed-out mitigation/runtime sections retain status and reason.");
 Check(independent.Status == InspectionStatus.Partial && independent.Token.Status == InspectionStatus.AccessDenied && independent.CommandLine.Status == InspectionStatus.Available && independent.Image.Status == InspectionStatus.Available && independent.Job.Status == InspectionStatus.Available, "Sections must remain independent.");
 var runtimePresent = await Capture(new(), new() { Rows = [new("coreclr.dll", "C:\\nonexistent-security-smoke\\coreclr.dll", 0, 1)] });
 Check(runtimePresent.Runtime.Modules.Single().RuntimeFamily == ".NET", "Runtime identification uses loaded module file name.");
@@ -249,6 +254,7 @@ sealed class FakeNative : IProcessSecurityNative
     public uint Required;
     public InspectionStatus? FinalValidation;
     public InspectionStatus TokenStatus = InspectionStatus.Available;
+    public bool TimeoutMitigations;
     public SafeProcessHandle Open(int pid, uint access, out int error) { Calls++; error = 0; return new(new IntPtr(123), false); }
     public (InspectionStatus Status, string Detail)? Validate(SafeProcessHandle process, ProcessIdentity identity)
     {
@@ -269,7 +275,7 @@ sealed class FakeNative : IProcessSecurityNative
             TokenElevationKind.Default, false, false, false, false, 1, [], TokenStatus, 1);
     }
     public ProtectionSection Protection(SafeProcessHandle process) { Calls++; return new(InspectionStatus.Available, "synthetic protection", 0xFFFFFFFE, "NONE"); }
-    public MitigationSection Mitigations(int pid, Action check) { Calls++; return new(InspectionStatus.Available, "synthetic mitigations", [new(MitigationPolicyKind.Dep, InspectionStatus.Available, "synthetic", 1, DecodeMitigation(MitigationPolicyKind.Dep, 1))]); }
+    public MitigationSection Mitigations(int pid, Action check) { Calls++; if (TimeoutMitigations) throw new TimeoutException(); return new(InspectionStatus.Available, "synthetic mitigations", [new(MitigationPolicyKind.Dep, InspectionStatus.Available, "synthetic", 1, DecodeMitigation(MitigationPolicyKind.Dep, 1))]); }
     public JobSection Job(SafeProcessHandle process) { Calls++; return new(InspectionStatus.Available, "synthetic job", false); }
     public (InspectionStatus Status, string Detail, string? Path) ImagePath(SafeProcessHandle process) { Calls++; return (InspectionStatus.Available, "synthetic image", "synthetic.exe"); }
 }

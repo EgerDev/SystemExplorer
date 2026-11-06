@@ -1,7 +1,8 @@
 namespace SystemExplorer.Core;
 
 public sealed record ProcessHistoryPoint(DateTimeOffset At, bool Observed, bool BreakBefore,
-    ulong? PrivateBytes, ulong? WorkingSetBytes, ulong? PrivateWorkingSetBytes, double? CpuPercent);
+    ulong? PrivateBytes, ulong? WorkingSetBytes, ulong? PrivateWorkingSetBytes, double? CpuPercent,
+    double? ReadBytesPerSecond, double? WriteBytesPerSecond);
 
 public sealed record ProcessHistorySnapshot(ProcessIdentity Identity, string Name, IReadOnlyList<ProcessHistoryPoint> Points);
 
@@ -54,7 +55,8 @@ public sealed class SelectedProcessHistory
         if (process is null && entry.Points.LastOrDefault() is { Observed: false }) return;
         bool wasMissing = entry.Points.LastOrDefault() is { Observed: false };
         entry.Points.Enqueue(new(at, process is not null, gap || wasMissing,
-            process?.PrivateBytes, process?.WorkingSetBytes, process?.PrivateWorkingSetBytes, process?.CpuPercent));
+            process?.PrivateBytes, process?.WorkingSetBytes, process?.PrivateWorkingSetBytes, process?.CpuPercent,
+            process?.ReadBytesPerSecond, process?.WriteBytesPerSecond));
         entry.BreakPending = false;
         while (entry.Points.Count > MaximumPoints) entry.Points.Dequeue();
     }

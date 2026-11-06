@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using SystemExplorer.Core;
 
 namespace SystemExplorer.App.Views;
 
@@ -15,9 +16,11 @@ public sealed partial class InventoryView : UserControl
     public event Action? BackRequested;
     public InventoryView() { InitializeComponent(); ready = true; }
 
-    public void ShowRows(string message, IEnumerable<InventoryRow> rows, string name, string first, string second, string third, string? action = null, bool back = false, int initialSort = 0, bool reverse = false)
+    public void ShowRows(string message, IEnumerable<InventoryRow> rows, string name, string first, string second, string third, string? action = null, bool back = false, int initialSort = 0, bool reverse = false, bool preserveState = false)
     {
-        source = rows.ToArray(); status = message; sort = initialSort; descending = reverse;
+        source = rows.ToArray(); status = message;
+        if (!preserveState) { sort = initialSort; descending = reverse; }
+        var selected = preserveState ? (Rows.SelectedItem as InventoryRow)?.Name : null;
         NameHeader.Content = name; FirstHeader.Content = first; SecondHeader.Content = second; ThirdHeader.Content = third;
         var labels = new[] { first, second, third };
         var buttons = new[] { FirstHeader, SecondHeader, ThirdHeader };
@@ -28,8 +31,9 @@ public sealed partial class InventoryView : UserControl
         }
         ActionButton.Content = action; ActionButton.Visibility = action is null ? Visibility.Collapsed : Visibility.Visible;
         Back.Visibility = back ? Visibility.Visible : Visibility.Collapsed;
-        Search.Text = "";
+        if (!preserveState) Search.Text = "";
         Rebuild();
+        if (selected is not null && Rows.ItemsSource is InventoryRow[] shown) Rows.SelectedItem = shown.FirstOrDefault(r => r.Name == selected);
     }
     public void ShowMessage(string message, bool back = false) => ShowRows(message, [], "Observation", "", "", "", back: back);
     public void SetTargets(IReadOnlyList<string> labels, Action<int> changed)
@@ -47,11 +51,10 @@ public sealed partial class InventoryView : UserControl
     private void Rebuild()
     {
         var filtered = source.Where(r => r.Description.Contains(Search.Text.Trim(), StringComparison.OrdinalIgnoreCase));
-        decimal? Number(InventoryRow row) => sort switch { 1 => row.Number1, 2 => row.Number2, _ => row.Number3 };
+        decimal? Number(InventoryRow row) => sort switch { 0 => row.NameKey, 1 => row.Number1, 2 => row.Number2, _ => row.Number3 };
         string Text(InventoryRow row) => sort switch { 1 => row.First, 2 => row.Second, 3 => row.Third, _ => row.Name };
-        var numeric = sort > 0 && source.Any(r => Number(r) is not null);
-        var ordered = !numeric ? descending ? filtered.OrderByDescending(Text, StringComparer.OrdinalIgnoreCase) : filtered.OrderBy(Text, StringComparer.OrdinalIgnoreCase)
-            : descending ? filtered.OrderBy(r => Number(r) is null).ThenByDescending(Number) : filtered.OrderBy(r => Number(r) is null).ThenBy(Number);
+        var numeric = source.Any(r => Number(r) is not null);
+        var ordered = InventoryOrdering.Order(filtered, Text, Number, numeric, descending);
         var displayed = ordered.ToArray();
         Rows.ItemsSource = displayed;
         Detail.Text = "Select an observation for full, copyable details."; ActionButton.IsEnabled = false;

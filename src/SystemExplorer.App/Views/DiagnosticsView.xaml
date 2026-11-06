@@ -11,6 +11,7 @@
             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
+        <Button x:Name="IoAttributionButton" Content="Capture I/O (admin)" Tag="IoAttribution" Click="InventoryClicked" Visibility="Collapsed" HorizontalAlignment="Right"/>
         <Grid x:Name="MemorySummary" ColumnSpacing="10">
             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
             <controls:SummaryCard x:Name="PhysicalCard" Label="Physical memory in use" Glyph="&#xE964;"/>

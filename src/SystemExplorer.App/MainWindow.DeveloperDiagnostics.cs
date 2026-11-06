@@ -17,7 +17,7 @@ public sealed partial class MainWindow
     {
         if (kind == "History") { HistoryClicked(this, new RoutedEventArgs()); return; }
         if (kind == "Timeline") { ShowLifecycleTimeline(); return; }
-        if (kind is "Disk" or "FileUsers" or "Adapters" or "Cores" or "Gpu" or "DllUsers" or "MemoryLists" or "PoolTags" or "Drivers" or "Persistence") { ShowSystemDepth(kind); return; }
+        if (kind is "Disk" or "FileUsers" or "Adapters" or "IoAttribution" or "Cores" or "Gpu" or "DllUsers" or "MemoryLists" or "PoolTags" or "Drivers" or "Persistence") { ShowSystemDepth(kind); return; }
         if (kind == "Tasks")
         {
             await ShowInventoryAsync("Local scheduled tasks", async (view, token) =>
@@ -87,7 +87,7 @@ public sealed partial class MainWindow
                     DiagnosticData.Percent(t.CpuPercent), ThreadTime(t.KernelTimeTicks), ThreadTime(t.UserTimeTicks),
                     t.CpuPercent is { } cpu ? (decimal)cpu : null, t.KernelTimeTicks, t.UserTimeTicks,
                     $"PID {identity.Pid} · process creation {identity.CreationTimeFileTime}\nTID {t.Identity.ThreadId} · thread creation {t.Identity.CreationTimeFileTime}\nCPU: {DiagnosticData.Percent(t.CpuPercent)} (100% = one logical CPU)\nKernel: {ThreadTime(t.KernelTimeTicks)} · User: {ThreadTime(t.UserTimeTicks)}\n{t.Status}: {t.Detail}\nCaptured {result.CapturedAt:O}; total capture span {result.SampleInterval.TotalMilliseconds:F0} ms, not the individual CPU denominator.",
-                    t.Identity.IsStable ? t.Identity : null)),
+                    t.Identity.IsStable ? t.Identity : null, NameKey: t.Identity.ThreadId)),
                 "Thread identity", "CPU %", "Kernel total", "User total", action: "Inspect selected wait chain", initialSort: 1, reverse: true);
             var busy = false;
             view.BackRequested += ShowThreads;
@@ -143,15 +143,134 @@ public sealed partial class MainWindow
             Field("Base start type", result.StartType is { } start ? start switch
             {
                 0 => "Boot (0)", 1 => "System (1)", 2 => "Automatic (2)", 3 => "Demand (3)", 4 => "Disabled (4)", _ => $"Unknown ({start})"
-            } : null, "Base mode does not include delayed auto-start or trigger configuration.");
+            } : null);
             Field("Error control", result.ErrorControl is { } error ? $"{error}" : null);
             foreach (var dependency in result.Dependencies)
                 Field(dependency.StartsWith('+') ? "Load-order group dependency" : "Service dependency", dependency,
                     "Observed configuration only; not proof of running state or ownership. Leading + denotes a load-order group, not a service name.");
             if (result.Status == InspectionStatus.Available && result.Dependencies.Count == 0)
                 Field("Dependencies", "None reported");
+            if (result.Extensions is { } extensions)
+            {
+                var delayed = extensions.DelayedAutoStart;
+                Field("Extensions / delayed auto-start", delayed.IsDelayed is { } enabled ? enabled ? "Yes" : "No" : "Unavailable", $"{delayed.Status}: {delayed.Detail}");
+                Field("Extensions / description", extensions.Description.Description, $"{extensions.Description.Status}: {extensions.Description.Detail}");
+                Field("Extensions / service SID type", extensions.ServiceSid.SidTypeName ?? extensions.ServiceSid.SidType?.ToString(), $"{extensions.ServiceSid.Status}: {extensions.ServiceSid.Detail}");
+                var triggers = extensions.Triggers;
+                Field("Triggers / status", triggers.Status.ToString(), triggers.Detail);
+                for (int i = 0; i < triggers.Triggers.Count; i++)
+                {
+                    var trigger = triggers.Triggers[i];
+                    Field($"Triggers / {i + 1:D3}", $"{trigger.TriggerTypeName}; {trigger.ActionName}",
+                        $"Subtype: {trigger.SubtypeName ?? trigger.Subtype?.ToString() ?? "Unavailable"}\nData items: {trigger.DataItemCount}\nMetadata only; trigger data is never decoded.");
+                }
+                if (triggers.Status == InspectionStatus.Available && triggers.Triggers.Count == 0)
+                    Field("Triggers / entries", "None reported");
+            }
+            else
+            {
+                Field("Extensions / status", "Unavailable", "No extension observations returned.");
+                Field("Triggers / status", "Unavailable", "No trigger observation returned.");
+            }
+            if (result.Dependents is { } dependents)
+            {
+                Field("Reverse dependents / status", dependents.Status.ToString(), dependents.Detail);
+                foreach (var dependent in dependents.Services)
+                    Field($"Reverse dependent / {dependent.Name}", dependent.DisplayName,
+                        $"Current state: {ServiceCurrentState(dependent.CurrentState)}\nObserved by EnumDependentServicesW; not an ownership claim.");
+                if (dependents.Status == InspectionStatus.Available && dependents.Services.Count == 0)
+                    Field("Reverse dependents / entries", "None reported");
+            }
+            else Field("Reverse dependents / status", "Unavailable", "No dependent-service observation returned.");
+            view.ShowRows($"{result.Status} · {result.CapturedAt.LocalDateTime:T} · {result.Detail} Graph inventory is being collected read-only.", rows,
+                "Configuration / dependency", "", "", "");
+            await AddServiceGraphRowsAsync(result, rows, token);
             view.ShowRows($"{result.Status} · {result.CapturedAt.LocalDateTime:T} · {result.Detail}", rows,
                 "Configuration / dependency", "", "", "");
         });
+    }
+
+    private static string ServiceCurrentState(uint state) => state switch
+    {
+        1 => "Stopped", 2 => "Start pending", 3 => "Stop pending", 4 => "Running",
+        5 => "Continue pending", 6 => "Pause pending", 7 => "Paused", _ => $"Unknown ({state})"
+    };
+
+    private async Task AddServiceGraphRowsAsync(ServiceInspection root, List<InventoryRow> rows, CancellationToken token)
+    {
+        void Field(string label, string value, string detail = "") => rows.Add(new(label, value, FullText: $"{label}: {value}\n{detail}"));
+        try
+        {
+            var inventory = Model.Relationships;
+            if (inventory is null)
+            {
+                Field("Graph / status", "Unavailable", "Service inventory has not loaded. Reopen after the Services page has data; no inventory was invented.");
+                return;
+            }
+            var inputs = new List<ServiceGraphInput>();
+            var failures = new List<string>();
+            var names = inventory.Services.Select(s => s.Name).Append(root.Name).Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => !string.Equals(n, root.Name, StringComparison.OrdinalIgnoreCase))
+                .ThenBy(n => n, StringComparer.OrdinalIgnoreCase).ToArray();
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            int examined = 0;
+            foreach (var name in names)
+            {
+                token.ThrowIfCancellationRequested();
+                if (examined >= 512 || started.Elapsed >= TimeSpan.FromSeconds(10)) break;
+                var observation = string.Equals(name, root.Name, StringComparison.OrdinalIgnoreCase)
+                    ? root : await serviceInspection.CaptureAsync(name, token);
+                examined++;
+                if (observation.Status == InspectionStatus.Available)
+                    inputs.Add(new(observation.Name, observation.Dependencies, observation.LoadOrderGroup));
+                else failures.Add($"{name}: {observation.Status} · {observation.Detail}");
+            }
+            if (inputs.Count == 0)
+            {
+                Field("Graph / status", "Unavailable", string.Join("\n", failures));
+                return;
+            }
+            var graph = ServiceGraph.Build(root.Name, inputs, cancellationToken: token);
+            bool partial = failures.Count > 0 || examined < names.Length || inventory.Limitations.Any(WindowsRelationshipProvider.IsServiceEnumerationGap);
+            Field("Graph / status", partial ? $"Partial / {graph.Status}" : graph.Status == InspectionStatus.Available ? "Available within readable inventory" : graph.Status.ToString(),
+                $"{graph.Detail}\nInventory from Services / WindowsRelationshipProvider at {inventory.CapturedAt:O}. Configuration read separately, not an atomic snapshot.\n{inputs.Count} configurations available; {failures.Count} failed; {names.Length - examined} not queried (512-service / cooperative 10-second bound).\nMissing nodes mean absent from the supplied readable configuration inventory, not proof a service is absent from Windows. Reverse links can be incomplete.\n{string.Join("\n", inventory.Limitations.Concat(failures))}");
+            Field("Graph / bounds", graph.Status == InspectionStatus.Truncated ? "Truncated" : "No graph bound reached",
+                $"Maximum depth reached: {graph.MaximumDepthReached}; depth limit {ServiceGraph.DefaultMaximumDepth}, node limit {ServiceGraph.DefaultMaximumNodes}, group-member limit 256, cycle limit {ServiceGraph.MaximumCycles}. Inventory limits are separate above.");
+            void Edges(string label, IReadOnlyList<ServiceGraphEdge> edges, bool reverse)
+            {
+                var depths = new Dictionary<(string, ServiceGraphNodeKind), int>();
+                var queue = new Queue<(string Name, ServiceGraphNodeKind Kind, int Depth)>();
+                queue.Enqueue((graph.Root, ServiceGraphNodeKind.Service, 0));
+                var rootGroup = inputs.FirstOrDefault(i => string.Equals(i.Name, root.Name, StringComparison.OrdinalIgnoreCase))?.LoadOrderGroup;
+                if (reverse && !string.IsNullOrWhiteSpace(rootGroup)) queue.Enqueue((rootGroup, ServiceGraphNodeKind.Group, 1));
+                while (queue.TryDequeue(out var item))
+                {
+                    if (!depths.TryAdd((item.Name.ToUpperInvariant(), item.Kind), item.Depth)) continue;
+                    foreach (var edge in edges.Where(e => string.Equals(reverse ? e.To : e.From, item.Name, StringComparison.OrdinalIgnoreCase) &&
+                        (reverse ? e.ToKind == item.Kind : item.Kind == ServiceGraphNodeKind.Service)))
+                        queue.Enqueue((reverse ? edge.From : edge.To, reverse ? ServiceGraphNodeKind.Service : edge.ToKind, item.Depth + 1));
+                }
+                foreach (var edge in edges)
+                {
+                    var target = reverse ? edge.From : edge.To;
+                    var kind = reverse ? ServiceGraphNodeKind.Service : edge.ToKind;
+                    var depth = depths.GetValueOrDefault((target.ToUpperInvariant(), kind));
+                    Field($"Graph / {label} / depth {depth:D2} / {target}", $"{edge.From} depends on {(edge.ToKind == ServiceGraphNodeKind.Group ? "+" : "")}{edge.To}",
+                        "Depth is shortest observed distance from the root; group-dependent traversal starts with the root's group at depth 1. Configuration only, not runtime state.");
+                }
+                if (edges.Count == 0) Field($"Graph / {label}", "None observed in supplied inventory", "See graph status for collection gaps and bounds.");
+            }
+            Edges("depends-on", graph.DependsOn, false);
+            Edges("dependents", graph.Dependents, true);
+            foreach (var node in graph.Nodes)
+                if (node.Kind == ServiceGraphNodeKind.Group || !node.InInventory)
+                    Field($"Graph / {node.Kind} / {node.Name}", node.InInventory ? "In supplied inventory" : "Missing from supplied inventory",
+                        node.Kind == ServiceGraphNodeKind.Group ? $"Load-order group (not a service). Observed members: {string.Join(", ", node.GroupMembers)}" : "Configuration unavailable or name not enumerated; see graph status.");
+            foreach (var cycle in graph.ObservedCycles)
+                Field("Graph / observed configuration cycle", string.Join(" → ", cycle.Path), "Not a runtime deadlock claim.");
+            if (graph.ObservedCycles.Count == 0) Field("Graph / observed cycles", "None observed", "Only within supplied inventory and traversal bounds; not proof that no cycle exists.");
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { Field("Graph / status", "Unavailable", ex.Message); }
     }
 }
