@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches: [master, feature/systemexplorer-integration]
-    paths: ['src/**', 'tests/**', 'tools/Build-SystemExplorer.ps1', '.github/workflows/systemexplorer.yml']
+    paths: ['src/**', 'tests/**', 'tools/tests/**', 'tools/Build-SystemExplorer.ps1', '.github/workflows/systemexplorer.yml']
   pull_request:
     branches: [master, feature/systemexplorer-integration, feature/phase2-validation-components, feature/read-only-process-inspection, 'feature/design-fidelity-*', 'feature/se-*']
-    paths: ['src/**', 'tests/**', 'tools/Build-SystemExplorer.ps1', '.github/workflows/systemexplorer.yml']
+    paths: ['src/**', 'tests/**', 'tools/tests/**', 'tools/Build-SystemExplorer.ps1', '.github/workflows/systemexplorer.yml']
 
 permissions:
   contents: read
@@ -50,6 +50,9 @@ jobs:
         run: dotnet run --project tests/SystemExplorer.Persistence.Smoke -c Release
       - name: Opt-in I/O attribution checks
         run: dotnet run --project tests/SystemExplorer.IoAttribution.Smoke -c Release
+      - name: Acceptance preflight predicate tests
+        shell: pwsh
+        run: ./tools/tests/Windows11-Acceptance-Preflight.Tests.ps1
       - name: Publish unsigned portable test build
         shell: pwsh
         run: ./tools/Build-SystemExplorer.ps1
