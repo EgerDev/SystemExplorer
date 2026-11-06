@@ -48,6 +48,8 @@ jobs:
         run: dotnet run --project tests/SystemExplorer.ProcessSecurity.Smoke -c Release
       - name: Read-only persistence inventory checks
         run: dotnet run --project tests/SystemExplorer.Persistence.Smoke -c Release
+      - name: Opt-in I/O attribution checks
+        run: dotnet run --project tests/SystemExplorer.IoAttribution.Smoke -c Release
       - name: Publish unsigned portable test build
         shell: pwsh
         run: ./tools/Build-SystemExplorer.ps1

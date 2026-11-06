@@ -48,6 +48,7 @@ public sealed partial class DiagnosticsView : UserControl
         DiskButton.Visibility = section == "Disks" ? Visibility.Visible : Visibility.Collapsed;
         FileUsersButton.Visibility = section == "Disks" ? Visibility.Visible : Visibility.Collapsed;
         AdaptersButton.Visibility = section == "Network" ? Visibility.Visible : Visibility.Collapsed;
+        IoAttributionButton.Visibility = section == "Network" ? Visibility.Visible : Visibility.Collapsed;
         CoresButton.Visibility = section == "CPU" ? Visibility.Visible : Visibility.Collapsed;
         GpuButton.Visibility = section == "CPU" ? Visibility.Visible : Visibility.Collapsed;
         DllUsersButton.Visibility = section == "CPU" ? Visibility.Visible : Visibility.Collapsed;

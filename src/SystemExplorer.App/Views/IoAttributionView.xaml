@@ -1,0 +1,40 @@
+<UserControl x:Class="SystemExplorer.App.Views.IoAttributionView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid RowSpacing="8">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+            <TextBlock x:Name="Status" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontSize="12"/>
+        </ScrollViewer>
+        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Disabled">
+            <Grid MinWidth="780">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <Grid Padding="8,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="60"/><ColumnDefinition Width="108"/><ColumnDefinition Width="108"/><ColumnDefinition Width="108"/><ColumnDefinition Width="108"/><ColumnDefinition Width="80"/></Grid.ColumnDefinitions>
+                    <Button Content="Process" Tag="0" Click="SortClicked"/>
+                    <Button Grid.Column="1" Content="PID" Tag="1" Click="SortClicked"/>
+                    <Button Grid.Column="2" Content="Net send/s" Tag="2" Click="SortClicked"/>
+                    <Button Grid.Column="3" Content="Net recv/s" Tag="3" Click="SortClicked"/>
+                    <Button Grid.Column="4" Content="Disk read/s" Tag="4" Click="SortClicked"/>
+                    <Button Grid.Column="5" Content="Disk write/s" Tag="5" Click="SortClicked"/>
+                    <Button Grid.Column="6" Content="Events" Tag="6" Click="SortClicked"/>
+                </Grid>
+                <ListView x:Name="Rows" Grid.Row="1" SelectionMode="None" AutomationProperties.Name="Frozen per-process I/O attribution">
+                    <ListView.ItemTemplate><DataTemplate>
+                        <Grid Padding="8,6" ToolTipService.ToolTip="{Binding Identity}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="60"/><ColumnDefinition Width="108"/><ColumnDefinition Width="108"/><ColumnDefinition Width="108"/><ColumnDefinition Width="108"/><ColumnDefinition Width="80"/></Grid.ColumnDefinitions>
+                            <StackPanel><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Identity}" FontSize="10" TextTrimming="CharacterEllipsis"/></StackPanel>
+                            <TextBlock Grid.Column="1" Text="{Binding Pid}"/>
+                            <TextBlock Grid.Column="2" Text="{Binding Send}"/>
+                            <TextBlock Grid.Column="3" Text="{Binding Receive}"/>
+                            <TextBlock Grid.Column="4" Text="{Binding Read}"/>
+                            <TextBlock Grid.Column="5" Text="{Binding Write}"/>
+                            <TextBlock Grid.Column="6" Text="{Binding Events}"/>
+                        </Grid>
+                    </DataTemplate></ListView.ItemTemplate>
+                    <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="Padding" Value="0"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/></Style></ListView.ItemContainerStyle>
+                </ListView>
+            </Grid>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

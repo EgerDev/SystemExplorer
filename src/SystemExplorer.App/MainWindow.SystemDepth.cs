@@ -16,6 +16,7 @@ public sealed partial class MainWindow
     private readonly IProcessSecurityProvider processSecurity = new WindowsProcessSecurityProvider();
     private readonly IDriverServiceProvider driverServices = new WindowsDriverServiceProvider();
     private readonly IPersistenceInventoryProvider persistence = new WindowsPersistenceProvider();
+    private readonly IIoAttributionCapture ioAttribution = new WindowsIoAttributionCapture();
 
     private async Task<SystemCounterSnapshot> CaptureCountersAsync(CancellationToken token)
     {
@@ -43,6 +44,36 @@ public sealed partial class MainWindow
     {
         switch (kind)
         {
+            case "IoAttribution":
+                if (detailsOpen) return;
+                detailsOpen = true;
+                var durations = new ComboBox { ItemsSource = new[] { "10 s", "30 s", "60 s" }, SelectedIndex = 0, Header = "Capture duration", HorizontalAlignment = HorizontalAlignment.Stretch };
+                var consent = new ContentDialog
+                {
+                    XamlRoot = Root.XamlRoot, RequestedTheme = Root.ActualTheme, Title = "Capture I/O (admin)",
+                    PrimaryButtonText = "Capture", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary,
+                    Content = new StackPanel
+                    {
+                        Spacing = 12,
+                        Children =
+                        {
+                            new TextBlock { Text = "Administrator-only, opt-in, bounded local capture. Observes per-process traffic and requested file I/O byte counts only: no addresses, ports, file names or contents are retained. Nothing is saved. No elevation is attempted. Close the capture dialog to cancel and stop the session.", TextWrapping = TextWrapping.Wrap },
+                            durations
+                        }
+                    }
+                };
+                ContentDialogResult choice;
+                try { choice = await consent.ShowAsync(); }
+                finally { detailsOpen = false; }
+                if (choice != ContentDialogResult.Primary || shutdown.IsCancellationRequested) return;
+                var seconds = new[] { 10, 30, 60 }[durations.SelectedIndex];
+                await ShowInventoryAsync("Per-process I/O attribution", async (view, token) =>
+                {
+                    view.ShowMessage($"Capturing for {seconds} s. Close / cancel stops the private ETW session. Nothing is saved.");
+                    var result = await ioAttribution.CaptureAsync(TimeSpan.FromSeconds(seconds), token);
+                    if (!token.IsCancellationRequested) view.Content = new Views.IoAttributionView(result);
+                });
+                break;
             case "Disk":
                 await ShowInventoryAsync("Disk latency and queue", async (view, token) =>
                 {
