@@ -77,6 +77,13 @@ dependency-versions.json records managed package versions. licenses/ preserves
 package license/notice files and NuGet metadata, including build-only dependencies
 and downloaded runtime packs; this inventory does not assert every package is linked.
 BUILD-METADATA.json identifies the source revision and whether it was dirty.
+I/O attribution uses Microsoft.Diagnostics.Tracing.TraceEvent 4.0.0, Microsoft,
+MIT (https://github.com/microsoft/perfview). Its additional shipped managed runtime
+dependencies include Microsoft.Diagnostics.NETCore.Client 0.2.661903,
+Microsoft.Extensions.DependencyInjection.Abstractions 8.0.2 and
+Microsoft.Extensions.Logging.Abstractions 8.0.3, all Microsoft, MIT.
+TraceEvent also ships FastSerialization and COM interop/native support binaries;
+the package metadata and transitive dependency notices are preserved in licenses/.
 See src/README.md and docs/testing/QUALITY_GATES.md in the source repository for
 supported features, missing measurements and remaining license review gates.
 '@ | Set-Content -LiteralPath (Join-Path $output 'README-TEST-BUILD.txt') -Encoding UTF8

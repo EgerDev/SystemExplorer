@@ -11,5 +11,6 @@ public sealed partial class SummaryCard : UserControl
     public string Label { get => (string)GetValue(LabelProperty); set => SetValue(LabelProperty, value); }
     public string Value { get => (string)GetValue(ValueProperty); set => SetValue(ValueProperty, value); }
     public string Glyph { get => (string)GetValue(GlyphProperty); set => SetValue(GlyphProperty, value); }
+    public string AccessibleValue(string label, string value) => $"{label}: {value}";
     public SummaryCard() => InitializeComponent();
 }

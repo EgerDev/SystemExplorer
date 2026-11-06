@@ -1,0 +1,10 @@
+<UserControl
+    x:Class="SystemExplorer.App.Views.ResourceTrendView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Foreground="{ThemeResource InteractionAccent}">
+    <Grid>
+        <Canvas x:Name="Plot" SizeChanged="PlotSizeChanged" AutomationProperties.AccessibilityView="Raw"/>
+        <TextBlock x:Name="HistoryDescription" Style="{StaticResource Muted}" VerticalAlignment="Bottom"/>
+    </Grid>
+</UserControl>

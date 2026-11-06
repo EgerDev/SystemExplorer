@@ -4,32 +4,30 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:SystemExplorer.App"
     xmlns:controls="using:SystemExplorer.App.Controls"
+    xmlns:views="using:SystemExplorer.App.Views"
     Title="SystemExplorer">
     <Grid x:Name="Root" Background="{ThemeResource PageSurface}" RequestedTheme="Light" KeyboardAcceleratorPlacementMode="Hidden">
         <Grid.Resources>
             <controls:ProcessColumns x:Key="ProcessColumns"/>
         </Grid.Resources>
         <Grid.RowDefinitions>
-            <RowDefinition Height="60"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="28"/>
         </Grid.RowDefinitions>
-        <Grid Padding="20,10" ColumnSpacing="22">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="192"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                <Border Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="7" Width="32" Height="32">
-                    <FontIcon Glyph="&#xE9D9;" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" FontSize="20"/>
-                </Border>
-                <TextBlock Text="SystemExplorer" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
-            </StackPanel>
-            <AutoSuggestBox x:Name="GlobalSearch" Grid.Column="1" PlaceholderText="Search processes, services, or connections…  Ctrl+K" QueryIcon="Find" TextChanged="GlobalSearchChanged" AutomationProperties.Name="Search current section" AutomationProperties.AcceleratorKey="Ctrl+K" MaxWidth="650" HorizontalAlignment="Stretch" />
-            <Button Grid.Column="2" x:Name="PauseButton" Content="Pause" Click="PauseClicked" AutomationProperties.Name="Pause live refresh"/>
-        </Grid>
-        <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Auto" ExpandedModeThresholdWidth="1100" CompactModeThresholdWidth="640" IsBackButtonVisible="Collapsed" IsSettingsVisible="False" OpenPaneLength="192" CompactPaneLength="48" IsPaneToggleButtonVisible="True" SelectionChanged="NavigationChanged" AlwaysShowHeader="False">
+        <TitleBar x:Name="WindowTitleBar" Title="SystemExplorer">
+            <TitleBar.Resources>
+                <HorizontalAlignment x:Key="TitleBarContentHorizontalAlignment">Stretch</HorizontalAlignment>
+            </TitleBar.Resources>
+            <TitleBar.IconSource><SymbolIconSource Symbol="ShowResults"/></TitleBar.IconSource>
+            <TitleBar.Content>
+                <AutoSuggestBox x:Name="GlobalSearch" PlaceholderText="Search this section…  Ctrl+K" QueryIcon="Find" TextChanged="GlobalSearchChanged" AutomationProperties.Name="Search current section" AutomationProperties.AcceleratorKey="Ctrl+K" MaxWidth="600" HorizontalAlignment="Stretch"/>
+            </TitleBar.Content>
+            <TitleBar.RightHeader>
+                <Button x:Name="PauseButton" Content="Pause" Click="PauseClicked" AutomationProperties.Name="Pause live refresh"/>
+            </TitleBar.RightHeader>
+        </TitleBar>
+        <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Auto" ExpandedModeThresholdWidth="900" CompactModeThresholdWidth="640" IsBackButtonVisible="Collapsed" IsSettingsVisible="False" OpenPaneLength="192" CompactPaneLength="48" IsPaneToggleButtonVisible="True" SelectionChanged="NavigationChanged" AlwaysShowHeader="False">
             <NavigationView.MenuItems>
                 <NavigationViewItem Content="Overview" Tag="Overview" Icon="Home"/>
                 <NavigationViewItem Content="Processes" Tag="Processes" Icon="AllApps" IsSelected="True"/>
@@ -73,22 +71,10 @@
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
                 <StackPanel Spacing="2">
-                    <TextBlock x:Name="PageTitle" Text="Processes" FontSize="28" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="PageSubtitle" Text="Live Windows processes, grouped conservatively by executable and parent chain." Style="{StaticResource Muted}"/>
+                    <TextBlock x:Name="PageTitle" Text="Processes" Style="{StaticResource PageHeading}"/>
+                    <TextBlock x:Name="PageSubtitle" Text="See what's using your system and explore related processes." Style="{StaticResource Muted}"/>
                 </StackPanel>
-                <Grid Grid.Row="1" ColumnSpacing="10">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                    </Grid.ColumnDefinitions>
-                    <controls:SummaryCard Grid.Column="0" Label="Total processes" Value="{x:Bind Model.ProcessCount, Mode=OneWay}" Glyph="&#xE950;"/>
-                    <controls:SummaryCard Grid.Column="1" Label="Application groups" Value="{x:Bind Model.GroupCount, Mode=OneWay}" Glyph="&#xE8FD;"/>
-                    <controls:SummaryCard Grid.Column="2" Label="Physical memory used" Value="{x:Bind Model.MemoryUsed, Mode=OneWay}" Glyph="&#xE964;"/>
-                    <controls:SummaryCard Grid.Column="3" Label="System CPU" Value="{x:Bind Model.CpuUsed, Mode=OneWay}" Glyph="&#xE9D9;"/>
-                </Grid>
-                <Grid x:Name="ProcessesPanel" Grid.Row="2" ColumnSpacing="12" SizeChanged="ProcessesSizeChanged">
+                <Grid x:Name="ProcessesPanel" Grid.Row="1" Grid.RowSpan="2" ColumnSpacing="12" SizeChanged="ProcessesSizeChanged">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition x:Name="InspectorColumn" Width="320"/>
@@ -96,15 +82,23 @@
                     <Grid RowSpacing="8">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition x:Name="MemorySummaryColumn"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <controls:SummaryCard Label="Processes" Value="{x:Bind Model.ProcessCount, Mode=OneWay}" Glyph="&#xE950;"/>
+                            <controls:SummaryCard Grid.Column="1" Label="Process groups" Value="{x:Bind Model.GroupCount, Mode=OneWay}" Glyph="&#xE8FD;" ToolTipService.ToolTip="Groups use the same executable, owner and observed parent chain; single processes are included."/>
+                            <controls:SummaryCard Grid.Column="2" Label="Memory in use" Value="{x:Bind Model.MemoryUsed, Mode=OneWay}" Glyph="&#xE964;" ToolTipService.ToolTip="Physical memory in use across the system. Not the sum of process private commit."/>
+                            <controls:SummaryCard Grid.Column="3" Label="System CPU" Value="{x:Bind Model.CpuUsed, Mode=OneWay}" Glyph="&#xE9D9;"/>
+                        </Grid>
+                        <Grid Grid.Row="1" ColumnSpacing="6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="150"/>
-                                <ColumnDefinition Width="150"/>
-                                <ColumnDefinition Width="40"/>
+                                <ColumnDefinition Width="120"/>
+                                <ColumnDefinition Width="156"/>
+                                <ColumnDefinition Width="34"/>
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="ProcessSearch" PlaceholderText="Search processes…" TextChanged="ProcessSearchChanged" AutomationProperties.Name="Filter processes"/>
                             <ComboBox x:Name="Grouping" Grid.Column="1" SelectedIndex="0" SelectionChanged="OptionsChanged" HorizontalAlignment="Stretch" AutomationProperties.Name="Group processes">
@@ -121,7 +115,7 @@
                                 <FontIcon Glyph="&#xE8CB;" FontSize="15"/>
                             </Button>
                         </Grid>
-                        <Border Grid.Row="1" Style="{StaticResource Card}" Padding="0">
+                        <Border Grid.Row="2" Style="{StaticResource Card}" Padding="0" SizeChanged="TableSizeChanged">
                             <Grid>
                                 <ScrollViewer HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled" IsTabStop="False">
                                     <Grid Width="{Binding TableWidth, Source={StaticResource ProcessColumns}, Mode=OneWay}">
@@ -153,19 +147,19 @@
                                                     <Button Content="CPU %" Tag="CPU" Click="ColumnSortClicked" Style="{StaticResource ColumnHeader}" Margin="0,0,12,0" ToolTipService.ToolTip="Sort by CPU %"/>
                                                     <controls:ColumnResizeHandle Columns="{StaticResource ProcessColumns}" ColumnIndex="2" AutomationProperties.Name="Resize CPU % column" AutomationProperties.HelpText="Left / Right change width. Home / End set minimum / maximum."/>
                                                 </Grid>
-                                                <Grid Grid.Column="3">
-                                                    <TextBlock Text="I/O rate" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" Margin="8,0,12,0"/>
+                                                <Grid Grid.Column="3" Visibility="{Binding IoVisibility, Source={StaticResource ProcessColumns}, Mode=OneWay}">
+                                                    <TextBlock Text="I/O rate" FontSize="13" VerticalAlignment="Center" Margin="8,0,12,0"/>
                                                     <controls:ColumnResizeHandle Columns="{StaticResource ProcessColumns}" ColumnIndex="3" AutomationProperties.Name="Resize I/O rate column" AutomationProperties.HelpText="Left / Right change width. Home / End set minimum / maximum."/>
                                                 </Grid>
-                                                <Grid Grid.Column="4">
-                                                    <TextBlock Text="Threads" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" Margin="8,0,12,0"/>
+                                                <Grid Grid.Column="4" Visibility="{Binding ThreadsVisibility, Source={StaticResource ProcessColumns}, Mode=OneWay}">
+                                                    <TextBlock Text="Threads" FontSize="13" VerticalAlignment="Center" Margin="8,0,12,0"/>
                                                     <controls:ColumnResizeHandle Columns="{StaticResource ProcessColumns}" ColumnIndex="4" AutomationProperties.Name="Resize Threads column" AutomationProperties.HelpText="Left / Right change width. Home / End set minimum / maximum."/>
                                                 </Grid>
-                                                <Grid Grid.Column="5">
+                                                <Grid Grid.Column="5" Visibility="Collapsed">
                                                     <TextBlock Text="User" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" Margin="8,0,12,0"/>
                                                     <controls:ColumnResizeHandle Columns="{StaticResource ProcessColumns}" ColumnIndex="5" AutomationProperties.Name="Resize User column" AutomationProperties.HelpText="Left / Right change width. Home / End set minimum / maximum."/>
                                                 </Grid>
-                                                <Grid Grid.Column="6">
+                                                <Grid Grid.Column="6" Visibility="Collapsed">
                                                     <TextBlock Text="Status" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" Margin="8,0,12,0"/>
                                                     <controls:ColumnResizeHandle Columns="{StaticResource ProcessColumns}" ColumnIndex="6" AutomationProperties.Name="Resize Status column" AutomationProperties.HelpText="Left / Right change width. Home / End set minimum / maximum."/>
                                                 </Grid>
@@ -186,7 +180,7 @@
                                             </ListView.ItemContainerStyle>
                                             <ListView.ItemTemplate>
                                                 <DataTemplate x:DataType="local:ProcessRow">
-                                                    <Grid Width="{Binding ContentWidth, Source={StaticResource ProcessColumns}, Mode=OneWay}" MinHeight="32" ToolTipService.ToolTip="{x:Bind GroupingReason}">
+                                                    <Grid Width="{Binding ContentWidth, Source={StaticResource ProcessColumns}, Mode=OneWay}" MinHeight="{x:Bind RowHeight}" ToolTipService.ToolTip="{x:Bind GroupingReason}">
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="{Binding Name, Source={StaticResource ProcessColumns}, Mode=OneWay}"/>
                                                             <ColumnDefinition Width="{Binding Memory, Source={StaticResource ProcessColumns}, Mode=OneWay}"/>
@@ -198,6 +192,7 @@
                                                             <ColumnDefinition Width="{Binding Pid, Source={StaticResource ProcessColumns}, Mode=OneWay}"/>
                                                         </Grid.ColumnDefinitions>
                                                         <Border Grid.ColumnSpan="8" Background="{ThemeResource GroupSurface}" Opacity="0.45" Visibility="{x:Bind GroupVisibility, Mode=OneWay}" IsHitTestVisible="False"/>
+                                                        <Border Grid.ColumnSpan="8" Background="{ThemeResource SelectionSurface}" Visibility="{x:Bind SelectionVisibility, Mode=OneWay}" IsHitTestVisible="False"/>
                                                         <Border Grid.ColumnSpan="8" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,0,1" IsHitTestVisible="False"/>
                                                         <Grid ColumnSpacing="6" Margin="4,0,8,0">
                                                             <Grid.ColumnDefinitions>
@@ -211,14 +206,23 @@
                                                                 <FontIcon Glyph="&#xE8A5;" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="16"/>
                                                                 <Image Width="20" Height="20" Loaded="ProcessIconLoaded" DataContextChanged="ProcessIconChanged"/>
                                                             </Grid>
-                                                            <TextBlock Grid.Column="3" Text="{x:Bind Name, Mode=OneWay}" FontSize="13" FontWeight="{x:Bind RowWeight, Mode=OneWay}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                                            <Grid Grid.Column="3" VerticalAlignment="Center" ColumnSpacing="4">
+                                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                                <StackPanel ToolTipService.ToolTip="{x:Bind IdentityHelp, Mode=OneWay}">
+                                                                    <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="{StaticResource DataSize}" FontWeight="{x:Bind RowWeight, Mode=OneWay}" TextTrimming="CharacterEllipsis"/>
+                                                                    <TextBlock Text="{x:Bind RawName}" FontSize="{StaticResource CaptionSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" Visibility="{x:Bind DescriptionVisibility, Mode=OneWay}"/>
+                                                                </StackPanel>
+                                                                <Border Grid.Column="1" Background="{ThemeResource ControlFillColorSecondaryBrush}" CornerRadius="4" Padding="5,1" VerticalAlignment="Center" Visibility="{x:Bind GroupVisibility, Mode=OneWay}">
+                                                                    <TextBlock Text="{x:Bind Count, Mode=OneWay}" FontSize="13"/>
+                                                                </Border>
+                                                            </Grid>
                                                         </Grid>
                                                         <TextBlock Grid.Column="1" Text="{x:Bind Memory, Mode=OneWay}" FontWeight="{x:Bind RowWeight, Mode=OneWay}" Style="{StaticResource NumericCell}"/>
                                                         <TextBlock Grid.Column="2" Text="{x:Bind Cpu, Mode=OneWay}" FontWeight="{x:Bind RowWeight, Mode=OneWay}" Style="{StaticResource NumericCell}"/>
-                                                        <TextBlock Grid.Column="3" Text="{x:Bind Io, Mode=OneWay}" FontWeight="{x:Bind RowWeight, Mode=OneWay}" Style="{StaticResource NumericCell}"/>
-                                                        <TextBlock Grid.Column="4" Text="{x:Bind Threads, Mode=OneWay}" FontWeight="{x:Bind RowWeight, Mode=OneWay}" Style="{StaticResource NumericCell}"/>
-                                                        <TextBlock Grid.Column="5" Text="{x:Bind User, Mode=OneWay}" FontWeight="{x:Bind RowWeight, Mode=OneWay}" Style="{StaticResource DataCell}"/>
-                                                        <Border Grid.Column="6" Background="{ThemeResource ControlFillColorSecondaryBrush}" CornerRadius="4" Padding="6,2" Margin="8,0" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                                        <TextBlock Grid.Column="3" Text="{x:Bind Io, Mode=OneWay}" FontWeight="{x:Bind RowWeight, Mode=OneWay}" Style="{StaticResource NumericCell}" Visibility="{Binding IoVisibility, Source={StaticResource ProcessColumns}, Mode=OneWay}"/>
+                                                        <TextBlock Grid.Column="4" Text="{x:Bind Threads, Mode=OneWay}" FontWeight="{x:Bind RowWeight, Mode=OneWay}" Style="{StaticResource NumericCell}" Visibility="{Binding ThreadsVisibility, Source={StaticResource ProcessColumns}, Mode=OneWay}"/>
+                                                        <TextBlock Grid.Column="5" Text="{x:Bind User, Mode=OneWay}" FontWeight="{x:Bind RowWeight, Mode=OneWay}" Style="{StaticResource DataCell}" Visibility="Collapsed"/>
+                                                        <Border Grid.Column="6" Background="{ThemeResource ControlFillColorSecondaryBrush}" CornerRadius="4" Padding="6,2" Margin="8,0" HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="Collapsed">
                                                             <TextBlock Text="{x:Bind Status, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                                                         </Border>
                                                         <TextBlock Grid.Column="7" Text="{x:Bind Pid, Mode=OneWay}" FontWeight="{x:Bind RowWeight, Mode=OneWay}" Style="{StaticResource NumericCell}"/>
@@ -231,103 +235,90 @@
                                 <TextBlock Margin="24,55,24,24" HorizontalAlignment="Center" VerticalAlignment="Top" TextAlignment="Center" Style="{StaticResource Muted}" Text="{x:Bind Model.EmptyMessage, Mode=OneWay}" Visibility="{x:Bind Model.EmptyVisibility, Mode=OneWay}" AutomationProperties.LiveSetting="Polite"/>
                             </Grid>
                         </Border>
-                        <Grid Grid.Row="2" ColumnSpacing="12">
+                        <Grid Grid.Row="3" ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="Observed ≠ running state · — means unavailable · Private commit ≠ RAM" Style="{StaticResource Muted}" FontSize="12" VerticalAlignment="Center"/>
+                            <TextBlock Text="Private commit is not physical RAM · — Unavailable" Style="{StaticResource Muted}" FontSize="13" VerticalAlignment="Center" ToolTipService.ToolTip="Process state is not inferred. Groups use the same executable, owner and observed parent chain. Inspect a selected member for details."/>
                             <Button x:Name="DetailsButton" Grid.Column="1" Content="Details" Click="DetailsClicked" Visibility="Collapsed" AutomationProperties.Name="Inspect selected process"/>
                         </Grid>
                     </Grid>
-                    <ScrollViewer x:Name="Inspector" Grid.Column="1" VerticalScrollBarVisibility="Auto">
-                        <StackPanel Spacing="12">
-                            <Border Style="{StaticResource Card}">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Text="PROCESS INSPECTOR" FontSize="11" CharacterSpacing="80" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                    <TextBlock x:Name="SelectedName" Text="Select a process" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                                    <Border Background="{ThemeResource ControlFillColorSecondaryBrush}" CornerRadius="4" Padding="7,3" HorizontalAlignment="Left">
-                                        <TextBlock x:Name="SelectedStatus" Text="No selection" FontSize="12"/>
-                                    </Border>
-                                    <TextBlock x:Name="SelectedIdentity" Text="Select a process to inspect its live measurements." Style="{StaticResource Muted}"/>
-                                    <TextBlock x:Name="SelectedAvailability" Style="{StaticResource Muted}" FontSize="12"/>
+                    <Grid x:Name="Inspector" Grid.Column="1" RowSpacing="8">
+                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <Border Style="{StaticResource Card}" Padding="12">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                <StackPanel>
+                                    <Grid ColumnSpacing="10" Margin="0,0,0,10">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <Grid VerticalAlignment="Top" Margin="0,4,0,0">
+                                            <FontIcon Glyph="&#xE8A5;" FontSize="28"/>
+                                            <Image x:Name="SelectedIcon" Width="32" Height="32"/>
+                                        </Grid>
+                                        <StackPanel Grid.Column="1" Spacing="3">
+                                            <TextBlock x:Name="SelectedName" Text="Process inspector" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                            <TextBlock x:Name="SelectedRawName" Style="{StaticResource Muted}" FontSize="13" TextWrapping="Wrap"/>
+                                            <TextBlock x:Name="SelectedIdentity" Text="Select a process to see its details." Style="{StaticResource Muted}" FontSize="13"/>
+                                        </StackPanel>
+                                    </Grid>
+                                    <Grid ColumnSpacing="12" Padding="0,8" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="0,1">
+                                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="Private commit" FontSize="13"/><TextBlock x:Name="SelectedCommit" Text="—" FontSize="22" FontWeight="SemiBold"/></StackPanel>
+                                        <StackPanel Grid.Column="1"><TextBlock Text="CPU" FontSize="13"/><TextBlock x:Name="SelectedCpu" Text="—" FontSize="22" FontWeight="SemiBold"/></StackPanel>
+                                    </Grid>
+                                    <controls:InspectorRow x:Name="SelectedPath" Glyph="&#xE8A5;" Label="Executable path" Value="—"/>
+                                    <controls:InspectorRow x:Name="SelectedOwner" Glyph="&#xE77B;" Label="User" Value="—"/>
+                                    <controls:InspectorRow x:Name="SelectedParent" Glyph="&#xE8FD;" Label="Parent process" Value="—"/>
+                                    <controls:InspectorRow x:Name="SelectedServices" Glyph="&#xE713;" Label="Associated services" Value="—"/>
+                                    <controls:InspectorRow x:Name="SelectedNetwork" Glyph="&#xE701;" Label="Network endpoints" Value="—"/>
+                                    <TextBlock Text="Read-only native inspection" Style="{StaticResource SectionLabel}" Margin="0,8,0,0"/>
+                                    <Grid ColumnSpacing="6">
+                                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                        <Button x:Name="ModulesButton" Content="Modules" Tag="Modules" Click="InspectionClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                        <Button x:Name="RegionsButton" Grid.Column="1" Content="Memory regions" Tag="Regions" Click="InspectionClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                    </Grid>
+                            <Grid ColumnSpacing="6">
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <Button x:Name="ThreadsButton" Content="Threads / waits" Click="ThreadsClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                <Button x:Name="HistoryButton" Grid.Column="1" Content="Recent history" Click="HistoryClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                            </Grid>
+                            <Grid ColumnSpacing="6">
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <Button x:Name="SecurityButton" Content="Security" Click="SecurityClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                <Button x:Name="HandlesButton" Grid.Column="1" Content="Handles" Click="HandlesClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                <Button x:Name="ActivityButton" Grid.Column="2" Content="Activity" Click="ActivityClicked" HorizontalAlignment="Stretch" IsEnabled="False" ToolTipService.ToolTip="Context switches and CPU cycles per thread"/>
+                            </Grid>
+                                    <Expander Header="Advanced details" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,10,0,0">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock x:Name="SelectedStatus" Text="No selection" Style="{StaticResource Muted}"/>
+                                            <TextBlock x:Name="SelectedAvailability" Style="{StaticResource Muted}"/>
+                                            <TextBlock Text="Command line" Style="{StaticResource SectionLabel}"/>
+                                            <TextBlock x:Name="SelectedCommandLine" Text="—" Style="{StaticResource Muted}" IsTextSelectionEnabled="True"/>
+                                            <TextBlock x:Name="SelectedMemory" Text="—" Style="{StaticResource Muted}"/>
+                                            <TextBlock Text="Private commit is not physical RAM. Working sets include shared pages. Observed does not imply a running state." Style="{StaticResource Muted}"/>
+                                        </StackPanel>
+                                    </Expander>
                                 </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource Card}">
-                                <StackPanel Spacing="6">
-                                    <TextBlock Text="Executable" Style="{StaticResource SectionLabel}"/>
-                                    <TextBlock Text="Executable path" Style="{StaticResource Muted}"/>
-                                    <TextBlock x:Name="SelectedPath" Text="—" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontSize="13"/>
-                                    <TextBlock Text="Command line" Style="{StaticResource Muted}" Margin="0,6,0,0"/>
-                                    <TextBlock x:Name="SelectedCommandLine" Text="—" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontSize="13"/>
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource Card}">
-                                <StackPanel Spacing="6">
-                                    <TextBlock Text="Ownership" Style="{StaticResource SectionLabel}"/>
-                                    <TextBlock x:Name="SelectedOwner" Text="—" Style="{StaticResource Muted}"/>
-                                    <TextBlock Text="Parent process" Style="{StaticResource SectionLabel}" Margin="0,4,0,0"/>
-                                    <TextBlock x:Name="SelectedParent" Text="—" Style="{StaticResource Muted}"/>
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource Card}">
-                                <StackPanel Spacing="6">
-                                    <TextBlock Text="Memory" Style="{StaticResource SectionLabel}"/>
-                                    <TextBlock x:Name="SelectedMemory" Text="—" Style="{StaticResource Muted}"/>
-                                    <TextBlock Text="Private commit is not physical RAM. Working sets include shared pages." Style="{StaticResource Muted}"/>
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource Card}">
-                                <StackPanel Spacing="6">
-                                    <TextBlock Text="Relationships" Style="{StaticResource SectionLabel}"/>
-                                    <TextBlock Text="Associated services" Style="{StaticResource Muted}"/>
-                                    <TextBlock x:Name="SelectedServices" Text="—" Style="{StaticResource Muted}"/>
-                                    <TextBlock Text="Network endpoints" Style="{StaticResource SectionLabel}" Margin="0,4,0,0"/>
-                                    <TextBlock x:Name="SelectedNetwork" Text="—" Style="{StaticResource Muted}"/>
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource Card}">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Text="Read-only actions" Style="{StaticResource SectionLabel}"/>
-                                    <Button x:Name="CopyPid" Content="Copy PID" Click="CopyPidClicked" Style="{StaticResource ReadOnlyAction}" IsEnabled="False" AutomationProperties.HelpText="Copy the observed PID of the selected member, not every grouped process."/>
-                                    <Button x:Name="OpenLocation" Content="Open file location" Click="OpenLocationClicked" Style="{StaticResource ReadOnlyAction}" IsEnabled="False"/>
-                                    <Button x:Name="CopyPath" Content="Copy executable path" Click="CopyPathClicked" Style="{StaticResource ReadOnlyAction}" IsEnabled="False"/>
-                                    <Button x:Name="PublisherButton" Content="Inspect publisher" Click="PublisherClicked" Style="{StaticResource ReadOnlyAction}" IsEnabled="False"/>
-                                    <TextBlock x:Name="PublisherText" Style="{StaticResource Muted}"/>
-                                    <TextBlock Text="Read-only monitoring. No termination, suspension or automatic elevation." Style="{StaticResource Muted}" FontSize="12"/>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
-                    </ScrollViewer>
+                            </ScrollViewer>
+                        </Border>
+                        <Border Grid.Row="1" Style="{StaticResource Card}" Padding="12">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="Quick actions" Style="{StaticResource SectionLabel}" ToolTipService.ToolTip="Read-only actions. No process control or automatic elevation."/>
+                                <Grid ColumnSpacing="6" RowSpacing="6">
+                                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                                    <Button x:Name="OpenLocation" Content="Open folder" Click="OpenLocationClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                    <Button x:Name="CopyPid" Grid.Column="1" Content="Copy PID" Click="CopyPidClicked" HorizontalAlignment="Stretch" IsEnabled="False" AutomationProperties.HelpText="Copy the observed PID of the selected member, not every grouped process."/>
+                                    <Button x:Name="CopyPath" Grid.Row="1" Content="Copy path" Click="CopyPathClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                    <Button x:Name="PublisherButton" Grid.Row="1" Grid.Column="1" Content="Publisher" Click="PublisherClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                </Grid>
+                                <TextBlock x:Name="PublisherText" Style="{StaticResource Muted}" FontSize="13"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
                 </Grid>
-                <Grid x:Name="DiagnosticsPanel" Grid.Row="2" Visibility="Collapsed" RowSpacing="10">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <Border x:Name="ChartCard" Style="{StaticResource Card}">
-                        <StackPanel Spacing="5">
-                            <TextBlock x:Name="ChartTitle" Text="Recent history" FontWeight="SemiBold"/>
-                            <Canvas x:Name="HistoryChart" Height="110" SizeChanged="ChartSizeChanged"/>
-                            <TextBlock x:Name="ChartLegend" Style="{StaticResource Muted}"/>
-                        </StackPanel>
-                    </Border>
-                    <ListView x:Name="DetailsList" Grid.Row="1" SelectionMode="None" AutomationProperties.Name="Diagnostic measurements">
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <Border Style="{StaticResource Card}" Margin="0,0,0,8">
-                                    <TextBlock Text="{Binding}" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontSize="{StaticResource BodySize}"/>
-                                </Border>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                        <ListView.ItemContainerStyle>
-                            <Style TargetType="ListViewItem">
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                <Setter Property="Padding" Value="0"/>
-                            </Style>
-                        </ListView.ItemContainerStyle>
-                    </ListView>
-                </Grid>
+                <views:OverviewView x:Name="OverviewPanel" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed"/>
+                <views:DiagnosticsView x:Name="DiagnosticsPanel" Grid.Row="2" Visibility="Collapsed"/>
                 <StackPanel x:Name="SettingsPanel" Grid.Row="2" Visibility="Collapsed" Spacing="16">
                     <TextBlock Text="Appearance" FontSize="18" FontWeight="SemiBold"/>
                     <ComboBox x:Name="ThemeSelector" SelectedIndex="0" SelectionChanged="ThemeChanged" AutomationProperties.Name="Color theme">
