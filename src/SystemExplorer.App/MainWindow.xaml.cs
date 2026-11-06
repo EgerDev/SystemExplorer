@@ -68,6 +68,7 @@ public sealed partial class MainWindow : Window
             if (descriptionRefresh is not null) await descriptionRefresh;
             monitor.Dispose();
             relationships.Dispose();
+            systemCounters?.Dispose();
         };
     }
 
