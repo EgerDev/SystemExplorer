@@ -25,10 +25,10 @@
                             <Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="60"/><ColumnDefinition Width="108"/><ColumnDefinition Width="108"/><ColumnDefinition Width="108"/><ColumnDefinition Width="108"/><ColumnDefinition Width="80"/></Grid.ColumnDefinitions>
                             <StackPanel><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Identity}" FontSize="10" TextTrimming="CharacterEllipsis"/></StackPanel>
                             <TextBlock Grid.Column="1" Text="{Binding Pid}"/>
-                            <TextBlock Grid.Column="2" Text="{Binding Send}"/>
-                            <TextBlock Grid.Column="3" Text="{Binding Receive}"/>
-                            <TextBlock Grid.Column="4" Text="{Binding Read}"/>
-                            <TextBlock Grid.Column="5" Text="{Binding Write}"/>
+                            <TextBlock Grid.Column="2" Text="{Binding Send}" TextWrapping="Wrap"/>
+                            <TextBlock Grid.Column="3" Text="{Binding Receive}" TextWrapping="Wrap"/>
+                            <TextBlock Grid.Column="4" Text="{Binding Read}" TextWrapping="Wrap"/>
+                            <TextBlock Grid.Column="5" Text="{Binding Write}" TextWrapping="Wrap"/>
                             <TextBlock Grid.Column="6" Text="{Binding Events}"/>
                         </Grid>
                     </DataTemplate></ListView.ItemTemplate>
