@@ -15,7 +15,7 @@ public sealed class ApplicationDescriptions
     {
         var path = process.ExecutablePath;
         if (!process.Identity.IsStable || path is null || !string.Equals(Path.GetFileName(path), process.Name, StringComparison.OrdinalIgnoreCase)) return null;
-        lock (cache) return cache.TryGetValue(path, out var found) ? found.Text : null;
+        lock (cache) return cache.TryGetValue(path, out var found) && found.Expires > DateTimeOffset.UtcNow ? found.Text : null;
     }
 
     public async Task<string?> LoadAsync(ProcessSnapshot process, CancellationToken cancellationToken)
