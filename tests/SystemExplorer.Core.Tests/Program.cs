@@ -1,8 +1,22 @@
+using System.Reflection;
 using SystemExplorer.Core;
 using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Application description cache honors expiry", () =>
+    {
+        var descriptions = new ApplicationDescriptions();
+        var cache = (Dictionary<string, (string? Text, DateTimeOffset Expires)>)typeof(ApplicationDescriptions)
+            .GetField("cache", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(descriptions)!;
+        var process = P(10, 100) with { Name = "example.exe" };
+        var path = process.ExecutablePath!;
+        cache[path] = ("Fresh description", DateTimeOffset.MaxValue);
+        Check(descriptions.GetCached(process) == "Fresh description");
+        cache[path] = ("Expired description", DateTimeOffset.MinValue);
+        Check(descriptions.GetCached(process) is null);
+    }),
     ("Application descriptions reject unsafe labels and uncertain attribution", () =>
     {
         Check(ApplicationDescriptions.Normalize(" Example app ") == "Example app");
