@@ -4,6 +4,47 @@ using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Selected history keeps lifetimes separate and absence explicit", () =>
+    {
+        var history = new SelectedProcessHistory();
+        var process = P(10, 100);
+        history.Track(process.Identity, Snapshot(0, process));
+        history.Observe(Snapshot(2, P(10, 200)));
+        history.Observe(Snapshot(4, P(10, 200)));
+        var old = history.Snapshots.Single();
+        Check(old.Points.Count == 2 && !old.Points[1].Observed && old.Points[1].PrivateBytes is null);
+        history.Track(new(10, 200), Snapshot(4, P(10, 200)));
+        Check(history.Snapshots.Count == 2 && history.Snapshots[0].Identity.CreationTimeFileTime == 200);
+    }),
+    ("Selected history preserves nulls and marks pause and missing-sample gaps", () =>
+    {
+        var history = new SelectedProcessHistory();
+        var process = P(10, 100) with { PrivateBytes = null, CpuPercent = null };
+        history.Track(process.Identity, Snapshot(0, process));
+        history.BreakContinuity();
+        history.Observe(Snapshot(2, process));
+        history.Observe(Snapshot(2, process));
+        history.Observe(Snapshot(1, process));
+        Check(history.Snapshots.Single().Points.Count == 2);
+        Check(history.Snapshots.Single().Points[1] is { BreakBefore: true, PrivateBytes: null, CpuPercent: null });
+        history.Observe(Snapshot(4));
+        history.Observe(Snapshot(6, process));
+        Check(history.Snapshots.Single().Points.Last().BreakBefore);
+        history.Observe(Snapshot(30, process));
+        Check(history.Snapshots.Single().Points.Last().BreakBefore);
+    }),
+    ("Selected history bounds points and least-recently-selected lifetimes", () =>
+    {
+        var history = new SelectedProcessHistory();
+        var process = P(10, 100);
+        history.Track(process.Identity, Snapshot(0, process));
+        for (int i = 1; i < 200; i++) history.Observe(Snapshot(i * 2, process));
+        Check(history.Snapshots.Single().Points.Count == SelectedProcessHistory.MaximumPoints);
+        for (int i = 1; i <= 9; i++) history.Track(new(i, i), Snapshot(400, P(i, i)));
+        Check(history.Snapshots.Count == SelectedProcessHistory.MaximumLifetimes && history.Snapshots.All(s => s.Identity.Pid != 10));
+        history.Track(new(99, null), Snapshot(400, P(99, 0) with { Identity = new(99, null) }));
+        Check(history.Snapshots.Count == SelectedProcessHistory.MaximumLifetimes);
+    }),
     ("Diagnostic byte units retain small region spans", () =>
     {
         Check(DiagnosticData.Bytes(null) == "—" && DiagnosticData.Bytes(0) == "0 B");

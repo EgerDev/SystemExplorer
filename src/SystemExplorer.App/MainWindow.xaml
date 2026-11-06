@@ -277,6 +277,7 @@
                                         <Button x:Name="ModulesButton" Content="Modules" Tag="Modules" Click="InspectionClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
                                         <Button x:Name="RegionsButton" Grid.Column="1" Content="Memory regions" Tag="Regions" Click="InspectionClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
                                     </Grid>
+                                    <Button x:Name="HistoryButton" Content="Recent selected-process history" Click="HistoryClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
                                     <Expander Header="Advanced details" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,10,0,0">
                                         <StackPanel Spacing="8">
                                             <TextBlock x:Name="SelectedStatus" Text="No selection" Style="{StaticResource Muted}"/>

@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using SystemExplorer.Core;
 using SystemExplorer.Windows;
 
@@ -43,6 +44,19 @@ internal static class ProcessInspectionSmoke
         cancelled.Cancel();
         try { await provider.CaptureAsync(self, ProcessInspectionKind.Modules, cancelled.Token); throw new InvalidOperationException("Expected inspection cancellation."); }
         catch (OperationCanceledException) { }
+        var processPath = Environment.ProcessPath!;
+        var start = new ProcessStartInfo(processPath) { UseShellExecute = false, CreateNoWindow = true };
+        if (Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            start.ArgumentList.Add(typeof(ProcessInspectionSmoke).Assembly.Location);
+        start.ArgumentList.Add("--inspection-exit-child");
+        using var child = Process.Start(start) ?? throw new InvalidOperationException("Could not start owned lifetime test child.");
+        if (!NativeMethods.GetProcessTimes(child.SafeHandle, out var childCreated, out _, out _, out _))
+            throw new InvalidOperationException("Could not observe owned child creation time.");
+        var childIdentity = new ProcessIdentity(child.Id, checked((long)childCreated.Ticks));
+        Check(WindowsProcessInspectionProvider.Validate(child.SafeHandle, childIdentity) is null, "Owned child should initially be live.");
+        await child.WaitForExitAsync(token);
+        Check(child.ExitCode == 259 && WindowsProcessInspectionProvider.Validate(child.SafeHandle, childIdentity)?.Status == InspectionStatus.Exited,
+            "An exited code-259 process must not be mistaken for live.");
         Console.WriteLine("PASS: read-only modules/regions, native layouts, actual executable/allocated address, nullable fields, stable identity rejection, truncation, timeout and cancellation.");
     }
 }

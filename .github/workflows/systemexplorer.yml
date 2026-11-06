@@ -6,7 +6,7 @@ on:
     branches: [master, feature/systemexplorer-integration]
     paths: ['src/**', 'tests/**', 'tools/Build-SystemExplorer.ps1', '.github/workflows/systemexplorer.yml']
   pull_request:
-    branches: [master, feature/systemexplorer-integration, feature/phase2-validation-components, 'feature/design-fidelity-*']
+    branches: [master, feature/systemexplorer-integration, feature/phase2-validation-components, feature/read-only-process-inspection, 'feature/design-fidelity-*']
     paths: ['src/**', 'tests/**', 'tools/Build-SystemExplorer.ps1', '.github/workflows/systemexplorer.yml']
 
 permissions:

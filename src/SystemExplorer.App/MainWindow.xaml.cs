@@ -85,6 +85,7 @@ public sealed partial class MainWindow : Window
                     if (Model.Snapshot is { } previous && next.CapturedAt <= previous.CapturedAt)
                         throw new InvalidOperationException("An out-of-order observation was ignored.");
                     Model.Apply(next);
+                    selectedHistory.Observe(next);
                     overviewData.Observe(next);
                     StartDescriptionRefresh();
                     overviewStale = false;
@@ -139,6 +140,7 @@ public sealed partial class MainWindow : Window
                 if (paused || generation != observationGeneration) continue;
                 overviewData.BreakContinuity();
                 Model.History.BreakContinuity();
+                selectedHistory.BreakContinuity();
                 overviewStale = true;
                 RefreshDiagnostics();
                 StatusText.Text = $"Refresh failed; previous data is stale: {ex.Message}";
@@ -303,6 +305,7 @@ public sealed partial class MainWindow : Window
             selectedIdentity = row.Identity;
             selectedCapturedAt = Model.Snapshot?.CapturedAt;
             selectedRowKey = row.RowKey;
+            if (row.Identity is { } identity && Model.Snapshot is { } snapshot) selectedHistory.Track(identity, snapshot);
         }
         else { selectedIdentity = null; selectedCapturedAt = null; selectedRowKey = null; }
         RefreshInspector();
@@ -335,6 +338,7 @@ public sealed partial class MainWindow : Window
     private async void DetailsClicked(object sender, RoutedEventArgs args) => await ShowDetailsAsync();
     private void RefreshInspector()
     {
+        HistoryButton.IsEnabled = selectedHistory.HasHistory;
         ModulesButton.IsEnabled = RegionsButton.IsEnabled = selectedIdentity is { IsStable: true } identity && Model.Snapshot?.Processes.Any(p => p.Identity == identity) == true;
         var process = SelectedProcess;
         if (process is null)
@@ -474,6 +478,7 @@ public sealed partial class MainWindow : Window
         {
             overviewData.BreakContinuity();
             Model.History.BreakContinuity();
+            selectedHistory.BreakContinuity();
         }
         RefreshDiagnostics();
         if (Model.Snapshot is { } snapshot) tray.Update(snapshot, paused);
