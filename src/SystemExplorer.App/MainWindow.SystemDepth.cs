@@ -109,7 +109,8 @@ public sealed partial class MainWindow
                         c.LogicalProcessors.Select(p => new InventoryRow($"CPU {p.Instance}", p.Group is { } g ? $"Group {g} · number {p.Number}" : "Group unavailable",
                             V(p.ProcessorUtilityPercent, Pct), V(p.PrivilegedTimePercent, Pct), "",
                             N(p.ProcessorUtilityPercent), N(p.PrivilegedTimePercent), null,
-                            $"Logical processor {p.Instance}\nProcessor utility: {V(p.ProcessorUtilityPercent, Pct)}{Why(p.ProcessorUtilityPercent)}\nPrivileged (kernel) time: {V(p.PrivilegedTimePercent, Pct)}{Why(p.PrivilegedTimePercent)}\nMeasured as reported; values above 100% are not clamped.")),
+                            $"Logical processor {p.Instance}\nProcessor utility: {V(p.ProcessorUtilityPercent, Pct)}{Why(p.ProcessorUtilityPercent)}\nPrivileged (kernel) time: {V(p.PrivilegedTimePercent, Pct)}{Why(p.PrivilegedTimePercent)}\nMeasured as reported; values above 100% are not clamped.",
+                            NameKey: p.Group is { } group && p.Number is { } number ? (decimal)group * 65536 + number : null)),
                         "Logical processor", "Utility", "Privileged", "");
                 });
                 break;
@@ -127,7 +128,7 @@ public sealed partial class MainWindow
                             N(p.MaxUtilizationPercent), N(p.DedicatedUsageBytes), N(p.SharedUsageBytes),
                             $"PID {p.Pid} · creation {p.Identity?.CreationTimeFileTime.ToString() ?? "unverified"} · adapter 0x{p.AdapterLuid:X}\n{string.Join("\n", p.Engines.Select(e => $"{e.EngineType}: {V(e.UtilizationPercent, Pct)}"))}\nDedicated: {V(p.DedicatedUsageBytes, B)} · Shared: {V(p.SharedUsageBytes, B)}",
                             p.Identity)));
-                    view.ShowRows($"{g.Status} · {r.CapturedAt.LocalDateTime:T} · {g.Detail} {g.InventoryDetail}{(g.MalformedInstanceCount > 0 ? $" {g.MalformedInstanceCount} malformed counter instance(s) skipped." : "")}",
+                    view.ShowRows($"{g.Status} · {r.CapturedAt.LocalDateTime:T} · {g.Detail} Inventory: {g.InventoryStatus} · {g.InventoryDetail}{(g.MalformedInstanceCount > 0 ? $" {g.MalformedInstanceCount} malformed counter instance(s) skipped. {g.MalformedDetail}" : "")}",
                         rows, "Adapter / process", "Busiest engine", "Dedicated", "Shared", initialSort: 1, reverse: true);
                 });
                 break;
@@ -166,7 +167,8 @@ public sealed partial class MainWindow
             case "DllUsers":
                 var dll = kind == "DllUsers";
                 var query = await PromptAsync(dll ? "Find processes that loaded a DLL" : "Find processes using a file",
-                    dll ? "Module name or path fragment, e.g. user32.dll" : @"Local absolute file path, e.g. C:\data\report.xlsx");
+                    dll ? "Module name or path fragment, e.g. user32.dll" : @"Local absolute file path, e.g. C:\data\report.xlsx",
+                    dll ? "Enter a module name or path fragment to search." : "Enter a local file path to search.");
                 if (string.IsNullOrWhiteSpace(query)) return;
                 await ShowInventoryAsync(dll ? $"Module users · {query}" : $"File users · {query}", async (view, token) =>
                 {
@@ -174,7 +176,7 @@ public sealed partial class MainWindow
                     {
                         var r = await fileUsage.FindModuleUsersAsync(query, token);
                         view.ShowRows($"{r.Status} · {r.Detail}", r.Matches.Select(m => new InventoryRow(ProcessName(m.Identity), m.ModulePath,
-                            $"PID {m.Identity.Pid}", $"0x{m.BaseAddress:X}", "", m.Identity.Pid, null, null,
+                            $"PID {m.Identity.Pid}", $"0x{m.BaseAddress:X}", "", m.Identity.Pid, m.BaseAddress, null,
                             $"PID {m.Identity.Pid} · creation {m.Identity.CreationTimeFileTime}\n{m.ModuleName}\n{m.ModulePath}\nBase 0x{m.BaseAddress:X}", m.Identity)),
                             "Process", "PID", "Base", "");
                     }
@@ -184,7 +186,7 @@ public sealed partial class MainWindow
                         view.ShowRows($"{r.Status} · {r.Detail} Restart Manager reports registered users only; it is read-only here and nothing is closed or restarted.",
                             r.Users.Select(u => new InventoryRow(u.AppName ?? ProcessName(u.Identity), u.ServiceShortName is { } svc ? $"Service {svc}" : u.AppType.ToString(),
                                 $"PID {u.Identity.Pid}", u.AppType.ToString(), "", u.Identity.Pid, null, null,
-                                $"{u.AppName} · PID {u.Identity.Pid} · creation {u.Identity.CreationTimeFileTime}\nType: {u.AppType} ({u.RawAppType}) · service: {u.ServiceShortName ?? "—"}", u.Identity)),
+                                $"{u.AppName} · PID {u.Identity.Pid} · creation {u.Identity.CreationTimeFileTime}\nType: {u.AppType} ({u.RawAppType}) · service: {u.ServiceShortName ?? "—"}\nRestartable (Restart Manager): {u.Restartable?.ToString() ?? "Unavailable"}. Nothing is restarted.", u.Identity)),
                             "Process", "PID", "Type", "");
                     }
                 });
@@ -204,7 +206,7 @@ public sealed partial class MainWindow
                 await ShowInventoryAsync("Other persistence locations", async (view, token) =>
                 {
                     var r = await persistence.CaptureAsync(token);
-                    var denied = r.Sources.Where(s => s.Status is not InspectionStatus.Available).Select(s => $"{s.Source}/{s.Scope}: {s.Status}");
+                    var denied = r.Sources.Where(s => s.Status is not InspectionStatus.Available).Select(s => $"{s.Source}/{s.Scope}: {s.Status} — {s.Detail}");
                     view.ShowRows($"{r.Status} · {r.CapturedAt.LocalDateTime:T} · {r.Detail} {string.Join("; ", denied)} Presence is not evidence of compromise; KnownDLLs rows are reference values.",
                         r.Entries.Select(e => new InventoryRow(e.Name, e.Location, e.Source.ToString(), e.Scope.ToString(), e.IsReference ? "Reference" : e.Status.ToString(),
                             FullText: $"{e.Source} · {e.Scope}\n{e.Location}\n{e.Name} = {e.Value ?? "(no value)"}\n{string.Join("\n", e.Properties.Select(p => $"{p.Key}: {p.Value}"))}\n{e.Status}: {e.Detail}\nRaw and unexpanded; nothing is resolved or executed.")),
@@ -217,13 +219,19 @@ public sealed partial class MainWindow
     private static string StartName(uint? start) => start switch { 0 => "Boot", 1 => "System", 2 => "Automatic", 3 => "Demand", 4 => "Disabled", null => "—", _ => $"{start}" };
     private string ProcessName(ProcessIdentity identity) => Model.Snapshot?.Processes.FirstOrDefault(p => p.Identity == identity)?.Name ?? $"PID {identity.Pid}";
 
-    private async Task<string?> PromptAsync(string title, string placeholder)
+    private async Task<string?> PromptAsync(string title, string placeholder, string requirement = "Enter text to search.")
     {
         if (detailsOpen) return null;
-        var box = new TextBox { PlaceholderText = placeholder, MinWidth = 420 };
+        var box = new TextBox { PlaceholderText = placeholder, MinWidth = 420, Description = requirement };
         var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, RequestedTheme = Root.ActualTheme, Title = title, Content = box,
-            PrimaryButtonText = "Search", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary ? box.Text.Trim() : null;
+            PrimaryButtonText = "Search", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary, IsPrimaryButtonEnabled = false };
+        box.TextChanged += (_, _) =>
+        {
+            var valid = PromptInput.CanSubmit(box.Text);
+            dialog.IsPrimaryButtonEnabled = valid;
+            box.Description = valid ? null : requirement;
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary ? PromptInput.Normalize(box.Text) : null;
     }
 
     private async void SecurityClicked(object sender, RoutedEventArgs args)
@@ -237,19 +245,24 @@ public sealed partial class MainWindow
             var t = r.Token;
             Add("Command line", r.CommandLine.LengthCharacters is { } len ? $"{len} characters · select this row, then Show command line" : "Unavailable", r.CommandLine.Status.ToString(), r.CommandLine.Detail);
             Add("User", t.UserAccount ?? t.UserSid ?? "Unavailable", t.Status.ToString(), t.Detail);
+            Add("Token session / groups", $"Session {t.SessionId?.ToString() ?? "Unavailable"} / {t.GroupCount?.ToString("N0") ?? "Unavailable"} groups", t.Status.ToString(), $"SID: {t.UserSid ?? "Unavailable"}\n{t.Detail}");
+            Add("Token virtualization", $"Allowed: {t.VirtualizationAllowed?.ToString() ?? "Unavailable"}; enabled: {t.VirtualizationEnabled?.ToString() ?? "Unavailable"}", t.Status.ToString(), t.Detail);
             Add("Integrity level", t.Integrity?.ToString() ?? "Unavailable", t.Status.ToString(), $"RID 0x{t.IntegrityRid:X}");
             Add("Elevation", t.IsElevated is { } e ? $"{(e ? "Elevated" : "Not elevated")} · {t.ElevationType}" : "Unavailable", t.Status.ToString(), "");
             Add("AppContainer / package", $"{t.IsAppContainer?.ToString() ?? "—"} / {t.HasPackageIdentity?.ToString() ?? "—"}", t.Status.ToString(), "");
-            Add("Protection", r.Protection.LevelName ?? "Unavailable", r.Protection.Status.ToString(), r.Protection.Detail);
+            Add("Protection", r.Protection.LevelName ?? "Unavailable", r.Protection.Status.ToString(), $"{r.Protection.Detail}\nRaw level: {(r.Protection.RawLevel is { } level ? $"0x{level:X8}" : "Unavailable")}");
             Add("In a job object", r.Job.InAnyJob?.ToString() ?? "Unavailable", r.Job.Status.ToString(), r.Job.Detail);
+            Add("Privileges", t.Privileges.Count > 0 ? $"{t.Privileges.Count} reported" : t.PrivilegesStatus == InspectionStatus.Available ? "None reported" : "Unavailable", t.PrivilegesStatus.ToString(), t.Detail);
+            Add("Mitigations", r.Mitigations.Policies.Count > 0 ? $"{r.Mitigations.Policies.Count} policies reported" : r.Mitigations.Status == InspectionStatus.Available ? "None reported" : "Unavailable", r.Mitigations.Status.ToString(), r.Mitigations.Detail);
+            Add("Runtime (.NET)", r.Runtime.Modules.Count > 0 ? $"{r.Runtime.Modules.Count} modules reported" : r.Runtime.Status == InspectionStatus.Available ? "None reported" : "Unavailable", r.Runtime.Status.ToString(), $"{r.Runtime.Detail}\n{r.Runtime.Source}");
             foreach (var p in t.Privileges)
-                Add($"Privilege {p.Name}", p.Enabled ? "Enabled" : p.Removed ? "Removed" : "Present, disabled", t.PrivilegesStatus.ToString(), $"Enabled by default: {p.EnabledByDefault}. Nothing is enabled or changed.");
+                Add($"Privilege {p.Name}", p.Enabled ? "Enabled" : p.Removed ? "Removed" : "Present, disabled", t.PrivilegesStatus.ToString(), $"LUID {unchecked((uint)p.LuidHigh):X8}:{p.LuidLow:X8}; attributes 0x{p.RawAttributes:X8}. Enabled by default: {p.EnabledByDefault}. Nothing is enabled or changed.");
             foreach (var m in r.Mitigations.Policies)
                 Add($"Mitigation {m.Kind}", m.Flags.Count == 0 ? "No flags reported" : string.Join(", ", m.Flags.Where(f => f.Value).Select(f => f.Name).DefaultIfEmpty("All off")), m.Status.ToString(), $"{m.Detail} Raw 0x{m.RawFlags:X}");
             foreach (var m in r.Runtime.Modules)
-                Add($"Runtime {m.RuntimeFamily}", $"{m.ModuleName} {m.FileVersion}", r.Runtime.Status.ToString(), $"{m.Path}\n{r.Runtime.Source}");
+                Add($"Runtime {m.RuntimeFamily}", $"{m.ModuleName} {m.FileVersion}", r.Runtime.Status.ToString(), $"{m.Path}\nProduct version: {m.ProductVersion ?? "Unavailable"}\n{r.Runtime.Source}");
             if (r.Image.Provenance is { } i)
-                Add("Image signature", $"{i.Signature}{(i.SignerSubject is { } s ? $" · {s}" : "")}", i.Status.ToString(), $"{i.Path}\n{i.CompanyName} · {i.ProductName} · {i.FileVersion}\nCatalog: {i.CatalogPath ?? "—"}\n{i.Detail}");
+                Add("Image signature", $"{i.Signature}{(i.SignerSubject is { } s ? $" · {s}" : "")}", i.Status.ToString(), $"{i.Path}\n{i.CompanyName} · {i.ProductName} · {i.FileVersion}\nDescription: {i.FileDescription ?? "Unavailable"}\nProduct version: {i.ProductVersion ?? "Unavailable"}\nResult: {(i.SignatureHResult is { } hr ? $"0x{unchecked((uint)hr):X8}" : "Unavailable")} · verified {i.VerifiedAt.LocalDateTime:O}\nCatalog: {i.CatalogPath ?? "—"}\n{i.Detail}");
             else Add("Image signature", "Unavailable", r.Image.Status.ToString(), r.Image.Detail);
             var commandText = r.CommandLine.Text;
             if (commandText is not null) rows[0] = rows[0] with { Value = "reveal" };
@@ -270,11 +283,26 @@ public sealed partial class MainWindow
         await ShowInventoryAsync($"Handles · PID {identity.Pid}", async (view, token) =>
         {
             var r = await handleInventory.CaptureAsync(identity, token);
+            void Summary()
+            {
             view.ShowRows($"{r.Status} · {r.CapturedAt.LocalDateTime:T} · {r.ProcessHandleCount?.ToString("N0") ?? "—"} handles in this process, {r.SystemHandleCount?.ToString("N0") ?? "—"} system-wide · {r.Detail}",
                 r.ProcessCountsByType.Select(c => new InventoryRow(c.TypeName ?? $"Type {c.TypeIndex}", $"Type index {c.TypeIndex}",
                     c.HandleCount.ToString("N0"), r.SystemCountsByType.FirstOrDefault(s => s.TypeIndex == c.TypeIndex)?.HandleCount.ToString("N0") ?? "—", "",
-                    c.HandleCount, r.SystemCountsByType.FirstOrDefault(s => s.TypeIndex == c.TypeIndex)?.HandleCount, null)),
-                "Object type", "This process", "System-wide", "", initialSort: 1, reverse: true);
+                    c.HandleCount, r.SystemCountsByType.FirstOrDefault(s => s.TypeIndex == c.TypeIndex)?.HandleCount, null,
+                    Value: r.Handles.Any(h => h.TypeIndex == c.TypeIndex) ? (object?)c.TypeIndex : null)),
+                "Object type", "This process", "System-wide", "", action: r.Handles.Count > 0 ? "Handle rows" : null, initialSort: 1, reverse: true);
+            }
+            Summary();
+            view.ActionRequested += row =>
+            {
+                var selected = r.Handles.Where(h => Equals(h.TypeIndex, row.Value)).ToArray();
+                view.ShowRows($"{r.Status} · {row.Name}: {selected.Length:N0} of {r.Handles.Count:N0} collected rows (provider cap 4,096). Type-only observations; no names are queried. {r.Detail}",
+                selected.Select(h => new InventoryRow($"0x{h.HandleValue:X}", h.TypeName ?? $"Type {h.TypeIndex}",
+                    h.TypeName ?? $"Type {h.TypeIndex}", $"0x{h.GrantedAccess:X8}", $"0x{h.Attributes:X8}",
+                    FullText: $"Handle 0x{h.HandleValue:X}\nType index {h.TypeIndex}: {h.TypeName ?? "Unavailable"}\nGranted access 0x{h.GrantedAccess:X8}\nAttributes 0x{h.Attributes:X8}", NameKey: h.HandleValue)),
+                "Handle", "Type", "Access mask", "Attributes", back: true);
+            };
+            view.BackRequested += Summary;
         });
     }
 
@@ -284,11 +312,11 @@ public sealed partial class MainWindow
         await ShowInventoryAsync($"Thread activity · PID {identity.Pid}", async (view, token) =>
         {
             var r = await threadActivity.CaptureAsync(identity, token);
-            view.ShowRows($"{r.Status} · {r.CapturedAt.LocalDateTime:T} · {r.SampleInterval.TotalMilliseconds:F0} ms sample · process cycles +{r.ProcessCycleDelta?.ToString("N0") ?? "—"} · {r.Detail} Cycle counts are raw CPU cycles, not time.",
+            view.ShowRows($"{r.Status} · {r.CapturedAt.LocalDateTime:T} · {r.SampleInterval.TotalMilliseconds:F0} ms sample · process cycles {r.ProcessCycleTime?.ToString("N0") ?? "Unavailable"} (+{r.ProcessCycleDelta?.ToString("N0") ?? "—"}) · {r.Detail} Cycle counts are raw CPU cycles, not time.",
                 r.Threads.Select(t => new InventoryRow($"Thread {t.Identity.ThreadId}", $"{ObjectInventoryNames.ThreadStateName(t.ThreadState) ?? "State unavailable"} · {ObjectInventoryNames.WaitReasonName(t.WaitReason) ?? "—"} · priority {t.CurrentPriority}/{t.BasePriority}",
                     t.ContextSwitchesPerSecond is { } cs ? $"{cs:F0}/s" : "—", t.CycleDelta?.ToString("N0") ?? "—", t.ContextSwitches?.ToString("N0") ?? "—",
                     t.ContextSwitchesPerSecond is { } c ? (decimal)c : null, t.CycleDelta, t.ContextSwitches,
-                    $"TID {t.Identity.ThreadId} · creation {t.Identity.CreationTimeFileTime}\n{t.Status}: {t.Detail}\nContext switches: {t.ContextSwitches} (+{t.ContextSwitchDelta})\nCycles: {t.CycleTime} (+{t.CycleDelta})")),
+                    $"TID {t.Identity.ThreadId} · creation {t.Identity.CreationTimeFileTime}\n{t.Status}: {t.Detail}\nContext switches: {t.ContextSwitches} (+{t.ContextSwitchDelta})\nCycles: {t.CycleTime} (+{t.CycleDelta})", NameKey: t.Identity.ThreadId)),
                 "Thread", "Switches/s", "Cycles in sample", "Total switches", initialSort: 1, reverse: true);
         });
     }

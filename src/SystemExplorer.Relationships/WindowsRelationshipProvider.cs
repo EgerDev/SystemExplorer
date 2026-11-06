@@ -47,6 +47,9 @@ public sealed class WindowsRelationshipProvider : IRelationshipProvider
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows relationship APIs are required.");
     }
 
+    public static bool IsServiceEnumerationGap(string limitation) =>
+        limitation.StartsWith("Services: ", StringComparison.Ordinal);
+
     private RelationshipSnapshot Capture(ProcessSnapshot[] processes, CancellationToken token)
     {
         Check(token);
