@@ -31,6 +31,7 @@ public sealed class WindowsIoAttributionCapture : IIoAttributionCapture
         var status = IoAttributionStatus.Completed;
         var detail = Limits;
         long lost = 0;
+        long malformed = 0;
         long cutoffUtcTicks = DateTime.MaxValue.Ticks;
         TraceEventSession? session = null;
         Task? processing = null;
@@ -72,14 +73,16 @@ public sealed class WindowsIoAttributionCapture : IIoAttributionCapture
                         _ => (IoAttributionKind)(-1)
                     };
                     if ((int)kind < 0) return;
-                    pid = Convert.ToInt32(RequiredPayload(data, "PID"));
-                    bytes = Convert.ToUInt64(RequiredPayload(data, "size"));
+                    if (data.PayloadByName("PID") is not { } p || data.PayloadByName("size") is not { } n) { Interlocked.Increment(ref malformed); return; }
+                    pid = Convert.ToInt32(p);
+                    bytes = Convert.ToUInt64(n);
                 }
                 else if (data.ProviderGuid == FileProvider && (int)data.ID is 15 or 16)
                 {
                     kind = (int)data.ID == 15 ? IoAttributionKind.DiskRead : IoAttributionKind.DiskWrite;
                     pid = data.ProcessID;
-                    bytes = Convert.ToUInt64(RequiredPayload(data, "IOSize"));
+                    if (data.PayloadByName("IOSize") is not { } n) { Interlocked.Increment(ref malformed); return; }
+                    bytes = Convert.ToUInt64(n);
                 }
                 else return;
                 aggregate.Add(new(pid, kind, bytes));
@@ -125,10 +128,11 @@ public sealed class WindowsIoAttributionCapture : IIoAttributionCapture
             AppDomain.CurrentDomain.ProcessExit -= exit;
             Console.CancelKeyPress -= cancel;
         }
-        if (status == IoAttributionStatus.Completed && (aggregate.IsTruncated || lost > 0)) status = IoAttributionStatus.Truncated;
+        if (status == IoAttributionStatus.Completed && (aggregate.IsTruncated || lost > 0 || malformed > 0)) status = IoAttributionStatus.Truncated;
         if (status != IoAttributionStatus.Completed) detail = $"{status}: partial/unavailable capture. " + detail;
         if (aggregate.IsTruncated) detail += " PID limit reached; new PIDs dropped.";
         if (lost > 0) detail += $" ETW lost {lost} events.";
+        if (malformed > 0) detail += $" Skipped {malformed} events missing PID/size fields.";
         var rows = aggregate.GetRows(pid => Resolve(pid, started));
         return new(started, elapsed.Elapsed, status, detail, lost, rows);
     }
@@ -148,6 +152,4 @@ public sealed class WindowsIoAttributionCapture : IIoAttributionCapture
         return (new(pid, (long)creation.Ticks), name);
     }
 
-    private static object RequiredPayload(TraceEvent data, string name) => data.PayloadByName(name)
-        ?? throw new InvalidOperationException($"Unavailable ETW field {name} for provider {data.ProviderGuid}, event {(int)data.ID}.");
 }

@@ -40,7 +40,7 @@ public sealed partial class IoAttributionView : UserControl
         Rows.ItemsSource = rows.Select(r => new
         {
             Name = r.Name ?? "Name unavailable", r.Pid,
-            Identity = r.Identity is { IsStable: true } identity ? $"Creation: {identity.CreationTimeFileTime}" : "Unstable identity",
+            Identity = r.Identity is { IsStable: true } identity ? $"Started {DateTime.FromFileTimeUtc(identity.CreationTimeFileTime ?? 0).ToLocalTime():g}" : "Unstable identity",
             Send = Rate(r.NetworkSendBytes), Receive = Rate(r.NetworkReceiveBytes), Read = Rate(r.DiskReadBytes), Write = Rate(r.DiskWriteBytes), Events = r.EventCount
         }).ToArray();
         var label = capture.Status == IoAttributionStatus.Completed ? "Measured" : "Partial / unavailable";
