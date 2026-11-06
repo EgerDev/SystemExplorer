@@ -8,6 +8,9 @@ namespace SystemExplorer.Relationships;
 
 internal static class LocalInventory
 {
+    internal static bool IncludeStartupEntry(string name, bool isFolderEntry) =>
+        !isFolderEntry || !string.Equals(name, "desktop.ini", StringComparison.OrdinalIgnoreCase);
+
     internal static IReadOnlyList<StartupItem> GetStartupItems(CancellationToken token)
     {
         var items = new List<StartupItem>();
@@ -41,6 +44,7 @@ internal static class LocalInventory
             foreach (string entry in Directory.EnumerateFileSystemEntries(path))
             {
                 token.ThrowIfCancellationRequested();
+                if (!IncludeStartupEntry(Path.GetFileName(entry), isFolderEntry: true)) continue;
                 if (items.Count >= 4096) throw new NotSupportedException("Startup inventory exceeds the 4096-entry bound; no complete inventory returned.");
                 // Inventory the entry itself; never resolve shortcuts, expand commands or execute anything.
                 items.Add(new StartupItem(Path.GetFileName(entry), entry, $"Startup folder ({folder}); target not resolved",
