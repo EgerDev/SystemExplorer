@@ -34,6 +34,29 @@ var tests = new (string Name, Action Run)[]
             Check(InventoryOrdering.Order(rows, r => r, _ => null, false, descending).First() == (descending ? "beta" : "Alpha"));
         }
     }),
+    ("Window minimum scales physical pixels and rounds up", () =>
+    {
+        Check(WindowSizing.MinimumPhysicalSize(96, 2000, 2000) == (900, 560));
+        Check(WindowSizing.MinimumPhysicalSize(120, 2000, 2000) == (1125, 700));
+        Check(WindowSizing.MinimumPhysicalSize(144, 2000, 2000) == (1350, 840));
+        Check(WindowSizing.MinimumPhysicalSize(97, 2000, 2000) == (910, 566));
+    }),
+    ("Window minimum clamps each dimension to the work area", () =>
+    {
+        Check(WindowSizing.MinimumPhysicalSize(120, 1000, 600) == (1000, 600));
+        Check(WindowSizing.MinimumPhysicalSize(120, 1000, 1000) == (1000, 700));
+        Check(WindowSizing.MinimumPhysicalSize(120, 2000, 600) == (1125, 600));
+        Check(WindowSizing.MinimumPhysicalSize(96, 0, 0) == (0, 0));
+    }),
+    ("Window minimum rejects invalid DPI and work area", () =>
+    {
+        foreach (var (dpi, width, height) in new[] { (0u, 1000, 800), (96u, -1, 800), (96u, 1000, -1) })
+        {
+            try { WindowSizing.MinimumPhysicalSize(dpi, width, height); }
+            catch (ArgumentOutOfRangeException) { continue; }
+            throw new InvalidOperationException("Invalid window sizing input accepted");
+        }
+    }),
     ("Lifecycle timeline separates baseline, starts, disappearance and PID reuse", () =>
     {
         var timeline = new ProcessLifecycleTimeline();
