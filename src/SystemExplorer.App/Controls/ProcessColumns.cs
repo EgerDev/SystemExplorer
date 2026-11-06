@@ -46,6 +46,7 @@ public sealed class ProcessColumns : INotifyPropertyChanged
     {
         if (index < 0 || index >= widths.Length || !double.IsFinite(width)) return;
         var next = Math.Clamp(width, Minimums[index], Maximums[index]);
+        if (next == widths[index]) return;
         if (index == 0)
         {
             var remaining = next - widths[0];
@@ -58,7 +59,6 @@ public sealed class ProcessColumns : INotifyPropertyChanged
                 if (Math.Abs(remaining) < 0.1) break;
             }
         }
-        if (next == preferred[index]) return;
         preferred[index] = next;
         FitViewport(viewport);
     }

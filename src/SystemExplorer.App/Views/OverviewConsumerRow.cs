@@ -42,35 +42,34 @@ public sealed class OverviewConsumerRow : INotifyPropertyChanged, IDisposable
     public Thickness Indent => new(IsChild ? 18 : 0, 0, 0, 0);
     public global::Windows.UI.Text.FontWeight NameWeight => IsChild ? Microsoft.UI.Text.FontWeights.Normal : Microsoft.UI.Text.FontWeights.SemiBold;
 
-    public void Update(ProcessSnapshot next, ProcessGroup? nextGroup, bool isExpanded, ProcessIcons icons, ApplicationDescriptions descriptions)
+    public void Update(ProcessSnapshot next, ProcessGroup? nextGroup, bool isExpanded, ProcessIcons icons, string? nextDescription)
     {
+        var identityChanged = process.Identity != next.Identity;
         var pathChanged = !string.Equals(process.ExecutablePath, next.ExecutablePath, StringComparison.OrdinalIgnoreCase);
         process = next;
         group = nextGroup;
         expanded = isExpanded;
-        if (pathChanged)
+        if (identityChanged || pathChanged)
         {
             Dispose();
-            description = null;
             icon = null;
         }
+        description = nextDescription;
         Changed();
         if (metadata is null && next.Identity.IsStable && next.ExecutablePath is not null)
         {
             metadata = new CancellationTokenSource();
-            _ = LoadMetadataAsync(next, icons, descriptions, metadata.Token);
+            _ = LoadIconAsync(next, icons, metadata.Token);
         }
     }
 
-    private async Task LoadMetadataAsync(ProcessSnapshot captured, ProcessIcons icons, ApplicationDescriptions descriptions, CancellationToken token)
+    private async Task LoadIconAsync(ProcessSnapshot captured, ProcessIcons icons, CancellationToken token)
     {
         try
         {
-            var text = await descriptions.LoadAsync(captured, token);
             var image = await icons.LoadAsync(captured.ExecutablePath!, token);
             if (token.IsCancellationRequested || captured.Identity != process.Identity ||
                 !string.Equals(captured.ExecutablePath, process.ExecutablePath, StringComparison.OrdinalIgnoreCase)) return;
-            description = text;
             icon = image;
             Changed();
         }

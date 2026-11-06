@@ -12,6 +12,7 @@ public sealed partial class MainWindow
 
     private void InitializeOverview()
     {
+        OverviewPanel.InitializeDescriptionLookup(Model.Descriptions.GetCached);
         OverviewPanel.RankingChanged += RefreshOverview;
         OverviewPanel.ViewProcessesRequested += () => NavigateTo("Processes");
         OverviewPanel.InsightsRequested += () => NavigateTo("Insights", clearSearch: true);
@@ -21,10 +22,8 @@ public sealed partial class MainWindow
     private void RefreshOverview()
     {
         if (!ready || section != "Overview") return;
-        var overviewDescription = OverviewPanel.DescriptionLookup;
         var reading = overviewData.Create(Model.Relationships, Model.History,
-            OverviewPanel.Ranking, GlobalSearch.Text,
-            process => Model.Descriptions.GetCached(process) ?? overviewDescription(process));
+            OverviewPanel.Ranking, GlobalSearch.Text, OverviewPanel.DescriptionLookup);
         OverviewPanel.Update(reading, paused, overviewStale);
     }
 

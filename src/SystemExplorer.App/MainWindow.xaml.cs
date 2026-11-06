@@ -23,6 +23,7 @@ public sealed partial class MainWindow : Window
     private readonly ProcessIcons icons = new();
     private readonly NativeTray tray;
     private Task? polling;
+    private Task? descriptionRefresh;
     private bool paused;
     private bool ready;
     private bool detailsOpen;
@@ -61,6 +62,7 @@ public sealed partial class MainWindow : Window
             tray.Dispose();
             shutdown.Cancel();
             if (polling is not null) await polling;
+            if (descriptionRefresh is not null) await descriptionRefresh;
             monitor.Dispose();
             relationships.Dispose();
         };
@@ -83,6 +85,7 @@ public sealed partial class MainWindow : Window
                         throw new InvalidOperationException("An out-of-order observation was ignored.");
                     Model.Apply(next);
                     overviewData.Observe(next);
+                    StartDescriptionRefresh();
                     overviewStale = false;
                     tray.Update(next);
                     if (cycle++ % 3 == 0)
@@ -141,6 +144,24 @@ public sealed partial class MainWindow : Window
                 catch (OperationCanceledException) { break; }
             }
         }
+    }
+
+    private void StartDescriptionRefresh()
+    {
+        if (shutdown.IsCancellationRequested || descriptionRefresh is { IsCompleted: false }) return;
+        descriptionRefresh = RefreshDescriptionsAsync(shutdown.Token);
+    }
+
+    private async Task RefreshDescriptionsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!await Model.Descriptions.RefreshAsync(cancellationToken) || cancellationToken.IsCancellationRequested) return;
+            Model.Rebuild();
+            RefreshInspector();
+            RefreshOverview();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
 
     private void NavigationChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -225,13 +246,6 @@ public sealed partial class MainWindow : Window
         if (path is null) return;
         try
         {
-            if (row is not null)
-            {
-                var description = await Model.Descriptions.LoadAsync(row.Process, shutdown.Token);
-                if (shutdown.IsCancellationRequested || !ReferenceEquals(image.DataContext, row) ||
-                    row.Identity != identity || row.Process.ExecutablePath != path || !Equals(image.Tag, key)) return;
-                row.SetDescription(description);
-            }
             var icon = await icons.LoadAsync(path, shutdown.Token);
             if (!shutdown.IsCancellationRequested && ReferenceEquals(image.DataContext, row) && row?.Identity == identity &&
                 row?.Process.ExecutablePath == path && Equals(image.Tag, key)) image.Source = icon;

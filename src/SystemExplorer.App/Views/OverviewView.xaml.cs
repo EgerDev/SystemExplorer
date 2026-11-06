@@ -12,14 +12,14 @@ public sealed partial class OverviewView : UserControl
 {
     private readonly HashSet<ProcessIdentity> expanded = new();
     private readonly ProcessIcons icons = new();
-    private readonly ApplicationDescriptions descriptions = new();
     private OverviewReading? reading;
+    private Func<ProcessSnapshot, string?> descriptionLookup = _ => null;
     private bool ready;
     private bool? compactHeight;
 
     public ObservableCollection<OverviewConsumerRow> Rows { get; } = new();
     public ConsumerRanking Ranking { get; private set; } = ConsumerRanking.PrivateCommit;
-    public Func<ProcessSnapshot, string?> DescriptionLookup => descriptions.GetCached;
+    public Func<ProcessSnapshot, string?> DescriptionLookup => descriptionLookup;
     public event Action<ProcessIdentity>? InspectRequested;
     public event Action? InsightsRequested;
     public event Action? RankingChanged;
@@ -36,6 +36,8 @@ public sealed partial class OverviewView : UserControl
         foreach (var element in new FrameworkElement[] { DashboardScroller, ResourcesGrid, ReadingStatus, ConsumerHeader, ConsumerTableHeader, ConsumerFooter })
             element.SizeChanged += (_, _) => ResizeConsumerList();
     }
+
+    public void InitializeDescriptionLookup(Func<ProcessSnapshot, string?> lookup) => descriptionLookup = lookup;
 
     public void Update(OverviewReading? reading, bool paused, bool stale)
     {
@@ -99,7 +101,7 @@ public sealed partial class OverviewView : UserControl
                 Rows.Insert(i, row);
             }
             else if (Rows.IndexOf(row) != i) Rows.Move(Rows.IndexOf(row), i);
-            row.Update(item.Process, item.Group, expanded.Contains(item.Process.Identity), icons, descriptions);
+            row.Update(item.Process, item.Group, expanded.Contains(item.Process.Identity), icons, DescriptionLookup(item.Process));
         }
         ConsumersList.SelectedItem = selectedKey is null ? null : Rows.FirstOrDefault(r => r.Key == selectedKey);
         EmptyConsumers.Visibility = Rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;

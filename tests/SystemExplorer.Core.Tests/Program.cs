@@ -17,6 +17,104 @@ var tests = new (string Name, Action Run)[]
         cache[path] = ("Expired description", DateTimeOffset.MinValue);
         Check(descriptions.GetCached(process) is null);
     }),
+    ("Process descriptions resolve without rows and support Overview search", () =>
+    {
+        var clock = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+        var process = P(10, 100) with { Name = "example.exe" };
+        var reads = 0;
+        var index = new ProcessDescriptionIndex((_, _) =>
+        {
+            reads++;
+            return Task.FromResult<string?>("Friendly application");
+        }, clock);
+        index.UpdateProcesses([process]);
+        Check(index.GetCached(process) is null);
+        Check(index.RefreshAsync(default).GetAwaiter().GetResult());
+        Check(reads == 1 && index.GetCached(process) == "Friendly application");
+        var data = new OverviewData();
+        data.Observe(Snapshot(0, process));
+        Check(data.Create(null, new(), search: "Friendly application", descriptionLookup: index.GetCached)!
+            .Consumers.Single().Members.Single().Identity == process.Identity);
+    }),
+    ("Process descriptions prune retired keys and reject delayed identity/path results", () =>
+    {
+        var clock = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+        var staleLifetime = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stalePath = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reads = 0;
+        var index = new ProcessDescriptionIndex((_, _) =>
+        {
+            reads++;
+            return reads switch
+            {
+                1 => Task.FromResult<string?>("Old lifetime"),
+                2 => staleLifetime.Task,
+                3 => Task.FromResult<string?>("Reused lifetime"),
+                4 => stalePath.Task,
+                _ => Task.FromResult<string?>("Current path")
+            };
+        }, clock);
+        var original = P(10, 100) with { Name = "old.exe", ExecutablePath = @"C:\Apps\old.exe" };
+        var reused = P(10, 200) with { Name = "reused.exe", ExecutablePath = @"C:\Apps\reused.exe" };
+        var renamed = reused with { Name = "renamed.exe", ExecutablePath = @"C:\Apps\renamed.exe" };
+        var changedPath = renamed with { Name = "current.exe", ExecutablePath = @"C:\Apps\current.exe" };
+        index.UpdateProcesses([original]);
+        Check(index.RefreshAsync(default).GetAwaiter().GetResult());
+        Check(index.GetCached(original) == "Old lifetime");
+        clock.Advance(TimeSpan.FromMinutes(5));
+        var staleLifetimePass = index.RefreshAsync(default);
+        Check(ReferenceEquals(staleLifetimePass, index.RefreshAsync(default)));
+        index.UpdateProcesses([reused]);
+        Check(index.GetCached(original) is null);
+        staleLifetime.SetResult("Late old lifetime");
+        Check(!staleLifetimePass.GetAwaiter().GetResult());
+        Check(index.GetCached(reused) is null);
+        Check(index.RefreshAsync(default).GetAwaiter().GetResult());
+        Check(index.GetCached(reused) == "Reused lifetime");
+        index.UpdateProcesses([renamed]);
+        Check(index.GetCached(reused) is null && index.GetCached(renamed) is null);
+        var stalePathPass = index.RefreshAsync(default);
+        Check(ReferenceEquals(stalePathPass, index.RefreshAsync(default)));
+        index.UpdateProcesses([changedPath]);
+        stalePath.SetResult("Late old path");
+        Check(!stalePathPass.GetAwaiter().GetResult());
+        Check(index.GetCached(changedPath) is null);
+        Check(index.RefreshAsync(default).GetAwaiter().GetResult());
+        Check(index.GetCached(changedPath) == "Current path" && reads == 5);
+    }),
+    ("Process description positive and negative cache entries expire", () =>
+    {
+        var clock = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+        var process = P(10, 100) with { Name = "example.exe" };
+        var positiveReads = 0;
+        var positive = new ProcessDescriptionIndex((_, _) =>
+        {
+            positiveReads++;
+            return Task.FromResult<string?>(positiveReads == 1 ? "First" : "Second");
+        }, clock);
+        positive.UpdateProcesses([process]);
+        Check(positive.RefreshAsync(default).GetAwaiter().GetResult());
+        Check(positive.GetCached(process) == "First");
+        Check(!positive.RefreshAsync(default).GetAwaiter().GetResult() && positiveReads == 1);
+        clock.Advance(TimeSpan.FromMinutes(5));
+        Check(positive.GetCached(process) is null);
+        Check(positive.RefreshAsync(default).GetAwaiter().GetResult());
+        Check(positive.GetCached(process) == "Second" && positiveReads == 2);
+
+        var negativeReads = 0;
+        var negative = new ProcessDescriptionIndex((_, _) =>
+        {
+            negativeReads++;
+            return Task.FromResult<string?>(null);
+        }, clock);
+        var other = P(11, 200) with { Name = "other.exe", ExecutablePath = @"C:\Apps\other.exe" };
+        negative.UpdateProcesses([other]);
+        Check(!negative.RefreshAsync(default).GetAwaiter().GetResult() && negativeReads == 1);
+        Check(!negative.RefreshAsync(default).GetAwaiter().GetResult() && negativeReads == 1);
+        clock.Advance(TimeSpan.FromMinutes(1));
+        Check(negative.GetCached(other) is null);
+        Check(!negative.RefreshAsync(default).GetAwaiter().GetResult() && negativeReads == 2);
+    }),
     ("Application descriptions reject unsafe labels and uncertain attribution", () =>
     {
         Check(ApplicationDescriptions.Normalize(" Example app ") == "Example app");
@@ -209,3 +307,12 @@ static MonitorSnapshot Snapshot(int seconds, params ProcessSnapshot[] processes)
     CapturedAt = DateTimeOffset.UnixEpoch.AddSeconds(seconds),
     Processes = processes
 };
+
+sealed class ManualTimeProvider : TimeProvider
+{
+    private DateTimeOffset current;
+
+    public ManualTimeProvider(DateTimeOffset current) => this.current = current;
+    public override DateTimeOffset GetUtcNow() => current;
+    public void Advance(TimeSpan duration) => current += duration;
+}

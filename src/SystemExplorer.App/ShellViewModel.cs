@@ -74,7 +74,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     private MonitorSnapshot? snapshot;
     public ObservableCollection<ProcessRow> Rows { get; } = new();
     public DiagnosticsHistory History { get; } = new();
-    public ApplicationDescriptions Descriptions { get; } = new();
+    public ProcessDescriptionIndex Descriptions { get; } = new();
     public bool IsRebuilding { get; private set; }
     public event EventHandler? RowsRebuilt;
     public MonitorSnapshot? Snapshot => snapshot;
@@ -94,6 +94,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     {
         snapshot = next;
         History.Add(next);
+        Descriptions.UpdateProcesses(next.Processes);
         var live = next.Processes.Select(p => p.Identity).ToHashSet();
         expanded.RemoveWhere(id => !live.Contains(id));
         Rebuild();
