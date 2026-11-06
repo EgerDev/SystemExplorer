@@ -65,6 +65,7 @@ public sealed record MonitorSnapshot
     public double? DiskReadBytesPerSecond { get; init; }
     public double? DiskWriteBytesPerSecond { get; init; }
     public double? GpuPercent { get; init; }
+    public IReadOnlyList<GpuAdapterRow> GpuAdapters { get; init; } = Array.Empty<GpuAdapterRow>();
     public IReadOnlyList<string> Limitations { get; init; } = Array.Empty<string>();
 }
 

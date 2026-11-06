@@ -45,6 +45,18 @@ public sealed partial class DiagnosticsView : UserControl
         NameHeader.Content = headers[0]; FirstHeader.Content = headers[1]; SecondHeader.Content = headers[2]; ThirdHeader.Content = headers[3];
         MemorySummary.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
         PagefilesButton.Visibility = RecentButton.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
+        DiskButton.Visibility = section == "Disks" ? Visibility.Visible : Visibility.Collapsed;
+        FileUsersButton.Visibility = section == "Disks" ? Visibility.Visible : Visibility.Collapsed;
+        AdaptersButton.Visibility = section == "Network" ? Visibility.Visible : Visibility.Collapsed;
+        IoAttributionButton.Visibility = section == "Network" ? Visibility.Visible : Visibility.Collapsed;
+        CoresButton.Visibility = section == "CPU" ? Visibility.Visible : Visibility.Collapsed;
+        GpuButton.Visibility = section == "CPU" ? Visibility.Visible : Visibility.Collapsed;
+        DllUsersButton.Visibility = section == "CPU" ? Visibility.Visible : Visibility.Collapsed;
+        MemoryListsButton.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
+        PoolTagsButton.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
+        DriversButton.Visibility = section == "Services" ? Visibility.Visible : Visibility.Collapsed;
+        PersistenceButton.Visibility = section == "Startup" ? Visibility.Visible : Visibility.Collapsed;
+        TimelineButton.Visibility = section == "CPU" ? Visibility.Visible : Visibility.Collapsed;
         TasksButton.Visibility = section == "Startup" ? Visibility.Visible : Visibility.Collapsed;
         ChartCard.Visibility = section is "Memory" or "CPU" ? Visibility.Visible : Visibility.Collapsed;
         ChartSeries.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
