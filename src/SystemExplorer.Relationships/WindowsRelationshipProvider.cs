@@ -47,17 +47,19 @@ public sealed class WindowsRelationshipProvider : IRelationshipProvider
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows relationship APIs are required.");
     }
 
+    public static readonly IReadOnlyList<string> BaselineLimitations =
+    [
+        "Endpoint and service observations are not an atomic snapshot; CapturedAt marks capture start.",
+        "PID-only owners are unverified unless matched to a live handle creation time from the supplied process snapshot.",
+        "Services inaccessible to this token can be silently omitted by Windows; configured base start types do not include delayed/trigger modes or runtime behavior.",
+        "UDP rows are local endpoints, not connections. DNS, geography and bandwidth are not collected."
+    ];
+
     private RelationshipSnapshot Capture(ProcessSnapshot[] processes, CancellationToken token)
     {
         Check(token);
         var capturedAt = DateTimeOffset.UtcNow;
-        var limitations = new List<string>
-        {
-            "Endpoint and service observations are not an atomic snapshot; CapturedAt marks capture start.",
-            "PID-only owners are unverified unless matched to a live handle creation time from the supplied process snapshot.",
-            "Services inaccessible to this token can be silently omitted by Windows; configured base start types do not include delayed/trigger modes or runtime behavior.",
-            "UDP rows are local endpoints, not connections. DNS, geography and bandwidth are not collected."
-        };
+        var limitations = new List<string>(BaselineLimitations);
         var endpoints = new List<ConnectionSnapshot>();
         foreach (bool tcp in new[] { true, false })
         foreach (bool ipv6 in new[] { false, true })
