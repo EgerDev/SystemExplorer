@@ -127,7 +127,7 @@ internal static class FileUsageSmoke
             r = await Provider(new(), system, new(), processCap: 1).FindModuleUsersAsync("ntdll", default);
             Assert(r.Status == InspectionStatus.Truncated && r.ProcessesSearched == 1 && r.ProcessesNotSearched == 7, "process cap");
             r = await Provider(new(), system, new(), matchCap: 1).FindModuleUsersAsync("ntdll", default);
-            Assert(r.Status == InspectionStatus.Truncated && r.Matches.Count == 1 && r.ProcessesMatched == 1, "match cap counts only processes represented in retained rows");
+            Assert(r.Status == InspectionStatus.Truncated && r.Matches.Count == 1 && r.ProcessesMatched == 2, "match cap retains process matched count");
             var elapsed = TimeSpan.Zero;
             inspections = new FakeInspection { AfterCapture = () => elapsed = TimeSpan.FromSeconds(11) };
             r = await Provider(new(), system, inspections, elapsed: () => elapsed).FindModuleUsersAsync("ntdll", default);
