@@ -242,6 +242,9 @@ public sealed partial class MainWindow
             Add("AppContainer / package", $"{t.IsAppContainer?.ToString() ?? "—"} / {t.HasPackageIdentity?.ToString() ?? "—"}", t.Status.ToString(), "");
             Add("Protection", r.Protection.LevelName ?? "Unavailable", r.Protection.Status.ToString(), r.Protection.Detail);
             Add("In a job object", r.Job.InAnyJob?.ToString() ?? "Unavailable", r.Job.Status.ToString(), r.Job.Detail);
+            Add("Privileges", t.Privileges.Count > 0 ? $"{t.Privileges.Count} reported" : t.PrivilegesStatus == InspectionStatus.Available ? "None reported" : "Unavailable", t.PrivilegesStatus.ToString(), t.Detail);
+            Add("Mitigations", r.Mitigations.Policies.Count > 0 ? $"{r.Mitigations.Policies.Count} policies reported" : r.Mitigations.Status == InspectionStatus.Available ? "None reported" : "Unavailable", r.Mitigations.Status.ToString(), r.Mitigations.Detail);
+            Add("Runtime (.NET)", r.Runtime.Modules.Count > 0 ? $"{r.Runtime.Modules.Count} modules reported" : r.Runtime.Status == InspectionStatus.Available ? "None reported" : "Unavailable", r.Runtime.Status.ToString(), $"{r.Runtime.Detail}\n{r.Runtime.Source}");
             foreach (var p in t.Privileges)
                 Add($"Privilege {p.Name}", p.Enabled ? "Enabled" : p.Removed ? "Removed" : "Present, disabled", t.PrivilegesStatus.ToString(), $"Enabled by default: {p.EnabledByDefault}. Nothing is enabled or changed.");
             foreach (var m in r.Mitigations.Policies)
