@@ -127,7 +127,7 @@ internal static class FileUsageSmoke
             r = await Provider(new(), system, new(), processCap: 1).FindModuleUsersAsync("ntdll", default);
             Assert(r.Status == InspectionStatus.Truncated && r.ProcessesSearched == 1 && r.ProcessesNotSearched == 7, "process cap");
             r = await Provider(new(), system, new(), matchCap: 1).FindModuleUsersAsync("ntdll", default);
-            Assert(r.Status == InspectionStatus.Truncated && r.Matches.Count == 1 && r.ProcessesMatched == 2, "match cap retains process matched count");
+            Assert(r.Status == InspectionStatus.Truncated && r.Matches.Count == 1 && r.ProcessesMatched == 1, "match cap counts only processes represented in retained rows");
             var elapsed = TimeSpan.Zero;
             inspections = new FakeInspection { AfterCapture = () => elapsed = TimeSpan.FromSeconds(11) };
             r = await Provider(new(), system, inspections, elapsed: () => elapsed).FindModuleUsersAsync("ntdll", default);
@@ -225,6 +225,7 @@ internal static class FileUsageSmoke
             Calls++;
             var status = identity.Pid switch { 2 => InspectionStatus.AccessDenied, 3 => InspectionStatus.IdentityMismatch, 5 => InspectionStatus.Failed, 7 => InspectionStatus.Partial, _ => InspectionStatus.Available };
             ModuleObservation[] modules = identity.Pid == 7 ? [new("other.dll", @"C:\NTDLL.DLL\other.dll", 0x2222, 4096)] : [new("ntdll.dll", @"C:\Windows\System32\ntdll.dll", 0x1111, 4096)];
+            modules = [.. modules, .. modules.Select(m => m with { Path = m.Path.ToUpperInvariant() })];
             AfterCapture?.Invoke();
             if (Pending != null) return Pending.Task;
             return Task.FromResult(new ProcessInspection(identity, kind, DateTimeOffset.UtcNow, status, "fixed", modules, []));
