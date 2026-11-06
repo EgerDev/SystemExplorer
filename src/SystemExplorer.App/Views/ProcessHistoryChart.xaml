@@ -1,0 +1,14 @@
+<UserControl x:Class="SystemExplorer.App.Views.ProcessHistoryChart"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    IsTabStop="True" KeyDown="ChartKeyDown"
+    AutomationProperties.Name="Process history chart. Left and Right select samples; Home and End select endpoints.">
+    <Grid>
+        <TextBlock x:Name="Accent" Foreground="{ThemeResource InteractionAccent}" Visibility="Collapsed"/>
+        <TextBlock x:Name="Ink" Foreground="{ThemeResource TextFillColorPrimaryBrush}" Visibility="Collapsed"/>
+        <TextBlock x:Name="Secondary" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed"/>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel x:Name="Lanes" Spacing="3"/>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

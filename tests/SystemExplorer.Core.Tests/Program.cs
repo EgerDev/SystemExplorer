@@ -61,6 +61,22 @@ var tests = new (string Name, Action Run)[]
         history.Observe(Snapshot(30, process));
         Check(history.Snapshots.Single().Points.Last().BreakBefore);
     }),
+    ("Selected history retains nullable IO rates across breaks and absence", () =>
+    {
+        var history = new SelectedProcessHistory();
+        var process = P(10, 100) with { ReadBytesPerSecond = 123.5, WriteBytesPerSecond = 0 };
+        history.Track(process.Identity, Snapshot(0, process));
+        Check(history.Snapshots.Single().Points.Single() is { ReadBytesPerSecond: 123.5, WriteBytesPerSecond: 0 });
+        history.Observe(Snapshot(2, process with { ReadBytesPerSecond = null, WriteBytesPerSecond = null }));
+        Check(history.Snapshots.Single().Points.Last() is { Observed: true, ReadBytesPerSecond: null, WriteBytesPerSecond: null });
+        history.BreakContinuity();
+        history.Observe(Snapshot(4, process));
+        Check(history.Snapshots.Single().Points.Last() is { BreakBefore: true, ReadBytesPerSecond: 123.5, WriteBytesPerSecond: 0 });
+        history.Observe(Snapshot(6));
+        Check(history.Snapshots.Single().Points.Last() is { Observed: false, ReadBytesPerSecond: null, WriteBytesPerSecond: null });
+        history.Observe(Snapshot(30, process));
+        Check(history.Snapshots.Single().Points.Last() is { BreakBefore: true, ReadBytesPerSecond: 123.5, WriteBytesPerSecond: 0 });
+    }),
     ("Selected history bounds points and least-recently-selected lifetimes", () =>
     {
         var history = new SelectedProcessHistory();
