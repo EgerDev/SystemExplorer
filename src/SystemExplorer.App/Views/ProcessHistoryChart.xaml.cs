@@ -43,24 +43,21 @@ public sealed partial class ProcessHistoryChart : UserControl
                 entry.Children.Add(new TextBlock { Text = item.Label, FontSize = 12 });
                 legend.Children.Add(entry);
             }
-            var heading = new Grid();
-            heading.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var heading = new StackPanel();
             heading.Children.Add(legend);
             Lanes.Children.Add(heading);
-            var axis = new TextBlock { FontSize = 12 };
+            var axis = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap };
             axes.Add(axis);
-            Grid.SetColumn(axis, 1);
             heading.Children.Add(axis);
-            var plot = new Canvas { Height = 40, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+            var plot = new Canvas { Height = 80, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
             plot.SizeChanged += (_, _) => Draw();
             plot.PointerMoved += PlotPointerMoved;
             plot.PointerPressed += (_, _) => Focus(FocusState.Pointer);
             plots.Add(plot);
             Lanes.Children.Add(plot);
         }
-        Lanes.Children.Add(time);
-        Lanes.Children.Add(readout);
+        SampleDetails.Children.Add(time);
+        SampleDetails.Children.Add(readout);
         ActualThemeChanged += (_, _) => Draw();
     }
 
@@ -89,6 +86,12 @@ public sealed partial class ProcessHistoryChart : UserControl
     {
         0 => Display.Percent(v), 1 => DiagnosticData.Bytes((ulong)v), _ => DiagnosticData.Rate(v)
     };
+    private static string ReadoutValue(int lane, double value) => lane switch
+    {
+        0 => $"{value:F2}% ({value:0.####})",
+        1 => $"{Value(lane, value)} ({value:N0} B)",
+        _ => $"{Value(lane, value)} ({value:#,0.####} B/s)"
+    };
     private double X(ProcessHistoryPoint p, double width)
     {
         var points = history!.Points;
@@ -105,7 +108,8 @@ public sealed partial class ProcessHistoryChart : UserControl
             plot.Children.Clear();
             var values = points.SelectMany(p => series[lane].Select(s => Valid(p, s))).OfType<double>().ToArray();
             double max = values.Length == 0 ? 0 : values.Max();
-            axes[lane].Text = points.Count == 0 ? "No samples" : values.Length == 0 ? "Unavailable" : $"0 – {Value(lane, max)}";
+            axes[lane].Text = points.Count == 0 ? "No samples" : values.Length == 0 ? "Unavailable" :
+                $"Scale 0–{Value(lane, max)} · observed min {Value(lane, values.Min())} / max {Value(lane, max)}";
             if (plot.ActualWidth <= 0) continue;
             foreach (var s in series[lane])
             {
@@ -138,7 +142,7 @@ public sealed partial class ProcessHistoryChart : UserControl
         readout.Text = sample is null ? "No samples. Select a stable process to retain history." :
             $"{sample.At.LocalDateTime:yyyy-MM-dd HH:mm:ss.fff} · {(sample.Observed ? "Observed" : "Not observed (not confirmed exit)")}{(sample.BreakBefore ? " · Gap before sample" : "")}\n" +
             string.Join("\n", series.Select((items, lane) => string.Join(" · ", items.Select(s =>
-                $"{s.Label}: {(!sample.Observed ? "Not observed" : Valid(sample, s) is { } v ? lane == 0 ? $"{v:G17}%" : lane == 1 ? $"{v:G17} B" : $"{v:G17} B/s" : "Unavailable")}")))) +
+                $"{s.Label}: {(!sample.Observed ? "Not observed" : Valid(sample, s) is { } v ? ReadoutValue(lane, v) : "Unavailable")}")))) +
             "\nLeft/Right: sample · Home/End: endpoints. Private commit is not physical RAM; I/O is generic process I/O, not disk/network attribution.";
         AutomationProperties.SetName(this, readout.Text);
     }

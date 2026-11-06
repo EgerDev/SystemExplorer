@@ -7,8 +7,14 @@
         <TextBlock x:Name="Accent" Foreground="{ThemeResource InteractionAccent}" Visibility="Collapsed"/>
         <TextBlock x:Name="Ink" Foreground="{ThemeResource TextFillColorPrimaryBrush}" Visibility="Collapsed"/>
         <TextBlock x:Name="Secondary" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed"/>
+        <Grid RowSpacing="4">
+        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel x:Name="Lanes" Spacing="3"/>
         </ScrollViewer>
+        <ScrollViewer Grid.Row="1" MaxHeight="120" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel x:Name="SampleDetails" Spacing="3"/>
+        </ScrollViewer>
+        </Grid>
     </Grid>
 </UserControl>
