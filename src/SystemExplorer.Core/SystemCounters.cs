@@ -62,7 +62,10 @@ public sealed record GpuEngineUtilization(string EngineType, CounterValue Utiliz
 public sealed record GpuAdapterRow(ulong Luid, string? Description,
     ulong? DedicatedVideoMemoryBytes, ulong? SharedSystemMemoryBytes,
     CounterValue DedicatedUsageBytes, CounterValue SharedUsageBytes,
-    IReadOnlyList<GpuEngineUtilization> Engines, CounterValue HeadlineUtilizationPercent, string? HeadlineEngineType);
+    IReadOnlyList<GpuEngineUtilization> Engines, CounterValue HeadlineUtilizationPercent, string? HeadlineEngineType)
+{
+    public bool HasCounterInstances { get; init; }
+}
 
 /// <summary>Identity is non-null only when the PID's creation time was read and matched at both samples.</summary>
 public sealed record GpuProcessRow(int Pid, ProcessIdentity? Identity, InspectionStatus IdentityStatus, string IdentityDetail,

@@ -183,11 +183,13 @@ public sealed class WindowsFileUsageProvider : IFileUsageProvider
                     searched++;
                     partial |= inspection.Status != InspectionStatus.Available;
                     var processMatched = false;
+                    var seen = new HashSet<ModuleObservation>(ModuleMappingComparer.Instance);
                     foreach (var module in inspection.Modules)
                     {
                         token.ThrowIfCancellationRequested();
                         if (Remaining() <= TimeSpan.Zero) { timedOut = true; break; }
                         if (!module.Name.Contains(query, StringComparison.OrdinalIgnoreCase) && !module.Path.Contains(query, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!seen.Add(module)) continue;
                         processMatched = true;
                         if (matches.Count < matchCap) matches.Add(new(identity, module.Name, module.Path, module.BaseAddress));
                         else capped = true;

@@ -4,6 +4,81 @@ using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Inventory identifier keys sort numerically with nulls last in both directions", () =>
+    {
+        var rows = new (string Text, decimal? Key)[] { ("0xFFC", 0xFFC), ("Unavailable", null), ("0x1010", 0x1010) };
+        foreach (var descending in new[] { false, true })
+        {
+            var ordered = InventoryOrdering.Order(rows, r => r.Text, r => r.Key, true, descending).ToArray();
+            Check(ordered[0].Text == (descending ? "0x1010" : "0xFFC"));
+            Check(ordered[1].Text == (descending ? "0xFFC" : "0x1010") && ordered[2].Key is null);
+            var text = InventoryOrdering.Order(rows.Where(r => r.Key is not null), r => r.Text, r => r.Key, false, descending).ToArray();
+            Check(text[0].Text != ordered[0].Text);
+        }
+        Check((decimal)ulong.MaxValue == 18446744073709551615m);
+    }),
+    ("Inventory CPU keys order group and processor number rather than labels", () =>
+    {
+        var rows = new (string Text, decimal? Key)[] { ("CPU 0,10", 10), ("CPU 1,0", 65536), ("CPU 0,2", 2) };
+        var ordered = InventoryOrdering.Order(rows, r => r.Text, r => r.Key, true, false).ToArray();
+        Check(ordered.Select(r => r.Text).SequenceEqual(new[] { "CPU 0,2", "CPU 0,10", "CPU 1,0" }));
+        Check(InventoryOrdering.Order(rows, r => r.Text, r => r.Key, false, false).First().Text == "CPU 0,10");
+    }),
+    ("Inventory ordering preserves empty, missing-key and text-only rows", () =>
+    {
+        foreach (var descending in new[] { false, true })
+        {
+            Check(!InventoryOrdering.Order(Array.Empty<string>(), r => r, _ => null, true, descending).Any());
+            var rows = new[] { "beta", "Alpha" };
+            Check(InventoryOrdering.Order(rows, r => r, _ => null, true, descending).SequenceEqual(rows));
+            Check(InventoryOrdering.Order(rows, r => r, _ => null, false, descending).First() == (descending ? "beta" : "Alpha"));
+        }
+    }),
+    ("Window minimum scales physical pixels and rounds up", () =>
+    {
+        Check(WindowSizing.MinimumPhysicalSize(96, 2000, 2000) == (900, 560));
+        Check(WindowSizing.MinimumPhysicalSize(120, 2000, 2000) == (1125, 700));
+        Check(WindowSizing.MinimumPhysicalSize(144, 2000, 2000) == (1350, 840));
+        Check(WindowSizing.MinimumPhysicalSize(97, 2000, 2000) == (910, 566));
+    }),
+    ("Window minimum clamps each dimension to the work area", () =>
+    {
+        Check(WindowSizing.MinimumPhysicalSize(120, 1000, 600) == (1000, 600));
+        Check(WindowSizing.MinimumPhysicalSize(120, 1000, 1000) == (1000, 700));
+        Check(WindowSizing.MinimumPhysicalSize(120, 2000, 600) == (1125, 600));
+        Check(WindowSizing.MinimumPhysicalSize(96, 0, 0) == (0, 0));
+    }),
+    ("Window minimum rejects invalid DPI and work area", () =>
+    {
+        foreach (var (dpi, width, height) in new[] { (0u, 1000, 800), (96u, -1, 800), (96u, 1000, -1) })
+        {
+            try { WindowSizing.MinimumPhysicalSize(dpi, width, height); }
+            catch (ArgumentOutOfRangeException) { continue; }
+            throw new InvalidOperationException("Invalid window sizing input accepted");
+        }
+    }),
+    ("GPU page preserves software adapter measurements and honest unavailable states", () =>
+    {
+        var missing = CounterValue.Unavailable("No counter reading");
+        var adapter = new GpuAdapterRow(1, "Microsoft Basic Render Driver (software adapter)", 0, 100,
+            missing, missing, [new("3D", CounterValue.Measured(23)), new("Copy", CounterValue.Measured(12))], CounterValue.Measured(23), "3D")
+        { HasCounterInstances = true };
+        IReadOnlyList<DiagnosticItem> Rows(params GpuAdapterRow[] adapters) => DiagnosticData.Create("GPU",
+            Snapshot(0) with { GpuAdapters = adapters, TotalCpuPercent = 99, DiskReadBytesPerSecond = 1000 }, null, [], new(), _ => null);
+        var measured = Rows(adapter).Single();
+        Check(measured.Name.Contains("software adapter") && measured.First == "23.0%" && measured.Detail.Contains("GPU utilization: 23.0%") && measured.Detail.Contains("not a sum"));
+        Check(Rows().Single().Name == "GPU utilization unavailable");
+        Check(Rows(adapter with { Description = "NVIDIA RTX 4090" }).Single().Name == "NVIDIA RTX 4090");
+        Check(Rows(adapter with { Description = "NVIDIA RTX 4090", Engines = [], HeadlineUtilizationPercent = missing }).Single().Name == "NVIDIA RTX 4090");
+        Check(Rows(adapter with { Description = "Inventory adapter", HasCounterInstances = false, Engines = [], HeadlineUtilizationPercent = missing }).Single().Name == "Inventory adapter (adapter type unavailable)");
+        Check(Rows(adapter with { Description = null }).Single().Name == "Adapter 0x1 (adapter type unavailable)");
+        Check(Rows(adapter with { Description = null, HasCounterInstances = false }).Single().Name == "Adapter 0x1 (adapter type unavailable)");
+        Check(Rows(adapter with { HasCounterInstances = false }).Single().Name == adapter.Description);
+        Check(!measured.Name.Contains("adapter type unavailable"));
+        foreach (var value in new[] { missing, CounterValue.Warmup("First sample"), CounterValue.Measured(double.NaN), CounterValue.Measured(101) })
+            Check(Rows(adapter with { HeadlineUtilizationPercent = value }).Single().First == "Utilization unavailable");
+        Check(Rows(adapter with { HeadlineUtilizationPercent = CounterValue.Measured(0) }).Single().First == "0.0%");
+    }),
     ("Lifecycle timeline separates baseline, starts, disappearance and PID reuse", () =>
     {
         var timeline = new ProcessLifecycleTimeline();
@@ -426,6 +501,13 @@ var tests = new (string Name, Action Run)[]
         Check(group.PrivateBytes == 200);
         Check(ProcessGrouping.Create([P(10, 100), P(11, 200, 10) with { PrivateBytes = null }]).Single().PrivateBytes is null);
     }),
+    ("Prompt input requires non-blank text and trims it", () =>
+    {
+        Check(!PromptInput.CanSubmit(null) && !PromptInput.CanSubmit("") && !PromptInput.CanSubmit(" \t\r\n "));
+        Check(PromptInput.Normalize("") is null && PromptInput.Normalize("   ") is null);
+        Check(PromptInput.CanSubmit("user32.dll") && PromptInput.Normalize("user32.dll") == "user32.dll");
+        Check(PromptInput.CanSubmit("  user32.dll\t") && PromptInput.Normalize("  user32.dll\t") == "user32.dll");
+    }),
     ("Physical accounting rejects invalid available", () => Check(new MemorySnapshot { PhysicalTotalBytes = 10, PhysicalAvailableBytes = 11 }.PhysicalUsedBytes is null)),
     ("History bounded to 180 samples", () =>
     {
@@ -488,6 +570,21 @@ var tests = new (string Name, Action Run)[]
         history.Add(Snapshot(0, P(10, 100)));
         history.Add(Snapshot(0, P(10, 100)));
         Check(history.System.Count == 1);
+    }),
+    ("Module mappings collapse only exact base, size and case-insensitive path duplicates", () =>
+    {
+        var seen = new HashSet<ModuleObservation>(ModuleMappingComparer.Instance);
+        Check(seen.Count == 0);
+        var module = new ModuleObservation("notepad.exe", @"C:\Windows\SysWOW64\notepad.exe", 0x8B0000, 192512);
+        Check(seen.Add(module));
+        Check(!seen.Add(module with { }));
+        Check(!seen.Add(module with { Name = "other name", Path = module.Path.ToUpperInvariant() }));
+        Check(seen.Add(module with { BaseAddress = 0x9B0000 }));
+        Check(seen.Add(module with { Path = @"C:\Windows\System32\notepad.exe" }));
+        Check(seen.Add(module with { SizeBytes = 233472 }));
+        Check(seen.Count == 4);
+        Check(!ModuleMappingComparer.Instance.Equals(module, null));
+        Check(ModuleMappingComparer.Instance.Equals(null, null));
     })
 };
 var failures = 0;
