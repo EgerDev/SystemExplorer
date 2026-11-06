@@ -4,6 +4,36 @@ using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Inventory identifier keys sort numerically with nulls last in both directions", () =>
+    {
+        var rows = new (string Text, decimal? Key)[] { ("0xFFC", 0xFFC), ("Unavailable", null), ("0x1010", 0x1010) };
+        foreach (var descending in new[] { false, true })
+        {
+            var ordered = InventoryOrdering.Order(rows, r => r.Text, r => r.Key, true, descending).ToArray();
+            Check(ordered[0].Text == (descending ? "0x1010" : "0xFFC"));
+            Check(ordered[1].Text == (descending ? "0xFFC" : "0x1010") && ordered[2].Key is null);
+            var text = InventoryOrdering.Order(rows.Where(r => r.Key is not null), r => r.Text, r => r.Key, false, descending).ToArray();
+            Check(text[0].Text != ordered[0].Text);
+        }
+        Check((decimal)ulong.MaxValue == 18446744073709551615m);
+    }),
+    ("Inventory CPU keys order group and processor number rather than labels", () =>
+    {
+        var rows = new (string Text, decimal? Key)[] { ("CPU 0,10", 10), ("CPU 1,0", 65536), ("CPU 0,2", 2) };
+        var ordered = InventoryOrdering.Order(rows, r => r.Text, r => r.Key, true, false).ToArray();
+        Check(ordered.Select(r => r.Text).SequenceEqual(new[] { "CPU 0,2", "CPU 0,10", "CPU 1,0" }));
+        Check(InventoryOrdering.Order(rows, r => r.Text, r => r.Key, false, false).First().Text == "CPU 0,10");
+    }),
+    ("Inventory ordering preserves empty, missing-key and text-only rows", () =>
+    {
+        foreach (var descending in new[] { false, true })
+        {
+            Check(!InventoryOrdering.Order(Array.Empty<string>(), r => r, _ => null, true, descending).Any());
+            var rows = new[] { "beta", "Alpha" };
+            Check(InventoryOrdering.Order(rows, r => r, _ => null, true, descending).SequenceEqual(rows));
+            Check(InventoryOrdering.Order(rows, r => r, _ => null, false, descending).First() == (descending ? "beta" : "Alpha"));
+        }
+    }),
     ("Lifecycle timeline separates baseline, starts, disappearance and PID reuse", () =>
     {
         var timeline = new ProcessLifecycleTimeline();
