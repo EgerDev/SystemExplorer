@@ -15,9 +15,11 @@ public sealed partial class InventoryView : UserControl
     public event Action? BackRequested;
     public InventoryView() { InitializeComponent(); ready = true; }
 
-    public void ShowRows(string message, IEnumerable<InventoryRow> rows, string name, string first, string second, string third, string? action = null, bool back = false, int initialSort = 0, bool reverse = false)
+    public void ShowRows(string message, IEnumerable<InventoryRow> rows, string name, string first, string second, string third, string? action = null, bool back = false, int initialSort = 0, bool reverse = false, bool preserveState = false)
     {
-        source = rows.ToArray(); status = message; sort = initialSort; descending = reverse;
+        source = rows.ToArray(); status = message;
+        if (!preserveState) { sort = initialSort; descending = reverse; }
+        var selected = preserveState ? (Rows.SelectedItem as InventoryRow)?.Name : null;
         NameHeader.Content = name; FirstHeader.Content = first; SecondHeader.Content = second; ThirdHeader.Content = third;
         var labels = new[] { first, second, third };
         var buttons = new[] { FirstHeader, SecondHeader, ThirdHeader };
@@ -28,8 +30,9 @@ public sealed partial class InventoryView : UserControl
         }
         ActionButton.Content = action; ActionButton.Visibility = action is null ? Visibility.Collapsed : Visibility.Visible;
         Back.Visibility = back ? Visibility.Visible : Visibility.Collapsed;
-        Search.Text = "";
+        if (!preserveState) Search.Text = "";
         Rebuild();
+        if (selected is not null && Rows.ItemsSource is InventoryRow[] shown) Rows.SelectedItem = shown.FirstOrDefault(r => r.Name == selected);
     }
     public void ShowMessage(string message, bool back = false) => ShowRows(message, [], "Observation", "", "", "", back: back);
     public void SetTargets(IReadOnlyList<string> labels, Action<int> changed)

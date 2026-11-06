@@ -41,6 +41,7 @@ public sealed partial class MainWindow
         Grid.SetRow(table, 2); content.Children.Add(table);
         bool updating = false;
         DateTimeOffset? renderedAt = null;
+        ProcessIdentity? renderedIdentity = null;
         void Render()
         {
             var history = histories.FirstOrDefault(h => h.Identity == identity);
@@ -53,7 +54,9 @@ public sealed partial class MainWindow
                         DiagnosticData.Bytes(p.PrivateBytes), DiagnosticData.Bytes(p.WorkingSetBytes), DiagnosticData.Bytes(p.PrivateWorkingSetBytes),
                         p.PrivateBytes, p.WorkingSetBytes, p.PrivateWorkingSetBytes,
                         $"{p.At:O}\nPID {history.Identity.Pid} · creation {history.Identity.CreationTimeFileTime}\n{(p.Observed ? "Observed" : "Not observed; this does not establish exit")} · Gap before: {p.BreakBefore}\nPrivate commit: {DiagnosticData.Bytes(p.PrivateBytes)}\nWorking set: {DiagnosticData.Bytes(p.WorkingSetBytes)}\nPrivate working set: {DiagnosticData.Bytes(p.PrivateWorkingSetBytes)}\nCPU (machine normalized): {(p.CpuPercent is { } cpu ? $"{cpu:F2}%" : "Unavailable")}\nRead: {(p.ReadBytesPerSecond is { } read ? Display.Rate(read) : "Unavailable")}\nWrite: {(p.WriteBytesPerSecond is { } write ? Display.Rate(write) : "Unavailable")}\nPrivate commit is not physical RAM; shared resident pages are not additive.")),
-                    "Sample time", "Private commit", "Working set", "Private WS", reverse: true);
+                    "Sample time", "Private commit", "Working set", "Private WS", reverse: true,
+                    preserveState: renderedIdentity == history.Identity);
+            renderedIdentity = history?.Identity;
             renderedAt = history?.Points.LastOrDefault()?.At;
         }
         void Refresh()
