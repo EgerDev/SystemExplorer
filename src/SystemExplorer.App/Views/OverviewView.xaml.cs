@@ -15,6 +15,7 @@ public sealed partial class OverviewView : UserControl
     private readonly ApplicationDescriptions descriptions = new();
     private OverviewReading? reading;
     private bool ready;
+    private bool? compactHeight;
 
     public ObservableCollection<OverviewConsumerRow> Rows { get; } = new();
     public ConsumerRanking Ranking { get; private set; } = ConsumerRanking.PrivateCommit;
@@ -27,9 +28,11 @@ public sealed partial class OverviewView : UserControl
     public OverviewView()
     {
         InitializeComponent();
+        NetworkCard.TrendHeight = double.NaN;
         ready = true;
         Unloaded += (_, _) => { foreach (var row in Rows) row.Dispose(); };
         Loaded += (_, _) => ReconcileConsumers();
+        DashboardScroller.SizeChanged += (_, _) => UpdateDensity();
         foreach (var element in new FrameworkElement[] { DashboardScroller, ResourcesGrid, ReadingStatus, ConsumerHeader, ConsumerTableHeader, ConsumerFooter })
             element.SizeChanged += (_, _) => ResizeConsumerList();
     }
@@ -40,7 +43,7 @@ public sealed partial class OverviewView : UserControl
         CpuCard.Value = Display.Percent(reading?.CpuPercent);
         CpuCard.Detail = "Across all processors";
         MemoryCard.Value = Display.Percent(reading?.PhysicalMemoryPercent);
-        MemoryCard.Detail = $"{Display.Bytes(reading?.PhysicalUsedBytes)} / {Display.Bytes(reading?.PhysicalTotalBytes)} physical";
+        MemoryCard.Detail = $"{Display.Bytes(reading?.PhysicalUsedBytes)} / {Display.Bytes(reading?.PhysicalTotalBytes)}";
         DiskCard.Value = reading?.DiskTotalBytesPerSecond is { } total ? Display.Rate(total) : "—";
         DiskCard.Detail = $"Read\u00a0{Rate(reading?.DiskReadBytesPerSecond)} · Write\u00a0{Rate(reading?.DiskWriteBytesPerSecond)}";
         NetworkObservation.Text = reading?.ObservedEndpointCount is { } endpoints
@@ -50,7 +53,7 @@ public sealed partial class OverviewView : UserControl
         MemoryTrend.Update(reading?.MemoryTrend, "Physical memory");
         DiskTrend.Update(reading?.DiskTrend, "Disk read + write throughput", true);
         MemoryHeadline.Text = reading?.PhysicalMemoryPercent is { } percent ? $"Physical memory usage ({percent:F0}%)" : "Physical memory unavailable";
-        MemoryEvidence.Text = $"{Display.Bytes(reading?.PhysicalUsedBytes)} used of {Display.Bytes(reading?.PhysicalTotalBytes)} physical memory.";
+        MemoryEvidence.Text = $"{Display.Bytes(reading?.PhysicalUsedBytes)} used / {Display.Bytes(reading?.PhysicalTotalBytes)} total.";
         AvailableValue.Text = Display.Bytes(reading?.PhysicalAvailableBytes);
         CacheValue.Text = Display.Bytes(reading?.SystemCacheBytes);
         CommitValue.Text = $"{Display.Bytes(reading?.CommitTotalBytes)} / {Display.Bytes(reading?.CommitLimitBytes)}";
@@ -145,6 +148,26 @@ public sealed partial class OverviewView : UserControl
     private void InsightsClicked(object sender, RoutedEventArgs args) => InsightsRequested?.Invoke();
     private void ViewProcessesClicked(object sender, RoutedEventArgs args) => ViewProcessesRequested?.Invoke();
 
+    private void UpdateDensity()
+    {
+        if (!ready || DashboardScroller.ActualHeight <= 0) return;
+        var compact = DashboardScroller.ActualHeight < 520;
+        if (compactHeight == compact) return;
+        compactHeight = compact;
+        foreach (var card in new[] { CpuCard, MemoryCard, DiskCard, NetworkCard }) card.IsCompact = compact;
+        foreach (var card in new[] { CpuCard, MemoryCard, DiskCard }) card.TrendHeight = compact ? 24 : 32;
+        ConsumersPanel.Padding = InsightsPanel.Padding = new Thickness(compact ? 12 : 16);
+        ConsumersLayout.RowSpacing = compact ? 6 : 10;
+        ConsumerCaption.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        ConsumerTableHeader.Padding = new Thickness(10, compact ? 4 : 8, 42, compact ? 4 : 8);
+        ResourcesGrid.Margin = new Thickness(0, 0, 0, compact ? 12 : 16);
+        InsightsContent.Spacing = compact ? 8 : 12;
+        MemorySummary.Padding = new Thickness(compact ? 8 : 12);
+        MemoryFacts.RowSpacing = compact ? 8 : 14;
+        InsightsAction.Padding = new Thickness(12, compact ? 8 : 10, 12, compact ? 8 : 10);
+        ResizeConsumerList();
+    }
+
     private void ResizeConsumerList()
     {
         if (!ready || DashboardScroller.ActualHeight <= 0) return;
@@ -154,9 +177,10 @@ public sealed partial class OverviewView : UserControl
             ConsumersPanel.BorderThickness.Top + ConsumersPanel.BorderThickness.Bottom +
             ConsumerHeader.ActualHeight + ConsumerTableHeader.ActualHeight + ConsumerFooter.ActualHeight +
             ConsumersLayout.RowSpacing * (ConsumersLayout.RowDefinitions.Count - 1);
-        var available = DashboardScroller.ActualHeight - statusHeight -
-            ResourcesGrid.ActualHeight - ResourcesGrid.Margin.Top - ResourcesGrid.Margin.Bottom - chromeHeight;
-        var height = Math.Max(80, Math.Floor(available));
+        var panelHeight = DashboardScroller.ActualHeight - statusHeight -
+            ResourcesGrid.ActualHeight - ResourcesGrid.Margin.Top - ResourcesGrid.Margin.Bottom;
+        InsightsPanel.MaxHeight = Dashboard.ActualWidth >= 820 ? Math.Max(180, Math.Floor(panelHeight)) : double.PositiveInfinity;
+        var height = Math.Max(80, Math.Floor(panelHeight - chromeHeight));
         if (Math.Abs(ConsumersList.MaxHeight - height) > 1) ConsumersList.MaxHeight = height;
     }
 

@@ -13,7 +13,7 @@
                 <controls:MetricCard x:Name="CpuCard" Label="CPU" Glyph="&#xE9D9;">
                     <controls:MetricCard.Trend><views:ResourceTrendView x:Name="CpuTrend"/></controls:MetricCard.Trend>
                 </controls:MetricCard>
-                <controls:MetricCard x:Name="MemoryCard" Grid.Column="1" Label="Memory" Glyph="&#xE964;">
+                <controls:MetricCard x:Name="MemoryCard" Grid.Column="1" Label="Physical memory" Glyph="&#xE964;">
                     <controls:MetricCard.Trend><views:ResourceTrendView x:Name="MemoryTrend"/></controls:MetricCard.Trend>
                 </controls:MetricCard>
                 <controls:MetricCard x:Name="DiskCard" Grid.Column="2" Label="Disk throughput" Glyph="&#xEDA2;">
@@ -33,7 +33,7 @@
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <StackPanel Spacing="4">
                                 <TextBlock Text="Top Resource Consumers" Style="{StaticResource SectionLabel}"/>
-                                <TextBlock Text="Applications and observed process groups" Style="{StaticResource Muted}"/>
+                                <TextBlock x:Name="ConsumerCaption" Text="Applications and observed process groups" Style="{StaticResource Muted}"/>
                             </StackPanel>
                             <ComboBox x:Name="RankingSelector" Grid.Column="1" SelectedIndex="0" SelectionChanged="RankingSelectionChanged" VerticalAlignment="Top" AutomationProperties.Name="Rank top resource consumers">
                                 <x:String>Private commit</x:String><x:String>CPU</x:String>
@@ -45,13 +45,13 @@
                             <TextBlock Grid.Column="1" Text="Private commit" FontSize="{StaticResource CaptionSize}" HorizontalAlignment="Right"/>
                             <TextBlock Grid.Column="2" Text="CPU" FontSize="{StaticResource CaptionSize}" HorizontalAlignment="Right"/>
                         </Grid>
-                        <ListView x:Name="ConsumersList" Grid.Row="2" ItemsSource="{x:Bind Rows}" SelectionMode="Single" MaxHeight="80" KeyDown="ConsumerKeyDown" AutomationProperties.Name="Ranked resource consumers" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListView x:Name="ConsumersList" Grid.Row="2" ItemsSource="{x:Bind Rows}" SelectionMode="Single" MaxHeight="80" KeyDown="ConsumerKeyDown" AutomationProperties.Name="Ranked resource consumers" AutomationProperties.HelpText="Applications and observed process groups, ranked by the selected resource." ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                             <ListView.ItemContainerStyle>
                                 <Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0"/></Style>
                             </ListView.ItemContainerStyle>
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="views:OverviewConsumerRow">
-                                    <Grid Padding="4,4" ColumnSpacing="8" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="0,0,0,1" ToolTipService.ToolTip="{x:Bind IdentityExplanation, Mode=OneWay}" AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}">
+                                    <Grid Padding="4,2" ColumnSpacing="8" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="0,0,0,1" ToolTipService.ToolTip="{x:Bind IdentityExplanation, Mode=OneWay}" AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="106"/><ColumnDefinition Width="62"/><ColumnDefinition Width="30"/></Grid.ColumnDefinitions>
                                         <Grid ColumnSpacing="8" Margin="{x:Bind Indent}">
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -62,7 +62,7 @@
                                                 <FontIcon Glyph="&#xE737;" FontSize="22" Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" AutomationProperties.AccessibilityView="Raw"/>
                                                 <Image Source="{x:Bind Icon, Mode=OneWay}" Width="26" Height="26" AutomationProperties.AccessibilityView="Raw"/>
                                             </Grid>
-                                            <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center">
+                                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
                                                 <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontWeight="{x:Bind NameWeight}" FontSize="{StaticResource BodySize}" TextTrimming="CharacterEllipsis"/>
                                                 <TextBlock Text="{x:Bind Secondary, Mode=OneWay}" FontSize="{StaticResource CaptionSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
                                             </StackPanel>
@@ -83,30 +83,35 @@
                     </Grid>
                 </Border>
                 <Border x:Name="InsightsPanel" Grid.Column="1" Style="{StaticResource Card}" VerticalAlignment="Stretch">
-                    <StackPanel Spacing="12">
-                        <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                            <FontIcon Glyph="&#xEA80;" FontSize="26" VerticalAlignment="Top" Margin="0,2,0,0" AutomationProperties.AccessibilityView="Raw"/>
-                            <StackPanel Grid.Column="1" Spacing="4"><TextBlock Text="System Insights" Style="{StaticResource SectionLabel}"/></StackPanel>
-                        </Grid>
-                        <Border Background="{ThemeResource SelectionSurface}" CornerRadius="8" Padding="12">
-                            <StackPanel Spacing="6"><TextBlock x:Name="MemoryHeadline" Text="Physical memory" Style="{StaticResource SectionLabel}" Foreground="{ThemeResource SelectionForeground}"/><TextBlock x:Name="MemoryEvidence" Text="Waiting for measurements…" TextWrapping="Wrap" FontSize="{StaticResource BodySize}" Foreground="{ThemeResource SelectionForeground}"/></StackPanel>
-                        </Border>
-                        <Grid ColumnSpacing="12" RowSpacing="14">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                            <TextBlock Text="Available physical" Style="{StaticResource Muted}"/>
-                            <TextBlock x:Name="AvailableValue" Grid.Column="1" HorizontalAlignment="Right" AutomationProperties.Name="Available physical memory"/>
-                            <TextBlock Grid.Row="1" Text="Cache (overlaps physical)" Style="{StaticResource Muted}"/>
-                            <TextBlock x:Name="CacheValue" Grid.Row="1" Grid.Column="1" HorizontalAlignment="Right" AutomationProperties.Name="System cache, overlaps physical memory"/>
-                            <TextBlock Grid.Row="2" Text="Virtual commit / limit" Style="{StaticResource Muted}"/>
-                            <TextBlock x:Name="CommitValue" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Right" AutomationProperties.Name="Committed virtual memory and limit"/>
-                        </Grid>
-                        <TextBlock Text="Cache and commit are different views, not additional physical usage." Style="{StaticResource Muted}"/>
-                        <Button Click="InsightsClicked" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="12,10">
+                    <Grid RowSpacing="8">
+                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" IsTabStop="True" AutomationProperties.Name="System insight observations">
+                            <StackPanel x:Name="InsightsContent" Spacing="12">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <FontIcon Glyph="&#xEA80;" FontSize="26" VerticalAlignment="Top" Margin="0,2,0,0" AutomationProperties.AccessibilityView="Raw"/>
+                                    <StackPanel Grid.Column="1" Spacing="4"><TextBlock Text="System Insights" Style="{StaticResource SectionLabel}"/></StackPanel>
+                                </Grid>
+                                <Border x:Name="MemorySummary" Background="{ThemeResource SelectionSurface}" CornerRadius="8" Padding="12">
+                                    <StackPanel Spacing="6"><TextBlock x:Name="MemoryHeadline" Text="Physical memory" Style="{StaticResource SectionLabel}" Foreground="{ThemeResource SelectionForeground}"/><TextBlock x:Name="MemoryEvidence" Text="Waiting for measurements…" TextWrapping="Wrap" FontSize="{StaticResource BodySize}" Foreground="{ThemeResource SelectionForeground}"/></StackPanel>
+                                </Border>
+                                <Grid x:Name="MemoryFacts" ColumnSpacing="12" RowSpacing="14">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <TextBlock Text="Available physical" Style="{StaticResource Muted}"/>
+                                    <TextBlock x:Name="AvailableValue" Grid.Column="1" HorizontalAlignment="Right" AutomationProperties.Name="Available physical memory"/>
+                                    <TextBlock Grid.Row="1" Text="Cache (overlaps physical)" Style="{StaticResource Muted}"/>
+                                    <TextBlock x:Name="CacheValue" Grid.Row="1" Grid.Column="1" HorizontalAlignment="Right" AutomationProperties.Name="System cache, overlaps physical memory"/>
+                                    <TextBlock Grid.Row="2" Text="Virtual commit / limit" Style="{StaticResource Muted}"/>
+                                    <TextBlock x:Name="CommitValue" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Right" AutomationProperties.Name="Committed virtual memory and limit"/>
+                                </Grid>
+                                <TextBlock Text="Cache and commit are different views, not additional physical usage." Style="{StaticResource Muted}"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                        <Button x:Name="InsightsAction" Grid.Row="1" Click="InsightsClicked" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="12,10">
                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="View detailed analysis" TextWrapping="Wrap"/><FontIcon Grid.Column="1" Glyph="&#xE76C;" FontSize="12" Margin="8,0,0,0"/></Grid>
                         </Button>
-                    </StackPanel>
+                    </Grid>
                 </Border>
             </Grid>
             <TextBlock x:Name="ReadingStatus" Margin="0,0,0,12" Style="{StaticResource Muted}" AutomationProperties.LiveSetting="Polite"/>

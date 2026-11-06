@@ -447,6 +447,7 @@ public sealed partial class MainWindow : Window
         RefreshOverview();
         if (Model.Snapshot is { } snapshot) tray.Update(snapshot, paused);
         PauseButton.Content = paused ? "Resume" : "Pause";
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(PauseButton, paused ? "Resume live refresh" : "Pause live refresh");
         StatusText.Text = paused ? "Paused · displayed measurements are frozen" : "Resuming live local monitoring…";
     }
     private void ThemeChanged(object sender, SelectionChangedEventArgs args)
