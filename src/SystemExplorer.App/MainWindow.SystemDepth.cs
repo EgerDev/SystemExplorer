@@ -204,7 +204,7 @@ public sealed partial class MainWindow
                 await ShowInventoryAsync("Other persistence locations", async (view, token) =>
                 {
                     var r = await persistence.CaptureAsync(token);
-                    var denied = r.Sources.Where(s => s.Status is not InspectionStatus.Available).Select(s => $"{s.Source}/{s.Scope}: {s.Status}");
+                    var denied = r.Sources.Where(s => s.Status is not InspectionStatus.Available).Select(s => $"{s.Source}/{s.Scope}: {s.Status} — {s.Detail}");
                     view.ShowRows($"{r.Status} · {r.CapturedAt.LocalDateTime:T} · {r.Detail} {string.Join("; ", denied)} Presence is not evidence of compromise; KnownDLLs rows are reference values.",
                         r.Entries.Select(e => new InventoryRow(e.Name, e.Location, e.Source.ToString(), e.Scope.ToString(), e.IsReference ? "Reference" : e.Status.ToString(),
                             FullText: $"{e.Source} · {e.Scope}\n{e.Location}\n{e.Name} = {e.Value ?? "(no value)"}\n{string.Join("\n", e.Properties.Select(p => $"{p.Key}: {p.Value}"))}\n{e.Status}: {e.Detail}\nRaw and unexpanded; nothing is resolved or executed.")),
