@@ -1,4 +1,5 @@
 using System.Net;
+using System.Diagnostics;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
@@ -30,6 +31,28 @@ empty.Add(new(0, IoAttributionKind.DiskRead, 1));
 var bounded = empty.GetRows(_ => (null, null));
 Check(empty.CompletionStatus == IoAttributionStatus.Truncated && bounded.Count == 4096 && bounded[0].DiskReadBytes == 2, "PID bound must drop only new PIDs.");
 Console.WriteLine("PASS: pure aggregation, empty/invalid events, duration clamp, stable/unstable identity and 4096-PID truncation.");
+
+var resolverStart = DateTimeOffset.UtcNow;
+using (var monitor = new WindowsMonitorProvider())
+{
+    var snapshot = await monitor.CaptureAsync(CancellationToken.None);
+    var candidate = snapshot.Processes.First(p => p.Identity.IsStable && p.Identity.Pid != Environment.ProcessId
+        && p.Identity.CreationTimeFileTime < resolverStart.UtcDateTime.ToFileTimeUtc()
+        && WindowsIoAttributionCapture.Resolve(p.Identity.Pid, resolverStart).Name is not null);
+    var resolved = WindowsIoAttributionCapture.Resolve(candidate.Identity.Pid, resolverStart);
+    Check(resolved.Identity == candidate.Identity && !string.IsNullOrWhiteSpace(resolved.Name), "Pre-existing non-self identity must match native monitor.");
+    Check(WindowsIoAttributionCapture.Resolve(candidate.Identity.Pid, DateTimeOffset.FromFileTime(candidate.Identity.CreationTimeFileTime!.Value).AddTicks(-1)).Identity is null,
+        "New PID must not acquire stable identity.");
+    Console.WriteLine($"PASS: native non-self resolver PID={candidate.Identity.Pid}; name={resolved.Name}; identity={resolved.Identity}; matches WindowsMonitorProvider.");
+}
+Check(WindowsIoAttributionCapture.Resolve(-1, resolverStart) == (null, null), "Invalid PID stays unstable.");
+using (var exited = Process.Start(new ProcessStartInfo("cmd.exe", "/c exit 0") { CreateNoWindow = true, UseShellExecute = false })!)
+{
+    var exitedPid = exited.Id;
+    await exited.WaitForExitAsync();
+    Check(WindowsIoAttributionCapture.Resolve(exitedPid, DateTimeOffset.UtcNow) == (null, null), "Exited PID stays unstable.");
+}
+Console.WriteLine("PASS: new, invalid and exited PIDs remain unstable.");
 
 var provider = new WindowsIoAttributionCapture();
 using var alreadyCancelled = new CancellationTokenSource();

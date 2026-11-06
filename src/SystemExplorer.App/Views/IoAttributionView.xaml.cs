@@ -33,7 +33,7 @@ public sealed partial class IoAttributionView : UserControl
             4 => row.DiskReadBytes, 5 => row.DiskWriteBytes, _ => row.EventCount
         };
         var rows = sort == 0
-            ? descending ? capture.Processes.OrderByDescending(r => r.Name, StringComparer.OrdinalIgnoreCase) : capture.Processes.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            ? descending ? capture.Processes.OrderBy(r => r.Name is null).ThenByDescending(r => r.Name, StringComparer.OrdinalIgnoreCase) : capture.Processes.OrderBy(r => r.Name is null).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
             : descending ? capture.Processes.OrderByDescending(Number) : capture.Processes.OrderBy(Number);
         var seconds = capture.ActualDuration.TotalSeconds;
         string Rate(ulong bytes) => seconds > 0 ? Display.Rate(bytes / seconds) : "Unavailable";
@@ -45,6 +45,6 @@ public sealed partial class IoAttributionView : UserControl
         }).ToArray();
         var label = capture.Status == IoAttributionStatus.Completed ? "Measured" : "Partial / unavailable";
         var headers = new[] { "Process", "PID", "Net send/s", "Net recv/s", "Disk read/s", "Disk write/s", "Events" };
-        Status.Text = $"{label}: {capture.Status} · actual duration {seconds:F3} s · events lost {capture.EventsLost}\n{capture.Detail}\n{capture.Processes.Count} processes · {headers[sort]} {(descending ? "descending" : "ascending")}. Rates = observed bytes / actual duration; no observations is not proof of no I/O.";
+        Status.Text = $"{label}: {capture.Status} · actual duration {seconds:F3} s · events lost {capture.EventsLost}\n{capture.Detail}\n{capture.Processes.Count} processes ({capture.Processes.Count(r => r.Identity is { IsStable: true })} stable identities) · {headers[sort]} {(descending ? "descending" : "ascending")}. Rates = observed bytes / actual duration; no observations is not proof of no I/O.";
     }
 }

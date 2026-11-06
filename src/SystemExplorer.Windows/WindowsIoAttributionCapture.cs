@@ -1,8 +1,11 @@
 using System.Diagnostics;
 using System.Security.Principal;
+using System.Text;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Session;
 using SystemExplorer.Core;
+
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("SystemExplorer.IoAttribution.Smoke")]
 
 namespace SystemExplorer.Windows;
 
@@ -130,16 +133,19 @@ public sealed class WindowsIoAttributionCapture : IIoAttributionCapture
         return new(started, elapsed.Elapsed, status, detail, lost, rows);
     }
 
-    private static (ProcessIdentity? Identity, string? Name) Resolve(int pid, DateTimeOffset started)
+    internal static (ProcessIdentity? Identity, string? Name) Resolve(int pid, DateTimeOffset started)
     {
-        try
-        {
-            using var process = Process.GetProcessById(pid);
-            var creation = process.StartTime.ToUniversalTime();
-            return (creation <= started.UtcDateTime && !process.HasExited ? new(pid, creation.ToFileTimeUtc()) : null, process.ProcessName);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
-        { return (null, null); }
+        if (pid < 0) return (null, null);
+        using var process = NativeMethods.OpenProcess(NativeMethods.QueryLimited | 0x100000, false, (uint)pid);
+        if (process.IsInvalid || NativeSecurityMethods.WaitForSingleObject(process, 0) != 258) return (null, null);
+        if (!NativeMethods.GetProcessTimes(process, out var creation, out _, out _, out _)
+            || creation.Ticks == 0 || creation.Ticks > (ulong)started.UtcDateTime.ToFileTimeUtc()) return (null, null);
+        var path = new StringBuilder(32768);
+        uint length = (uint)path.Capacity;
+        var name = NativeMethods.QueryFullProcessImageNameW(process, 0, path, ref length)
+            ? Path.GetFileNameWithoutExtension(path.ToString()) : null;
+        if (NativeSecurityMethods.WaitForSingleObject(process, 0) != 258) return (null, null);
+        return (new(pid, (long)creation.Ticks), name);
     }
 
     private static object RequiredPayload(TraceEvent data, string name) => data.PayloadByName(name)
