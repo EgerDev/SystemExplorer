@@ -167,7 +167,8 @@ public sealed partial class MainWindow
             case "DllUsers":
                 var dll = kind == "DllUsers";
                 var query = await PromptAsync(dll ? "Find processes that loaded a DLL" : "Find processes using a file",
-                    dll ? "Module name or path fragment, e.g. user32.dll" : @"Local absolute file path, e.g. C:\data\report.xlsx");
+                    dll ? "Module name or path fragment, e.g. user32.dll" : @"Local absolute file path, e.g. C:\data\report.xlsx",
+                    dll ? "Enter a module name or path fragment to search." : "Enter a local file path to search.");
                 if (string.IsNullOrWhiteSpace(query)) return;
                 await ShowInventoryAsync(dll ? $"Module users · {query}" : $"File users · {query}", async (view, token) =>
                 {
@@ -218,13 +219,19 @@ public sealed partial class MainWindow
     private static string StartName(uint? start) => start switch { 0 => "Boot", 1 => "System", 2 => "Automatic", 3 => "Demand", 4 => "Disabled", null => "—", _ => $"{start}" };
     private string ProcessName(ProcessIdentity identity) => Model.Snapshot?.Processes.FirstOrDefault(p => p.Identity == identity)?.Name ?? $"PID {identity.Pid}";
 
-    private async Task<string?> PromptAsync(string title, string placeholder)
+    private async Task<string?> PromptAsync(string title, string placeholder, string requirement = "Enter text to search.")
     {
         if (detailsOpen) return null;
-        var box = new TextBox { PlaceholderText = placeholder, MinWidth = 420 };
+        var box = new TextBox { PlaceholderText = placeholder, MinWidth = 420, Description = requirement };
         var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, RequestedTheme = Root.ActualTheme, Title = title, Content = box,
-            PrimaryButtonText = "Search", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary ? box.Text.Trim() : null;
+            PrimaryButtonText = "Search", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary, IsPrimaryButtonEnabled = false };
+        box.TextChanged += (_, _) =>
+        {
+            var valid = PromptInput.CanSubmit(box.Text);
+            dialog.IsPrimaryButtonEnabled = valid;
+            box.Description = valid ? null : requirement;
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary ? PromptInput.Normalize(box.Text) : null;
     }
 
     private async void SecurityClicked(object sender, RoutedEventArgs args)
