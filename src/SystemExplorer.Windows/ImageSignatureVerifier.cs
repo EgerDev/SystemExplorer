@@ -57,7 +57,19 @@ public sealed class ImageSignatureVerifier : IImageSignatureVerifier
             using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
             Check();
             // Content digest keys the cache so a replaced file with identical size and timestamp is re-verified.
-            var digest = size <= 512L * 1024 * 1024 ? Convert.ToHexString(SHA256.HashData(file)) : "";
+            var digest = "";
+            if (size <= 512L * 1024 * 1024)
+            {
+                using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                var buffer = new byte[1024 * 1024];
+                int read;
+                while ((read = file.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    sha.AppendData(buffer, 0, read);
+                    Check();
+                }
+                digest = Convert.ToHexString(sha.GetHashAndReset());
+            }
             file.Position = 0;
             Check();
             var key = new CacheKey(path.ToUpperInvariant(), size.Value, modified.Value.UtcTicks, digest);
