@@ -40,9 +40,10 @@ public sealed class ProcessLifecycleTimeline
             {
                 if (live.Count + next.Count >= MaximumTracked * 2 || next.Count >= MaximumTracked) { TrackingOverflow++; continue; }
                 lifetime = new Lifetime(identity, process, snapshot.CapturedAt);
+                lifetime.Observe(process, snapshot.CapturedAt);
                 Add(lifetime.ToEvent(snapshot.CapturedAt, first ? ProcessLifecycleKind.RunningAtFirstObservation : ProcessLifecycleKind.Started, gap));
             }
-            lifetime.Observe(process, snapshot.CapturedAt);
+            else lifetime.Observe(process, snapshot.CapturedAt);
             next[identity] = lifetime;
         }
         foreach (var (identity, lifetime) in live)

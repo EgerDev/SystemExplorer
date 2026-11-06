@@ -40,9 +40,13 @@ jobs:
         run: dotnet run --project tests/SystemExplorer.Threads.Smoke -c Release
       - name: Read-only scheduled task checks
         run: dotnet run --project tests/SystemExplorer.ScheduledTasks.Smoke -c Release
+      - name: Read-only system counter checks
         run: dotnet run --project tests/SystemExplorer.SystemCounters.Smoke -c Release
+      - name: Read-only object inventory checks
         run: dotnet run --project tests/SystemExplorer.ObjectInventories.Smoke -c Release
+      - name: Read-only process security checks
         run: dotnet run --project tests/SystemExplorer.ProcessSecurity.Smoke -c Release
+      - name: Read-only persistence inventory checks
         run: dotnet run --project tests/SystemExplorer.Persistence.Smoke -c Release
       - name: Publish unsigned portable test build
         shell: pwsh

@@ -149,7 +149,9 @@ internal sealed class SystemCounterSampler : ISystemCounterSampler
                 token.ThrowIfCancellationRequested();
                 if (expired()) { timedOut = true; break; }
                 var add = state.Added[path];
-                singles[path] = add != 0 ? new(add, add, null) : collect != 0 ? new(collect, collect, null) : state.Query.ReadSingle(path);
+                var single = add != 0 ? new PdhSingleResult(add, add, null) : collect != 0 ? new PdhSingleResult(collect, collect, null) : state.Query.ReadSingle(path);
+                singles[path] = single;
+                if (single.FunctionStatus != 0 && !(warmup && WindowsSystemCounterProvider.IsWarmupStatus(single.FunctionStatus))) rebuild = true;
             }
             return new(warmup, arrays, singles, timedOut);
         }

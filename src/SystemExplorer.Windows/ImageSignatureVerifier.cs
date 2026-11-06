@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using SystemExplorer.Core;
 
@@ -16,7 +17,7 @@ public sealed class ImageSignatureVerifier : IImageSignatureVerifier
     private readonly object gate = new();
     private readonly LinkedList<(CacheKey Key, ImageProvenance Value)> lru = new();
     private readonly Dictionary<CacheKey, LinkedListNode<(CacheKey Key, ImageProvenance Value)>> cache = new();
-    private readonly record struct CacheKey(string Path, long Size, long Ticks);
+    private readonly record struct CacheKey(string Path, long Size, long Ticks, string Sha256);
 
     public ImageSignatureVerifier() : this(new ImageTrustNative()) { }
     internal ImageSignatureVerifier(IImageTrustNative native) => this.native = native;
@@ -53,18 +54,22 @@ public sealed class ImageSignatureVerifier : IImageSignatureVerifier
             var info = new FileInfo(path);
             size = info.Length;
             modified = new DateTimeOffset(info.LastWriteTimeUtc);
-            var key = new CacheKey(path.ToUpperInvariant(), size.Value, modified.Value.UtcTicks);
+            using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            Check();
+            // Content digest keys the cache so a replaced file with identical size and timestamp is re-verified.
+            var digest = size <= 512L * 1024 * 1024 ? Convert.ToHexString(SHA256.HashData(file)) : "";
+            file.Position = 0;
+            Check();
+            var key = new CacheKey(path.ToUpperInvariant(), size.Value, modified.Value.UtcTicks, digest);
             lock (gate)
             {
-                if (cache.TryGetValue(key, out var cached))
+                if (digest.Length > 0 && cache.TryGetValue(key, out var cached))
                 {
                     lru.Remove(cached);
                     lru.AddFirst(cached);
                     return cached.Value.Value;
                 }
             }
-            using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
-            Check();
             var metadata = FileVersionInfo.GetVersionInfo(path);
             static string? Present(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
             company = Present(metadata.CompanyName);

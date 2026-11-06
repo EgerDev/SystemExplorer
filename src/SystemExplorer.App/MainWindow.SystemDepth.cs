@@ -204,7 +204,7 @@ public sealed partial class MainWindow
             var rows = new List<InventoryRow>();
             void Add(string name, string value, string status, string note) => rows.Add(new(name, value, status, FullText: $"{name}: {value}\n{status}\n{note}"));
             var t = r.Token;
-            Add("Command line", r.CommandLine.LengthCharacters is { } len ? $"{len} characters · select Show to reveal" : "Unavailable", r.CommandLine.Status.ToString(), r.CommandLine.Detail);
+            Add("Command line", r.CommandLine.LengthCharacters is { } len ? $"{len} characters · select this row, then Show command line" : "Unavailable", r.CommandLine.Status.ToString(), r.CommandLine.Detail);
             Add("User", t.UserAccount ?? t.UserSid ?? "Unavailable", t.Status.ToString(), t.Detail);
             Add("Integrity level", t.Integrity?.ToString() ?? "Unavailable", t.Status.ToString(), $"RID 0x{t.IntegrityRid:X}");
             Add("Elevation", t.IsElevated is { } e ? $"{(e ? "Elevated" : "Not elevated")} · {t.ElevationType}" : "Unavailable", t.Status.ToString(), "");
@@ -221,10 +221,11 @@ public sealed partial class MainWindow
                 Add("Image signature", $"{i.Signature}{(i.SignerSubject is { } s ? $" · {s}" : "")}", i.Status.ToString(), $"{i.Path}\n{i.CompanyName} · {i.ProductName} · {i.FileVersion}\nCatalog: {i.CatalogPath ?? "—"}\n{i.Detail}");
             else Add("Image signature", "Unavailable", r.Image.Status.ToString(), r.Image.Detail);
             var commandText = r.CommandLine.Text;
+            if (commandText is not null) rows[0] = rows[0] with { Value = "reveal" };
             view.ShowRows($"{r.Status} · {r.CapturedAt.LocalDateTime:T} · {r.Detail}", rows, "Property", "Status", "", "", action: commandText is null ? null : "Show command line");
-            view.ActionRequested += _ =>
+            view.ActionRequested += row =>
             {
-                if (commandText is null) return;
+                if (commandText is null || row.Value is not "reveal") return;
                 view.ShowRows("Command lines can contain secrets. Shown on request only; not logged or retained after this dialog closes.",
                     [new InventoryRow("Command line", commandText, FullText: commandText)], "Command line", "", "", "", back: true);
             };
