@@ -23,6 +23,14 @@ public sealed record ProcessSnapshot
     public ulong? PrivateBytes { get; init; }
     public ulong? WorkingSetBytes { get; init; }
     public ulong? PrivateWorkingSetBytes { get; init; }
+    public ulong? PeakWorkingSetBytes { get; init; }
+    public uint? PageFaultCount { get; init; }
+    public ulong? KernelCpuTimeTicks { get; init; }
+    public ulong? UserCpuTimeTicks { get; init; }
+    public ulong? ReadOperationCount { get; init; }
+    public ulong? WriteOperationCount { get; init; }
+    public ulong? OtherOperationCount { get; init; }
+    public ulong? OtherTransferBytes { get; init; }
     public double? CpuPercent { get; init; }
     public double? ReadBytesPerSecond { get; init; }
     public double? WriteBytesPerSecond { get; init; }
@@ -37,6 +45,10 @@ public sealed record MemorySnapshot
     public ulong? PhysicalAvailableBytes { get; init; }
     public ulong? CommitTotalBytes { get; init; }
     public ulong? CommitLimitBytes { get; init; }
+    public ulong? CommitPeakBytes { get; init; }
+    public uint? ProcessCount { get; init; }
+    public uint? ThreadCount { get; init; }
+    public uint? HandleCount { get; init; }
     public ulong? SystemCacheBytes { get; init; }
     public ulong? StandbyBytes { get; init; }
     public ulong? KernelPagedBytes { get; init; }
@@ -53,6 +65,7 @@ public sealed record MonitorSnapshot
     public double? DiskReadBytesPerSecond { get; init; }
     public double? DiskWriteBytesPerSecond { get; init; }
     public double? GpuPercent { get; init; }
+    public IReadOnlyList<GpuAdapterRow> GpuAdapters { get; init; } = Array.Empty<GpuAdapterRow>();
     public IReadOnlyList<string> Limitations { get; init; } = Array.Empty<string>();
 }
 
