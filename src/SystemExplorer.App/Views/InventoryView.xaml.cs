@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using SystemExplorer.Core;
 
 namespace SystemExplorer.App.Views;
 
@@ -50,11 +51,10 @@ public sealed partial class InventoryView : UserControl
     private void Rebuild()
     {
         var filtered = source.Where(r => r.Description.Contains(Search.Text.Trim(), StringComparison.OrdinalIgnoreCase));
-        decimal? Number(InventoryRow row) => sort switch { 1 => row.Number1, 2 => row.Number2, _ => row.Number3 };
+        decimal? Number(InventoryRow row) => sort switch { 0 => row.NameKey, 1 => row.Number1, 2 => row.Number2, _ => row.Number3 };
         string Text(InventoryRow row) => sort switch { 1 => row.First, 2 => row.Second, 3 => row.Third, _ => row.Name };
-        var numeric = sort > 0 && source.Any(r => Number(r) is not null);
-        var ordered = !numeric ? descending ? filtered.OrderByDescending(Text, StringComparer.OrdinalIgnoreCase) : filtered.OrderBy(Text, StringComparer.OrdinalIgnoreCase)
-            : descending ? filtered.OrderBy(r => Number(r) is null).ThenByDescending(Number) : filtered.OrderBy(r => Number(r) is null).ThenBy(Number);
+        var numeric = source.Any(r => Number(r) is not null);
+        var ordered = InventoryOrdering.Order(filtered, Text, Number, numeric, descending);
         var displayed = ordered.ToArray();
         Rows.ItemsSource = displayed;
         Detail.Text = "Select an observation for full, copyable details."; ActionButton.IsEnabled = false;

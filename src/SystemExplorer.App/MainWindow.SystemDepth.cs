@@ -109,7 +109,8 @@ public sealed partial class MainWindow
                         c.LogicalProcessors.Select(p => new InventoryRow($"CPU {p.Instance}", p.Group is { } g ? $"Group {g} · number {p.Number}" : "Group unavailable",
                             V(p.ProcessorUtilityPercent, Pct), V(p.PrivilegedTimePercent, Pct), "",
                             N(p.ProcessorUtilityPercent), N(p.PrivilegedTimePercent), null,
-                            $"Logical processor {p.Instance}\nProcessor utility: {V(p.ProcessorUtilityPercent, Pct)}{Why(p.ProcessorUtilityPercent)}\nPrivileged (kernel) time: {V(p.PrivilegedTimePercent, Pct)}{Why(p.PrivilegedTimePercent)}\nMeasured as reported; values above 100% are not clamped.")),
+                            $"Logical processor {p.Instance}\nProcessor utility: {V(p.ProcessorUtilityPercent, Pct)}{Why(p.ProcessorUtilityPercent)}\nPrivileged (kernel) time: {V(p.PrivilegedTimePercent, Pct)}{Why(p.PrivilegedTimePercent)}\nMeasured as reported; values above 100% are not clamped.",
+                            NameKey: p.Group is { } group && p.Number is { } number ? (decimal)group * 65536 + number : null)),
                         "Logical processor", "Utility", "Privileged", "");
                 });
                 break;
@@ -174,7 +175,7 @@ public sealed partial class MainWindow
                     {
                         var r = await fileUsage.FindModuleUsersAsync(query, token);
                         view.ShowRows($"{r.Status} · {r.Detail}", r.Matches.Select(m => new InventoryRow(ProcessName(m.Identity), m.ModulePath,
-                            $"PID {m.Identity.Pid}", $"0x{m.BaseAddress:X}", "", m.Identity.Pid, null, null,
+                            $"PID {m.Identity.Pid}", $"0x{m.BaseAddress:X}", "", m.Identity.Pid, m.BaseAddress, null,
                             $"PID {m.Identity.Pid} · creation {m.Identity.CreationTimeFileTime}\n{m.ModuleName}\n{m.ModulePath}\nBase 0x{m.BaseAddress:X}", m.Identity)),
                             "Process", "PID", "Base", "");
                     }
@@ -291,7 +292,7 @@ public sealed partial class MainWindow
                 view.ShowRows($"{r.Status} · {row.Name}: {selected.Length:N0} of {r.Handles.Count:N0} collected rows (provider cap 4,096). Type-only observations; no names are queried. {r.Detail}",
                 selected.Select(h => new InventoryRow($"0x{h.HandleValue:X}", h.TypeName ?? $"Type {h.TypeIndex}",
                     h.TypeName ?? $"Type {h.TypeIndex}", $"0x{h.GrantedAccess:X8}", $"0x{h.Attributes:X8}",
-                    FullText: $"Handle 0x{h.HandleValue:X}\nType index {h.TypeIndex}: {h.TypeName ?? "Unavailable"}\nGranted access 0x{h.GrantedAccess:X8}\nAttributes 0x{h.Attributes:X8}")),
+                    FullText: $"Handle 0x{h.HandleValue:X}\nType index {h.TypeIndex}: {h.TypeName ?? "Unavailable"}\nGranted access 0x{h.GrantedAccess:X8}\nAttributes 0x{h.Attributes:X8}", NameKey: h.HandleValue)),
                 "Handle", "Type", "Access mask", "Attributes", back: true);
             };
             view.BackRequested += Summary;
@@ -308,7 +309,7 @@ public sealed partial class MainWindow
                 r.Threads.Select(t => new InventoryRow($"Thread {t.Identity.ThreadId}", $"{ObjectInventoryNames.ThreadStateName(t.ThreadState) ?? "State unavailable"} · {ObjectInventoryNames.WaitReasonName(t.WaitReason) ?? "—"} · priority {t.CurrentPriority}/{t.BasePriority}",
                     t.ContextSwitchesPerSecond is { } cs ? $"{cs:F0}/s" : "—", t.CycleDelta?.ToString("N0") ?? "—", t.ContextSwitches?.ToString("N0") ?? "—",
                     t.ContextSwitchesPerSecond is { } c ? (decimal)c : null, t.CycleDelta, t.ContextSwitches,
-                    $"TID {t.Identity.ThreadId} · creation {t.Identity.CreationTimeFileTime}\n{t.Status}: {t.Detail}\nContext switches: {t.ContextSwitches} (+{t.ContextSwitchDelta})\nCycles: {t.CycleTime} (+{t.CycleDelta})")),
+                    $"TID {t.Identity.ThreadId} · creation {t.Identity.CreationTimeFileTime}\n{t.Status}: {t.Detail}\nContext switches: {t.ContextSwitches} (+{t.ContextSwitchDelta})\nCycles: {t.CycleTime} (+{t.CycleDelta})", NameKey: t.Identity.ThreadId)),
                 "Thread", "Switches/s", "Cycles in sample", "Total switches", initialSort: 1, reverse: true);
         });
     }

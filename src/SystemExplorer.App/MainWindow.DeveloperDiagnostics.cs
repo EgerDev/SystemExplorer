@@ -87,7 +87,7 @@ public sealed partial class MainWindow
                     DiagnosticData.Percent(t.CpuPercent), ThreadTime(t.KernelTimeTicks), ThreadTime(t.UserTimeTicks),
                     t.CpuPercent is { } cpu ? (decimal)cpu : null, t.KernelTimeTicks, t.UserTimeTicks,
                     $"PID {identity.Pid} · process creation {identity.CreationTimeFileTime}\nTID {t.Identity.ThreadId} · thread creation {t.Identity.CreationTimeFileTime}\nCPU: {DiagnosticData.Percent(t.CpuPercent)} (100% = one logical CPU)\nKernel: {ThreadTime(t.KernelTimeTicks)} · User: {ThreadTime(t.UserTimeTicks)}\n{t.Status}: {t.Detail}\nCaptured {result.CapturedAt:O}; total capture span {result.SampleInterval.TotalMilliseconds:F0} ms, not the individual CPU denominator.",
-                    t.Identity.IsStable ? t.Identity : null)),
+                    t.Identity.IsStable ? t.Identity : null, NameKey: t.Identity.ThreadId)),
                 "Thread identity", "CPU %", "Kernel total", "User total", action: "Inspect selected wait chain", initialSort: 1, reverse: true);
             var busy = false;
             view.BackRequested += ShowThreads;
