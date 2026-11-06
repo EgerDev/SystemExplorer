@@ -1,6 +1,6 @@
 namespace SystemExplorer.Core;
 
-public sealed record HistoryPoint(DateTimeOffset At, ulong? PhysicalUsedBytes, ulong? CommitBytes, double? CpuPercent);
+public sealed record HistoryPoint(DateTimeOffset At, ulong? PhysicalUsedBytes, ulong? CommitBytes, double? CpuPercent, bool BreakBefore = false);
 public sealed record Insight(string Title, string Evidence, string Kind = "Observation");
 
 public sealed class DiagnosticsHistory
@@ -11,19 +11,25 @@ public sealed class DiagnosticsHistory
     private Dictionary<string, ProcessIdentity> singleInstances = new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<(DateTimeOffset At, string Key, string Path)> replacements = new();
     private DateTimeOffset? latest;
+    private bool breakBefore;
+
+    public void BreakContinuity() => breakBefore = true;
 
     public IReadOnlyList<HistoryPoint> System => system.ToArray();
 
     public void Add(MonitorSnapshot snapshot)
     {
         if (latest is { } last && snapshot.CapturedAt <= last) return;
-        if (latest is { } previous && snapshot.CapturedAt - previous > TimeSpan.FromSeconds(10))
+        if (breakBefore || latest is { } previous && snapshot.CapturedAt - previous > TimeSpan.FromSeconds(10))
         {
+            breakBefore = true;
             singleInstances.Clear();
             replacements.Clear();
+            memory.Clear();
         }
         latest = snapshot.CapturedAt;
-        system.Enqueue(new(snapshot.CapturedAt, snapshot.Memory.PhysicalUsedBytes, snapshot.Memory.CommitTotalBytes, snapshot.TotalCpuPercent));
+        system.Enqueue(new(snapshot.CapturedAt, snapshot.Memory.PhysicalUsedBytes, snapshot.Memory.CommitTotalBytes, snapshot.TotalCpuPercent, breakBefore));
+        breakBefore = false;
         while (system.Count > Capacity) system.Dequeue();
         var currentInstances = new Dictionary<string, ProcessIdentity>(StringComparer.OrdinalIgnoreCase);
         var candidates = snapshot.Processes.Where(p => p.Identity.IsStable && p.ExecutablePath is not null && p.UserSid is not null && p.SessionId.HasValue)

@@ -163,9 +163,15 @@ Check(self.PrivateWorkingSetBytes is { } privateWorkingSet
 Check(!string.IsNullOrWhiteSpace(self.ExecutablePath), "Live self path must be available.");
 Check(!string.IsNullOrWhiteSpace(self.UserSid) && !string.IsNullOrWhiteSpace(self.UserName), "Live self owner must be available.");
 Check(self.SessionId is not null && self.ThreadCount > 0 && self.HandleCount > 0, "Live self metadata must be available.");
+Check(self.PeakWorkingSetBytes >= self.WorkingSetBytes && self.PageFaultCount is not null, "Collected memory peak and cumulative faults must be available for self.");
+Check(self.KernelCpuTimeTicks is not null && self.UserCpuTimeTicks is not null && self.ReadOperationCount is not null &&
+    self.WriteOperationCount is not null && self.OtherOperationCount is not null && self.OtherTransferBytes is not null,
+    "Already-read CPU and I/O totals must reach the snapshot.");
 Check(first.Memory.PhysicalTotalBytes > 0 && first.Memory.PhysicalAvailableBytes is not null &&
     first.Memory.PhysicalTotalBytes >= first.Memory.PhysicalAvailableBytes, "Physical memory must be consistent.");
 Check(first.Memory.CommitTotalBytes is not null && first.Memory.CommitLimitBytes > 0, "Commit metrics must be available.");
+Check(first.Memory.CommitPeakBytes >= first.Memory.CommitTotalBytes && first.Memory.ProcessCount > 0 &&
+    first.Memory.ThreadCount > 0 && first.Memory.HandleCount > 0, "System performance totals and commit peak must reach the snapshot.");
 Check(first.TotalCpuPercent is null, "First system CPU sample must be unavailable.");
 Check(first.DiskReadBytesPerSecond is null && first.DiskWriteBytesPerSecond is null, "First PDH rate sample must be unavailable.");
 Check(first.Memory.StandbyBytes is null &&

@@ -4,6 +4,53 @@ using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Diagnostic live rows retain objects and order without reset", () =>
+    {
+        var rows = new DiagnosticRows();
+        var first = new DiagnosticItem("a", new(1, 100), "A", "", 1, "1", "", "", 1);
+        var second = first with { Key = "b", Identity = new(2, 200), Pid = 2, Name = "B", Number1 = 2 };
+        rows.Apply([first, second], true);
+        var anchor = rows.Rows[1];
+        var reset = false;
+        rows.Rows.CollectionChanged += (_, e) => reset |= e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset;
+        rows.Apply([second with { First = "20", Number1 = 20 }, first], false);
+        Check(ReferenceEquals(rows.Rows[1], anchor) && anchor.First == "20" && !reset);
+        rows.Apply([second, first], true);
+        Check(ReferenceEquals(rows.Rows[0], anchor));
+        rows.Apply([first with { Key = "new lifetime", Identity = new(1, 300) }], false);
+        Check(rows.Rows.Count == 1 && rows.Rows[0].Key == "new lifetime" && !reset);
+    }),
+    ("Diagnostic search includes all rows and sorts unavailable values last", () =>
+    {
+        var processes = Enumerable.Range(1, 75).Select(i => P(i, i) with { Name = $"app{i}", PrivateBytes = (ulong)(1000 - i) }).ToArray();
+        var items = DiagnosticData.Create("Memory", Snapshot(0, processes), null, [], new(), _ => null);
+        Check(DiagnosticData.FilterAndSort(items, "app75", 2, true, true).Single().Pid == 75);
+        var unknown = items[0] with { Key = "unknown", First = "—", Number1 = null };
+        foreach (var descending in new[] { false, true })
+            Check(DiagnosticData.FilterAndSort([unknown, items[1]], "", 2, descending, true)[^1].Key == "unknown");
+    }),
+    ("Diagnostic ownership rejects stale and reused lifetimes", () =>
+    {
+        var process = P(42, 100);
+        var relationships = new RelationshipSnapshot { CapturedAt = DateTimeOffset.UnixEpoch, Connections = [new() { Protocol = "TCP", LocalAddress = "::1", LocalPort = 80, OwningPid = 42, OwnerIdentity = process.Identity }] };
+        var rows = DiagnosticData.Create("Network", Snapshot(2, process), relationships, [], new(), _ => null);
+        Check(rows.Single().Identity == process.Identity && rows.Single().Name == "[::1]:80");
+        Check(DiagnosticData.Create("Network", Snapshot(12, process), relationships, [], new(), _ => null).Single().Identity is null);
+        Check(DiagnosticData.Create("Network", Snapshot(2, P(42, 200)), relationships, [], new(), _ => null).Single().Identity is null);
+    }),
+    ("Commit chart uses elapsed time and breaks continuity", () =>
+    {
+        var history = new DiagnosticsHistory();
+        history.Add(Snapshot(0) with { Memory = new() { CommitTotalBytes = 10 } });
+        history.Add(Snapshot(2) with { Memory = new() { CommitTotalBytes = 20 } });
+        history.BreakContinuity();
+        history.Add(Snapshot(6) with { Memory = new() { CommitTotalBytes = 30 } });
+        var trend = DiagnosticData.BuildTrend(history.System, p => p.CommitBytes, 100);
+        Check(trend.Segments.Count == 2 && trend.SampleCount == 3);
+        Equal(1d / 3, trend.Segments[0][1].X);
+        Equal(.3, trend.Segments[1][0].Y);
+        Check(history.System[^1].BreakBefore);
+    }),
     ("Application description cache honors expiry", () =>
     {
         var descriptions = new ApplicationDescriptions();

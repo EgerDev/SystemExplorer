@@ -216,6 +216,11 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             WorkingSetBytes = memoryAvailable ? memory.WorkingSet.ToUInt64() : null,
             PrivateBytes = memoryAvailable ? memory.PrivateUsage.ToUInt64() : null,
             PrivateWorkingSetBytes = memoryAvailable ? privateWorkingSet : null,
+            PeakWorkingSetBytes = memoryAvailable ? memory.PeakWorkingSet.ToUInt64() : null,
+            PageFaultCount = memoryAvailable ? memory.PageFaultCount : null,
+            KernelCpuTimeTicks = kernel.Ticks, UserCpuTimeTicks = user.Ticks,
+            ReadOperationCount = io?.ReadOperations, WriteOperationCount = io?.WriteOperations,
+            OtherOperationCount = io?.OtherOperations, OtherTransferBytes = io?.OtherBytes,
             CpuPercent = cpu, ReadBytesPerSecond = read, WriteBytesPerSecond = write,
             Availability = denied ? DataAvailability.AccessDenied : errors.Count > 0 ? DataAvailability.Partial : DataAvailability.Available,
             UnavailableReason = errors.Count > 0 ? string.Join("; ", errors) : null
@@ -326,6 +331,8 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             PhysicalAvailableBytes = checked(info.PhysicalAvailable.ToUInt64() * page),
             CommitTotalBytes = checked(info.CommitTotal.ToUInt64() * page),
             CommitLimitBytes = checked(info.CommitLimit.ToUInt64() * page),
+            CommitPeakBytes = checked(info.CommitPeak.ToUInt64() * page),
+            ProcessCount = info.Processes, ThreadCount = info.Threads, HandleCount = info.Handles,
             SystemCacheBytes = checked(info.SystemCache.ToUInt64() * page),
             KernelPagedBytes = checked(info.KernelPaged.ToUInt64() * page),
             KernelNonpagedBytes = checked(info.KernelNonpaged.ToUInt64() * page)

@@ -17,10 +17,10 @@ public sealed partial class ResourceTrendView : UserControl
         ActualThemeChanged += (_, _) => Draw();
     }
 
-    public void Update(ResourceTrend? next, string label, bool rate = false)
+    public void Update(ResourceTrend? next, string label, bool rate = false, bool bytes = false)
     {
         trend = next;
-        string Value(double value) => rate ? Display.Rate(value) : $"{value:F1}%";
+        string Value(double value) => bytes ? Display.Bytes((ulong)value) : rate ? Display.Rate(value) : $"{value:F1}%";
         var description = next is { SampleCount: > 0, MinimumObserved: { } min, MaximumObserved: { } max }
             ? $"{label} history: {next.SampleCount} observed samples, range {Value(min)} to {Value(max)}. Axis 0 to {Value(next.Maximum)}. Gaps are not connected."
             : $"{label}: no measured history available.";

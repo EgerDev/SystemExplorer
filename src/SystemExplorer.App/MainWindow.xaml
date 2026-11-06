@@ -301,34 +301,7 @@
                     </Grid>
                 </Grid>
                 <views:OverviewView x:Name="OverviewPanel" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed"/>
-                <Grid x:Name="DiagnosticsPanel" Grid.Row="2" Visibility="Collapsed" RowSpacing="10">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <Border x:Name="ChartCard" Style="{StaticResource Card}">
-                        <StackPanel Spacing="5">
-                            <TextBlock x:Name="ChartTitle" Text="Recent history" FontWeight="SemiBold"/>
-                            <Canvas x:Name="HistoryChart" Height="110" SizeChanged="ChartSizeChanged"/>
-                            <TextBlock x:Name="ChartLegend" Style="{StaticResource Muted}"/>
-                        </StackPanel>
-                    </Border>
-                    <ListView x:Name="DetailsList" Grid.Row="1" SelectionMode="None" AutomationProperties.Name="Diagnostic measurements">
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <Border Style="{StaticResource Card}" Margin="0,0,0,8">
-                                    <TextBlock Text="{Binding}" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontSize="{StaticResource BodySize}"/>
-                                </Border>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                        <ListView.ItemContainerStyle>
-                            <Style TargetType="ListViewItem">
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                <Setter Property="Padding" Value="0"/>
-                            </Style>
-                        </ListView.ItemContainerStyle>
-                    </ListView>
-                </Grid>
+                <views:DiagnosticsView x:Name="DiagnosticsPanel" Grid.Row="2" Visibility="Collapsed"/>
                 <StackPanel x:Name="SettingsPanel" Grid.Row="2" Visibility="Collapsed" Spacing="16">
                     <TextBlock Text="Appearance" FontSize="18" FontWeight="SemiBold"/>
                     <ComboBox x:Name="ThemeSelector" SelectedIndex="0" SelectionChanged="ThemeChanged" AutomationProperties.Name="Color theme">

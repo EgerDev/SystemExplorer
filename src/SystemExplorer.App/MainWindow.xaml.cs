@@ -49,6 +49,7 @@ public sealed partial class MainWindow : Window
         tray = new NativeTray(this);
         ready = true;
         InitializeOverview();
+        DiagnosticsPanel.InspectRequested += InspectOverviewProcess;
         var work = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(Math.Min(1440, work.Width), Math.Min(920, work.Height)));
         AppWindow.Move(new global::Windows.Graphics.PointInt32(work.X + Math.Max(0, (work.Width - AppWindow.Size.Width) / 2), work.Y + Math.Max(0, (work.Height - AppWindow.Size.Height) / 2)));
@@ -137,8 +138,9 @@ public sealed partial class MainWindow : Window
             {
                 if (paused || generation != observationGeneration) continue;
                 overviewData.BreakContinuity();
+                Model.History.BreakContinuity();
                 overviewStale = true;
-                RefreshOverview();
+                RefreshDiagnostics();
                 StatusText.Text = $"Refresh failed; previous data is stale: {ex.Message}";
                 try { await Task.Delay(2000, shutdown.Token); }
                 catch (OperationCanceledException) { break; }
@@ -362,17 +364,25 @@ public sealed partial class MainWindow : Window
         DetailsButton.IsEnabled = true;
         CopyPid.IsEnabled = true;
         SelectedIdentity.Text = $"Selected member · PID {process.Identity.Pid}";
+        if (process.Identity.CreationTimeFileTime is long created && created > 0)
+        {
+            try { SelectedIdentity.Text += $"\nStarted {DateTimeOffset.FromFileTime(created).LocalDateTime:g}"; }
+            catch (ArgumentOutOfRangeException) { SelectedIdentity.Text += "\nStart time unavailable"; }
+        }
         SelectedPath.Value = process.ExecutablePath ?? "Unavailable";
         SelectedCommandLine.Text = process.CommandLine ?? "Unavailable from this documented-API provider";
         var byPid = Model.Snapshot!.Processes.ToDictionary(p => p.Identity.Pid);
         var parent = ProcessGrouping.VerifiedParent(process, byPid);
         SelectedParent.Value = parent is null ? "Unverified or no longer observed" : $"{parent.Name} · PID {parent.Identity.Pid}";
         SelectedMemory.Text = $"Private commit: {Display.Bytes(process.PrivateBytes)}\nWorking set (includes shared): {Display.Bytes(process.WorkingSetBytes)}\nPrivate working set: {Display.Bytes(process.PrivateWorkingSetBytes)}";
+        SelectedMemory.Text += $"\nPeak working set: {Display.Bytes(process.PeakWorkingSetBytes)}\nPage faults (cumulative, not just hard faults): {process.PageFaultCount?.ToString("N0") ?? "—"}";
+        SelectedMemory.Text += $"\nCPU kernel / user seconds (cumulative): {CpuSeconds(process.KernelCpuTimeTicks)} / {CpuSeconds(process.UserCpuTimeTicks)}";
+        SelectedMemory.Text += $"\nI/O operations read / write / other (cumulative): {process.ReadOperationCount?.ToString("N0") ?? "—"} / {process.WriteOperationCount?.ToString("N0") ?? "—"} / {process.OtherOperationCount?.ToString("N0") ?? "—"}\nOther transfer bytes (cumulative): {Display.Bytes(process.OtherTransferBytes)}";
         var rel = Model.Relationships;
         var fresh = rel is not null && Math.Abs((Model.Snapshot.CapturedAt - rel.CapturedAt).TotalSeconds) <= 10;
         SelectedServices.Value = !fresh || !process.Identity.IsStable ? "Unavailable or stale" : string.Join("\n", rel!.Services.Where(s => s.OwnerIdentity == process.Identity).Select(s => $"{s.DisplayName} ({s.Name})").DefaultIfEmpty("None observed"));
         SelectedNetwork.Value = !fresh || !process.Identity.IsStable ? "Unavailable or stale" : $"{rel!.Connections.Count(c => c.OwnerIdentity == process.Identity)} verified TCP/UDP entries";
-        SelectedAvailability.Text = $"{process.ThreadCount?.ToString() ?? "—"} threads · {process.HandleCount?.ToString() ?? "—"} handles\n{process.UnavailableReason ?? (process.Identity.IsStable ? "Read-only observation. Some fields may be unavailable." : "Creation time unavailable; history and associations are not trusted.")}";
+        SelectedAvailability.Text = $"{process.ThreadCount?.ToString() ?? "—"} threads · {process.HandleCount?.ToString() ?? "—"} handles\nSession {process.SessionId?.ToString() ?? "—"} · SID {process.UserSid ?? "Unavailable"}\n{process.UnavailableReason ?? (process.Identity.IsStable ? "Read-only observation. Some fields may be unavailable." : "Creation time unavailable; history and associations are not trusted.")}";
         var local = IsLocalFile(process.ExecutablePath);
         OpenLocation.IsEnabled = PublisherButton.IsEnabled = local;
         CopyPath.IsEnabled = process.ExecutablePath is not null;
@@ -394,6 +404,8 @@ public sealed partial class MainWindow : Window
         catch (OperationCanceledException) { }
         catch (Exception) { /* Keep the generic process icon. */ }
     }
+
+    private static string CpuSeconds(ulong? ticks) => ticks is { } value ? $"{value / 10_000_000d:F2}" : "—";
 
     private static bool IsLocalFile(string? path)
     {
@@ -457,7 +469,11 @@ public sealed partial class MainWindow : Window
     {
         observationGeneration++;
         paused = !paused;
-        if (paused) overviewData.BreakContinuity();
+        if (paused)
+        {
+            overviewData.BreakContinuity();
+            Model.History.BreakContinuity();
+        }
         RefreshOverview();
         if (Model.Snapshot is { } snapshot) tray.Update(snapshot, paused);
         PauseButton.Content = paused ? "Resume" : "Pause";
@@ -468,7 +484,7 @@ public sealed partial class MainWindow : Window
     {
         if (!ready) return;
         Root.RequestedTheme = ThemeSelector.SelectedIndex switch { 1 => ElementTheme.Dark, 2 => ElementTheme.Default, _ => ElementTheme.Light };
-        DrawHistory();
+        RefreshDiagnostics();
     }
     private void ProcessesSizeChanged(object sender, SizeChangedEventArgs args)
     {
@@ -497,87 +513,10 @@ public sealed partial class MainWindow : Window
     {
         if (!ready || section is "Processes" or "Settings") return;
         if (section == "Overview") { RefreshOverview(); return; }
-        var snapshot = Model.Snapshot;
-        if (snapshot is null) { DetailsList.ItemsSource = new[] { "Waiting for the first real Windows sample…" }; return; }
-        var mem = snapshot.Memory;
-        var rows = new List<string>();
-        switch (section)
-        {
-            case "Memory":
-                rows.Add($"Physical: {Display.Bytes(mem.PhysicalUsedBytes)} used · {Display.Bytes(mem.PhysicalAvailableBytes)} available · {Display.Bytes(mem.PhysicalTotalBytes)} total");
-                rows.Add($"System commit: {Display.Bytes(mem.CommitTotalBytes)} / {Display.Bytes(mem.CommitLimitBytes)} limit\nCommit is not resident RAM.");
-                rows.Add($"System cache: {Display.Bytes(mem.SystemCacheBytes)} · Standby: {Display.Bytes(mem.StandbyBytes)}\nKernel paged: {Display.Bytes(mem.KernelPagedBytes)} · nonpaged: {Display.Bytes(mem.KernelNonpagedBytes)}\nThese categories overlap; do not add them to physical usage. — means unavailable.");
-                rows.AddRange(ProcessGrouping.Create(snapshot.Processes).OrderByDescending(g => g.PrivateBytes).Take(50).Select(g => $"{g.Name} · {g.Members.Count} process(es)\nPrivate commit: {Display.Bytes(g.PrivateBytes)} · not physical RAM"));
-                rows.AddRange(Model.History.Explain(snapshot).Where(i => i.Title.StartsWith("Sustained")).Select(i => $"{i.Title}\n{i.Evidence}"));
-                break;
-            case "CPU":
-                rows.Add($"System CPU: {Display.Percent(snapshot.TotalCpuPercent)}\nProcess CPU is normalized to total logical-processor capacity. First samples are unavailable.");
-                rows.AddRange(snapshot.Processes.OrderByDescending(p => p.CpuPercent).Take(50).Select(p => $"{p.Name} · PID {p.Identity.Pid} · {Display.Percent(p.CpuPercent)}"));
-                break;
-            case "GPU":
-                rows.Add(snapshot.GpuPercent is null ? "GPU utilization unavailable\nThis provider does not yet expose a validated GPU engine counter. No CPU or process-I/O estimate is substituted." : $"GPU utilization: {Display.Percent(snapshot.GpuPercent)}");
-                break;
-            case "Disks":
-                rows.Add($"Physical disk read: {(snapshot.DiskReadBytesPerSecond is { } read ? Display.Rate(read) : "Unavailable")}\nPhysical disk write: {(snapshot.DiskWriteBytesPerSecond is { } write ? Display.Rate(write) : "Unavailable")}\nBelow is process I/O, which may include cached, device and network operations; it is not physical disk throughput.");
-                rows.AddRange(snapshot.Processes.Where(p => p.ReadBytesPerSecond.HasValue).OrderByDescending(p => p.ReadBytesPerSecond + p.WriteBytesPerSecond).Take(50).Select(p => $"{p.Name} · PID {p.Identity.Pid}\nRead {Display.Rate(p.ReadBytesPerSecond!.Value)} · Write {(p.WriteBytesPerSecond is { } rate ? Display.Rate(rate) : "Unavailable")}"));
-                break;
-            case "Network":
-                rows.Add("Observed endpoints; UDP has no remote peer. Owner PID is reported separately from verified process identity.");
-                if (Model.Relationships is { } network) rows.Add($"Relationship observation: {network.CapturedAt.LocalDateTime:T}. Ownership is verified at capture time; connections can change between refreshes.");
-                rows.AddRange(Model.Relationships?.Connections.Select(c => $"{c.Protocol} {c.LocalAddress}:{c.LocalPort} → {(c.RemoteAddress is null ? "—" : $"{c.RemoteAddress}:{c.RemotePort}")}\nPID {c.OwningPid} · {c.State ?? "endpoint"} · {(c.OwnerIdentity is null ? "ownership unverified" : "identity verified")}") ?? new[] { "Endpoint collection unavailable" });
-                break;
-            case "Services":
-                if (Model.Relationships is { } services) rows.Add($"Service observation: {services.CapturedAt.LocalDateTime:T}. Associations refer to this capture, not continuous tracing.");
-                rows.AddRange(Model.Relationships?.Services.Select(s => $"{s.DisplayName} ({s.Name})\n{s.State} · PID {s.ProcessId?.ToString() ?? "—"} · Start: {s.StartType ?? "Unavailable"} · {(s.OwnerIdentity is null ? "No verified owner" : "Identity verified")}") ?? new[] { "Service collection unavailable" });
-                break;
-            case "Startup":
-                rows.Add("Registry Run keys and startup folders only. Scheduled tasks and other startup mechanisms may not be included. No startup-impact measurement or disable action is inferred.");
-                if (startupCapturedAt is { } captured) rows.Add($"Last successful startup inventory: {captured.LocalDateTime:T}. Refreshed approximately once per minute.");
-                if (startupError is not null) rows.Add(startupError + " Any retained entries are stale.");
-                rows.AddRange(startup.Select(s => $"{s.Name} · {s.Scope}\n{s.Command}\n{s.Source}"));
-                if (startup.Count == 0) rows.Add("No entries observed, or inventory unavailable.");
-                break;
-            case "Insights": rows.AddRange(Model.History.Explain(snapshot, Model.Relationships).Select(i => $"{i.Kind}: {i.Title}\n{i.Evidence}")); break;
-            case "Help":
-                rows.Add("SystemExplorer · native Windows diagnostics\nCtrl+K focuses search. Use arrows and Enter to expand application groups. Double-click an individual row to inspect it when the side panel is hidden.");
-                rows.Add("Private commit is committed virtual memory, not RAM. Working sets contain shared pages. A growth trend is not proof of a memory leak. — means unavailable, not zero.");
-                rows.Add("Grouping is inferred from matching executable, owner and observed ancestry. Missing identity prevents history and verified associations. Read-only: no process termination, suspension, driver installation or automatic elevation.");
-                rows.Add("Original System Informer source remains in this repository under its original notices. This frontend does not automatically load its plugins or upload process information.");
-                break;
-        }
-        rows.AddRange(snapshot.Limitations.Select(l => $"Provider limitation: {l}"));
-        if (Model.Relationships is { } rel && (section is "Network" or "Services")) rows.AddRange(rel.Limitations.Select(l => $"Relationship limitation: {l}"));
-        var query = GlobalSearch.Text?.Trim() ?? "";
-        var filtered = rows.Where(r => query.Length == 0 || r.Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray();
-        DetailsList.ItemsSource = filtered.Length > 0 ? filtered : new[] { query.Length > 0 ? "No displayed observations match this search. Clear search to show this section." : "No observations are available for this section yet." };
-        ChartCard.Visibility = section is "Memory" or "CPU" ? Visibility.Visible : Visibility.Collapsed;
-        DrawHistory();
-    }
-
-    private void ChartSizeChanged(object sender, SizeChangedEventArgs args) => DrawHistory();
-    private void DrawHistory()
-    {
-        if (!ready || section is not ("Memory" or "CPU")) return;
-        HistoryChart.Children.Clear();
-        var points = Model.History.System;
-        var cpu = section == "CPU";
-        ChartTitle.Text = cpu ? "System CPU history" : "Physical memory history";
-        ChartLegend.Text = $"{points.Count} observed samples · up to 180 samples · gaps are not interpolated · {(cpu ? "0–100%" : "0–physical total")}";
-        if (points.Count < 2 || HistoryChart.ActualWidth <= 0) return;
-        var maximum = cpu ? 100d : (double)(Model.Snapshot?.Memory.PhysicalTotalBytes ?? 0);
-        if (maximum <= 0) return;
-        Polyline? line = null;
-        for (var i = 0; i < points.Count; i++)
-        {
-            double? value = cpu ? points[i].CpuPercent : points[i].PhysicalUsedBytes is { } bytes ? bytes : null;
-            if (value is null || i > 0 && (points[i].At - points[i - 1].At).TotalSeconds > 10) line = null;
-            if (value is null) continue;
-            if (line is null)
-            {
-                line = new Polyline { Stroke = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(255, 0, 120, 212)), StrokeThickness = 2 };
-                HistoryChart.Children.Add(line);
-            }
-            line.Points.Add(new global::Windows.Foundation.Point(i * HistoryChart.ActualWidth / (points.Count - 1), 105 - Math.Clamp(value.Value / maximum, 0, 1) * 100));
-        }
+        if (Model.Snapshot is not { } snapshot) return;
+        var startupStatus = startupError is not null ? startupError + " Retained entries are stale." :
+            startupCapturedAt is { } captured ? $"Last inventory {captured.LocalDateTime:T}; refreshed approximately once per minute." : "Inventory unavailable.";
+        DiagnosticsPanel.Update(section, snapshot, Model.Relationships, startup, Model.History,
+            GlobalSearch.Text ?? "", Model.Descriptions.GetCached, startupStatus, paused, overviewStale);
     }
 }
