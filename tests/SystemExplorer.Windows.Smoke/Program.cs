@@ -6,6 +6,15 @@ using SystemExplorer.Core;
 using SystemExplorer.Windows;
 using static SystemExplorer.Windows.NativeMethods;
 
+if (args.Length == 1 && args[0] == "--inspection-only")
+{
+    using var current = Process.GetCurrentProcess();
+    if (!GetProcessTimes(current.SafeHandle, out var created, out _, out _, out _))
+        throw new Win32Exception(Marshal.GetLastWin32Error());
+    await ProcessInspectionSmoke.Run(new(current.Id, checked((long)created.Ticks)), CancellationToken.None);
+    return;
+}
+
 if (args.Length == 2 && args[0] == "--churn-child" &&
     int.TryParse(args[1], out int childDelay) && childDelay is 1200 or 2200)
 {
@@ -163,6 +172,7 @@ Check(self.PrivateWorkingSetBytes is { } privateWorkingSet
 Check(!string.IsNullOrWhiteSpace(self.ExecutablePath), "Live self path must be available.");
 Check(!string.IsNullOrWhiteSpace(self.UserSid) && !string.IsNullOrWhiteSpace(self.UserName), "Live self owner must be available.");
 Check(self.SessionId is not null && self.ThreadCount > 0 && self.HandleCount > 0, "Live self metadata must be available.");
+await ProcessInspectionSmoke.Run(self.Identity, timeout.Token);
 Check(self.PeakWorkingSetBytes >= self.WorkingSetBytes && self.PageFaultCount is not null, "Collected memory peak and cumulative faults must be available for self.");
 Check(self.KernelCpuTimeTicks is not null && self.UserCpuTimeTicks is not null && self.ReadOperationCount is not null &&
     self.WriteOperationCount is not null && self.OtherOperationCount is not null && self.OtherTransferBytes is not null,

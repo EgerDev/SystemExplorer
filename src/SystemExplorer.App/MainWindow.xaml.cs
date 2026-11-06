@@ -335,6 +335,7 @@ public sealed partial class MainWindow : Window
     private async void DetailsClicked(object sender, RoutedEventArgs args) => await ShowDetailsAsync();
     private void RefreshInspector()
     {
+        ModulesButton.IsEnabled = RegionsButton.IsEnabled = selectedIdentity is { IsStable: true } identity && Model.Snapshot?.Processes.Any(p => p.Identity == identity) == true;
         var process = SelectedProcess;
         if (process is null)
         {
