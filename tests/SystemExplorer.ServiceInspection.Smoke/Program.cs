@@ -67,6 +67,26 @@ using (var memory = new BufferFixture(headerSize + 4))
     Require(WindowsServiceInspectionProvider.ReadDependencies(memory.Pointer, memory.Capacity, unterminated, default, out _).Count == 0, "Documented empty dependency string rejected.");
     Invalid(() => WindowsServiceInspectionProvider.Decode("fictional", DateTimeOffset.UtcNow, memory.Pointer, headerSize - 1, default));
 }
+foreach (int error in new[] { 5, 124, 87 })
+{
+    var fake = new FakeBackend { ExtensionResponse = (_, _, _, _) => (error, 0) };
+    var result = await new WindowsServiceInspectionProvider(fake).CaptureAsync("fictional", default);
+    var expected = error switch { 5 => InspectionStatus.AccessDenied, 124 => InspectionStatus.Unsupported, _ => InspectionStatus.Failed };
+    Require(result.Status == InspectionStatus.Available && result.Extensions?.DelayedAutoStart.Status == expected &&
+        result.Extensions.DelayedAutoStart.IsDelayed is null && result.Extensions.Description.Description is null && result.Extensions.ServiceSid.SidType is null,
+        "Extension failure invented values or discarded base configuration.");
+}
+var extensionTimeout = new FakeBackend();
+extensionTimeout.ExtensionResponse = (_, _, _, _) => { extensionTimeout.Elapsed = TimeSpan.FromSeconds(3); return (5, 0); };
+var timedExtensions = await new WindowsServiceInspectionProvider(extensionTimeout).CaptureAsync("fictional", default);
+Require(timedExtensions.Status == InspectionStatus.Available && timedExtensions.Extensions?.DelayedAutoStart.Status == InspectionStatus.TimedOut &&
+    timedExtensions.Extensions.Triggers.Status == InspectionStatus.TimedOut && timedExtensions.Extensions.Description.Status == InspectionStatus.TimedOut &&
+    timedExtensions.Extensions.ServiceSid.Status == InspectionStatus.TimedOut && timedExtensions.Dependents?.Status == InspectionStatus.TimedOut && extensionTimeout.ExtensionCalls == 1,
+    "Extension cooperative budget did not skip remaining native calls.");
+var extensionResize = new FakeBackend { ExtensionResponse = (level, call, _, _) => (122, (uint)(call * 64)) };
+var exhausted = await new WindowsServiceInspectionProvider(extensionResize).CaptureAsync("fictional", default);
+Require(exhausted.Extensions?.DelayedAutoStart.Status == InspectionStatus.Truncated && extensionResize.ExtensionCalls == 12, "Independent extension retry caps failed.");
+
 using (var memory = new BufferFixture(8192))
 {
     IntPtr deps = memory.Write(string.Concat(Enumerable.Repeat("x\0", 257)) + "\0");
@@ -133,8 +153,95 @@ foreach (string name in new[] { "", "bad\0name", "a/b", "a\\b", new string('a', 
     Require((await new WindowsServiceInspectionProvider(fake).CaptureAsync(name, default)).Status == InspectionStatus.Unsupported && fake.ManagerOpens == 0, "Invalid service name reached native code.");
 }
 
+using (var memory = new BufferFixture(8192))
+{
+    Marshal.WriteInt32(memory.Pointer, 1);
+    Require(WindowsServiceInspectionProvider.DecodeDelayedAutoStart(memory.Pointer, 4, default).IsDelayed == true, "Delayed true lost.");
+    Marshal.WriteInt32(memory.Pointer, 0);
+    Require(WindowsServiceInspectionProvider.DecodeDelayedAutoStart(memory.Pointer, 4, default).IsDelayed == false, "Delayed false lost.");
+    Invalid(() => WindowsServiceInspectionProvider.DecodeDelayedAutoStart(memory.Pointer, 3, default));
+    foreach (uint sid in new uint[] { 0, 1, 3, 99 })
+    {
+        Marshal.WriteInt32(memory.Pointer, (int)sid);
+        var result = WindowsServiceInspectionProvider.DecodeSid(memory.Pointer, 4, default);
+        Require(result.SidType == sid && (sid == 99 ? result.SidTypeName is null : result.SidTypeName is not null), "SID metadata wrong.");
+    }
+    var description = memory.Write(new string('x', 2050) + "\0");
+    Marshal.WriteIntPtr(memory.Pointer, description);
+    var text = WindowsServiceInspectionProvider.DecodeDescription(memory.Pointer, memory.Capacity, default);
+    Require(text.Status == InspectionStatus.Truncated && text.Description?.Length == 2048, "Description cap ignored.");
+    Marshal.WriteIntPtr(memory.Pointer, IntPtr.Zero);
+    Require(WindowsServiceInspectionProvider.DecodeDescription(memory.Pointer, memory.Capacity, default).Description is null, "Absent description invented.");
+    Marshal.WriteIntPtr(memory.Pointer, IntPtr.Add(memory.Pointer, memory.Capacity));
+    Invalid(() => WindowsServiceInspectionProvider.DecodeDescription(memory.Pointer, memory.Capacity, default));
+}
+using (var memory = new BufferFixture(16384))
+{
+    int stride = Marshal.SizeOf<ServiceTriggerEntry>();
+    IntPtr array = IntPtr.Add(memory.Pointer, 128);
+    IntPtr guid = IntPtr.Add(memory.Pointer, 4096);
+    Marshal.StructureToPtr(new Guid("4f27f2de-14e2-430b-a549-7cd48cbc8245"), guid, false);
+    Marshal.StructureToPtr(new ServiceTriggerEntry { Type = 2, Action = 1, Subtype = guid, DataCount = 2, Data = IntPtr.Add(memory.Pointer, 8192) }, array, false);
+    Marshal.StructureToPtr(new ServiceTriggerEntry { Type = 20, Action = 2, Subtype = IntPtr.Add(guid, 16) }, IntPtr.Add(array, stride), false);
+    Marshal.StructureToPtr(Guid.Empty, IntPtr.Add(guid, 16), false);
+    Marshal.StructureToPtr(new ServiceTriggerInfo { Count = 2, Triggers = array }, memory.Pointer, false);
+    var triggers = WindowsServiceInspectionProvider.DecodeTriggers(memory.Pointer, memory.Capacity, default);
+    Require(triggers.Status == InspectionStatus.Available && triggers.Triggers.Count == 2 && triggers.Triggers[0].SubtypeName == "NETWORK_MANAGER_FIRST_IP_ADDRESS_ARRIVAL" &&
+        triggers.Triggers[0].DataItemCount == 2 && triggers.Triggers[1].SubtypeName is null && triggers.Triggers[1].ActionName == "STOP", "Trigger metadata wrong.");
+    for (int i = 0; i < 65; i++) Marshal.StructureToPtr(new ServiceTriggerEntry { Type = 1, Action = 1 }, IntPtr.Add(array, i * stride), false);
+    Marshal.StructureToPtr(new ServiceTriggerInfo { Count = 65, Triggers = array }, memory.Pointer, false);
+    Require(WindowsServiceInspectionProvider.DecodeTriggers(memory.Pointer, memory.Capacity, default) is { Status: InspectionStatus.Truncated, Triggers.Count: 64 }, "Trigger cap ignored.");
+    Marshal.StructureToPtr(new ServiceTriggerInfo { Count = 1, Triggers = IntPtr.Add(memory.Pointer, memory.Capacity) }, memory.Pointer, false);
+    Invalid(() => WindowsServiceInspectionProvider.DecodeTriggers(memory.Pointer, memory.Capacity, default));
+    Marshal.StructureToPtr(new ServiceTriggerInfo(), memory.Pointer, false);
+    Require(WindowsServiceInspectionProvider.DecodeTriggers(memory.Pointer, memory.Capacity, default).Triggers.Count == 0, "Empty triggers wrong.");
+}
+using (var memory = new BufferFixture(65536))
+{
+    int stride = Marshal.SizeOf<ServiceDependentEntry>();
+    IntPtr name = IntPtr.Add(memory.Pointer, 60000);
+    Marshal.Copy(Encoding.Unicode.GetBytes("fictional\0"), 0, name, 20);
+    for (int i = 0; i < 513; i++) Marshal.StructureToPtr(new ServiceDependentEntry { Name = name, Type = 16, State = 4 }, IntPtr.Add(memory.Pointer, i * stride), false);
+    Require(WindowsServiceInspectionProvider.DecodeDependents(memory.Pointer, memory.Capacity, 513, default) is { Status: InspectionStatus.Truncated, Services.Count: 512 }, "Dependent cap ignored.");
+    Require(WindowsServiceInspectionProvider.DecodeDependents(IntPtr.Zero, 0, 0, default).Services.Count == 0, "Empty dependent response rejected.");
+    Marshal.StructureToPtr(new ServiceDependentEntry { Name = IntPtr.Add(memory.Pointer, memory.Capacity) }, memory.Pointer, false);
+    Invalid(() => WindowsServiceInspectionProvider.DecodeDependents(memory.Pointer, memory.Capacity, 1, default));
+}
+
+ServiceGraphInput[] graphRows = [new("A", ["b", "+G", "missing"], "H"), new("B", ["A"], "G"),
+    new("C", ["a"], "G"), new("D", ["C"], null), new("E", ["+g"], null), new("F", ["E"], null), new("Y", ["+H"], null)];
+var graph = ServiceGraph.Build("a", graphRows);
+Require(graph.Status == InspectionStatus.Available && graph.Root == "A" && graph.DependsOn.Any(e => e.From == "A" && e.To == "B"), "Forward graph wrong.");
+Require(graph.Dependents.Any(e => e.From == "D" && e.To == "C") && !graph.Dependents.Any(e => e.From is "E" or "F") &&
+    graph.Dependents.Any(e => e.From == "Y" && e.To == "H" && e.ToKind == ServiceGraphNodeKind.Group), "Transitive reverse/group graph wrong.");
+Require(graph.Nodes.Single(n => n.Kind == ServiceGraphNodeKind.Group && n.Name == "G").GroupMembers.SequenceEqual(new[] { "B", "C" }) &&
+    !graph.DependsOn.Any(e => e.From == "G"), "Group leaf semantics wrong.");
+Require(graph.Nodes.Any(n => n.Name == "missing" && !n.InInventory), "Missing reference omitted.");
+Require(graph.ObservedCycles.Count == 1 && graph.ObservedCycles[0].Path.SequenceEqual(new[] { "A", "B", "A" }) &&
+    graph.Detail.Contains("observed configuration cycle", StringComparison.OrdinalIgnoreCase) && !graph.Detail.Contains("deadlock", StringComparison.OrdinalIgnoreCase), "Cycle semantics wrong.");
+Require(ServiceGraph.Build("A", graphRows, maximumDepth: 0).Status == InspectionStatus.Truncated && ServiceGraph.Build("A", graphRows, maximumNodes: 1).Status == InspectionStatus.Truncated, "Graph bounds ignored.");
+Require(ServiceGraph.Build("absent", []).Nodes.Single().InInventory == false && ServiceGraph.Build("", []).Status == InspectionStatus.Unsupported, "Empty/missing graph wrong.");
+Require(graph.Nodes.Select(n => n.Name).SequenceEqual(ServiceGraph.Build("A", graphRows.Reverse().ToArray()).Nodes.Select(n => n.Name)), "Graph order not deterministic.");
+using (var source = new CancellationTokenSource())
+{
+    source.Cancel();
+    await Canceled(() => Task.Run(() => ServiceGraph.Build("A", graphRows, cancellationToken: source.Token)));
+}
+
 if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("This smoke requires Windows for real local SCM verification.");
 var provider = new WindowsServiceInspectionProvider();
+foreach (string name in new[] { "EventLog", "Dnscache", "Winmgmt", "SystemExplorer-Nonexistent-4698c219" })
+{
+    var result = await provider.CaptureAsync(name, default);
+    if (name.StartsWith("SystemExplorer-Nonexistent")) { Require(result.Status == InspectionStatus.Exited, "Missing real service not Exited."); continue; }
+    Require(result.Status is InspectionStatus.Available or InspectionStatus.Partial or InspectionStatus.Truncated or InspectionStatus.AccessDenied or InspectionStatus.Exited or InspectionStatus.TimedOut or InspectionStatus.Failed or InspectionStatus.Unsupported, "Dishonest live status.");
+    if (result.Extensions is { } extensions)
+    {
+        Require(extensions.DelayedAutoStart.Status != InspectionStatus.Available || extensions.DelayedAutoStart.IsDelayed is not null, "Available delayed observation lacks value.");
+        Require(extensions.ServiceSid.Status != InspectionStatus.Available || extensions.ServiceSid.SidType is not null, "Available SID observation lacks value.");
+        Require(extensions.Triggers.Triggers is not null && result.Dependents?.Services is not null, "Missing observed collections.");
+    }
+}
 int observed = 0, inaccessible = 0;
 foreach (string serviceName in EnumerateLocalServiceNames())
 {
@@ -202,6 +309,8 @@ sealed class BufferFixture : IDisposable
 sealed class FakeBackend : IServiceInspectionBackend
 {
     public int ManagerError, ServiceError, Calls, ManagerOpens, ManagerDisposals, QueryDisposals;
+    public int ExtensionCalls;
+    public Func<uint, int, IntPtr, uint, (int Error, uint Needed)> ExtensionResponse = (_, _, _, _) => (124, 0);
     public TimeSpan Elapsed;
     public Func<int, IntPtr, uint, (int Error, uint Needed)> Response = (_, buffer, capacity) =>
     {
@@ -228,6 +337,12 @@ sealed class FakeBackend : IServiceInspectionBackend
     }
     private sealed class QueryHandle(FakeBackend owner) : IServiceInspectionQuery
     {
+        public int QueryExtension(uint level, IntPtr buffer, uint capacity, out uint needed)
+        {
+            var response = owner.ExtensionResponse(level, ++owner.ExtensionCalls, buffer, capacity);
+            needed = response.Needed;
+            return response.Error;
+        }
         public int Query(IntPtr buffer, uint capacity, out uint needed)
         {
             var response = owner.Response(++owner.Calls, buffer, capacity);

@@ -14,15 +14,26 @@ only case-insensitive `desktop.ini` folder entries are excluded: registry names 
 unknown folder entries remain unchanged. Folder entries remain unresolved inventory,
 not guaranteed executable startup commands.
 
+Fixed buffers also cover delayed auto-start, trigger metadata (never data blobs),
+description/SID configuration and dependents. Pure graph checks cover forward and
+reverse traversal, group leaves, missing rows, observed configuration cycles and caps.
+The live checks include EventLog, Dnscache, Winmgmt and a nonexistent name, without
+assuming configured values.
+
 The real local smoke enumerates up to 32 local service names and reads one available
 configuration without requiring a particular service to be installed or configured.
 Enumeration uses the existing read-only enumeration API; the new provider itself
-requests only `SC_MANAGER_CONNECT` and `SERVICE_QUERY_CONFIG`. No services/processes
+requests `SC_MANAGER_CONNECT|SC_MANAGER_ENUMERATE_SERVICE` and
+`SERVICE_QUERY_CONFIG|SERVICE_ENUMERATE_DEPENDENTS`. Access denied retries once
+with query-config only and reports dependent access denied. No services/processes
 are created, changed, started or stopped. Output contains counts/status only.
 
 `WindowsServiceInspectionProvider` is on demand, serialized per instance and bounded
 to 8192 bytes, three total query calls (including the sizing probe), 256 returned
-dependencies and a cooperative three-second budget. Cancellation/time checks cannot
+dependencies and a cooperative three-second budget covering all observations.
+Each extension has independent status, up to three calls and an 8192-byte bound
+(16384 for triggers); triggers cap at 64 and descriptions at 2048 characters.
+Dependents cap at 64 KiB and 512 rows. Cancellation/time checks cannot
 interrupt a blocking native call and are not hard deadlines. `CapturedAt` is capture
 start, not an atomic snapshot. Invalid fields produce `Partial`; oversized/changing
 configuration or excess dependencies produce `Truncated`. Missing/deleted services
