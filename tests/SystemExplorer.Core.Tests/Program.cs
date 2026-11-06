@@ -107,6 +107,31 @@ var tests = new (string Name, Action Run)[]
         for (var i = 0; i < ProcessLifecycleTimeline.MaximumEvents; i++) timeline.Observe(Snapshot(32 + i, P(1000 + i, 1000 + i)));
         Check(timeline.Events.Count == ProcessLifecycleTimeline.MaximumEvents);
     }),
+    ("Lifecycle tracking prioritizes existing identities and admits replacements after exit", () =>
+    {
+        var timeline = new ProcessLifecycleTimeline();
+        var originals = Enumerable.Range(1, ProcessLifecycleTimeline.MaximumTracked)
+            .Select(pid => P(pid, 100_000 + pid)).ToArray();
+        var newcomers = Enumerable.Range(1, 8).Select(i => P(10_000 + i, 200_000 + i)).ToArray();
+        timeline.Observe(Snapshot(0, originals));
+
+        var second = originals.Select(p => p.Identity.Pid == 1 ? p with { PrivateBytes = 900 } : p).ToArray();
+        timeline.Observe(Snapshot(2, newcomers.Concat(second).ToArray()));
+        Check(timeline.TrackingOverflow == newcomers.Length && timeline.Events.All(e => e.Kind == ProcessLifecycleKind.RunningAtFirstObservation));
+
+        var third = originals.Select(p => p.Identity.Pid == 1 ? p with { PrivateBytes = 400 } : p).ToArray();
+        timeline.Observe(Snapshot(4, newcomers.Concat(third).ToArray()));
+        Check(timeline.TrackingOverflow == newcomers.Length * 2 && timeline.Events.All(e => e.Kind == ProcessLifecycleKind.RunningAtFirstObservation));
+
+        var beforeExitOverflow = timeline.TrackingOverflow;
+        var afterExit = originals.Where(p => p.Identity.Pid != 1).ToArray();
+        timeline.Observe(Snapshot(6, newcomers.Concat(afterExit).ToArray()));
+        var exited = timeline.Events.Single(e => e.Kind == ProcessLifecycleKind.NoLongerObserved && e.Identity.Pid == 1);
+        var admitted = timeline.Events.Single(e => e.Kind == ProcessLifecycleKind.Started);
+        Check(exited.Observations == 3 && exited.LastObserved == DateTimeOffset.UnixEpoch.AddSeconds(4) &&
+            exited.At == DateTimeOffset.UnixEpoch.AddSeconds(6) && exited.PeakPrivateBytes == 900);
+        Check(admitted.Identity.Pid == newcomers[0].Identity.Pid && timeline.TrackingOverflow == beforeExitOverflow + newcomers.Length - 1);
+    }),
     ("Selected history keeps lifetimes separate and absence explicit", () =>
     {
         var history = new SelectedProcessHistory();

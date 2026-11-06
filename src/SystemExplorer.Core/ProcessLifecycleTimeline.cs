@@ -34,21 +34,28 @@ public sealed class ProcessLifecycleTimeline
         var current = snapshot.Processes.Where(p => p.Identity.IsStable && p.Identity.Pid > 0)
             .GroupBy(p => p.Identity).ToDictionary(g => g.Key, g => g.First());
         var next = new Dictionary<ProcessIdentity, Lifetime>();
-        foreach (var (identity, process) in current)
+        var disappeared = new List<Lifetime>();
+        foreach (var (identity, lifetime) in live)
         {
-            if (!live.TryGetValue(identity, out var lifetime))
+            if (!current.TryGetValue(identity, out var process))
             {
-                if (live.Count + next.Count >= MaximumTracked * 2 || next.Count >= MaximumTracked) { TrackingOverflow++; continue; }
-                lifetime = new Lifetime(identity, process, snapshot.CapturedAt);
-                lifetime.Observe(process, snapshot.CapturedAt);
-                Add(lifetime.ToEvent(snapshot.CapturedAt, first ? ProcessLifecycleKind.RunningAtFirstObservation : ProcessLifecycleKind.Started, gap));
+                disappeared.Add(lifetime);
+                continue;
             }
-            else lifetime.Observe(process, snapshot.CapturedAt);
+            lifetime.Observe(process, snapshot.CapturedAt);
             next[identity] = lifetime;
         }
-        foreach (var (identity, lifetime) in live)
-            if (!next.ContainsKey(identity))
-                Add(lifetime.ToEvent(snapshot.CapturedAt, ProcessLifecycleKind.NoLongerObserved, gap));
+        foreach (var (identity, process) in current)
+        {
+            if (live.ContainsKey(identity)) continue;
+            if (next.Count >= MaximumTracked) { TrackingOverflow++; continue; }
+            var lifetime = new Lifetime(identity, process, snapshot.CapturedAt);
+            lifetime.Observe(process, snapshot.CapturedAt);
+            Add(lifetime.ToEvent(snapshot.CapturedAt, first ? ProcessLifecycleKind.RunningAtFirstObservation : ProcessLifecycleKind.Started, gap));
+            next[identity] = lifetime;
+        }
+        foreach (var lifetime in disappeared)
+            Add(lifetime.ToEvent(snapshot.CapturedAt, ProcessLifecycleKind.NoLongerObserved, gap));
         live = next;
     }
 
