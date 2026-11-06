@@ -160,7 +160,7 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
         if (QueryFullProcessImageNameW(process, 0, path, ref pathLength)) executable = path.ToString();
         else Error("Executable path", Marshal.GetLastWin32Error());
 
-        bool memoryAvailable = ReadProcessMemory(process, out var memory, out var privateWorkingSet,
+        bool memoryAvailable = QueryProcessMemoryCounters(process, out var memory, out var privateWorkingSet,
             out var privateWorkingSetReason, out int memoryError);
         if (!memoryAvailable)
         {
@@ -177,7 +177,7 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
                 }
                 else
                 {
-                    memoryAvailable = ReadProcessMemory(readable, out memory, out privateWorkingSet,
+                    memoryAvailable = QueryProcessMemoryCounters(readable, out memory, out privateWorkingSet,
                         out privateWorkingSetReason, out memoryError);
                 }
             }
@@ -227,7 +227,7 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
         };
     }
 
-    private static bool ReadProcessMemory(SafeProcessHandle process, out MemoryCounters memory,
+    private static bool QueryProcessMemoryCounters(SafeProcessHandle process, out MemoryCounters memory,
         out ulong? privateWorkingSet, out string? privateWorkingSetReason, out int error)
     {
         var extended = new MemoryCountersEx2
