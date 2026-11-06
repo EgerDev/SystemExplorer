@@ -86,6 +86,7 @@ public sealed class WindowsProcessInspectionProvider : IProcessInspectionProvide
                 if (error == 24 && attempt < 2) continue;
                 return (ErrorStatus(error), $"Module snapshot unavailable (Windows error {error}); loader changes may prevent a consistent snapshot.");
             }
+            var seen = new HashSet<ModuleObservation>(ModuleMappingComparer.Instance);
             var entry = new ModuleEntry { Size = (uint)Marshal.SizeOf<ModuleEntry>() };
             var more = Module32FirstW(snapshot, ref entry);
             var lastError = more ? 0 : Marshal.GetLastWin32Error();
@@ -93,9 +94,13 @@ public sealed class WindowsProcessInspectionProvider : IProcessInspectionProvide
             {
                 token.ThrowIfCancellationRequested();
                 if (clock.Elapsed >= budget) return (InspectionStatus.TimedOut, "Partial module inventory: cooperative time budget reached.");
-                if (rows.Count >= maximumRecords) return (InspectionStatus.Truncated, $"Module inventory truncated at {maximumRecords} records.");
                 if (entry.Pid != pid) return (InspectionStatus.Failed, "Snapshot returned an inconsistent module owner.");
-                rows.Add(new(entry.Name, entry.Path, entry.BaseAddress.ToUInt64(), entry.BaseSize));
+                var module = new ModuleObservation(entry.Name, entry.Path, entry.BaseAddress.ToUInt64(), entry.BaseSize);
+                if (seen.Add(module))
+                {
+                    if (rows.Count >= maximumRecords) return (InspectionStatus.Truncated, $"Module inventory truncated at {maximumRecords} records.");
+                    rows.Add(module);
+                }
                 entry.Size = (uint)Marshal.SizeOf<ModuleEntry>();
                 more = Module32NextW(snapshot, ref entry);
                 lastError = more ? 0 : Marshal.GetLastWin32Error();

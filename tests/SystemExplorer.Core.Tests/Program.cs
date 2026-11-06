@@ -570,6 +570,21 @@ var tests = new (string Name, Action Run)[]
         history.Add(Snapshot(0, P(10, 100)));
         history.Add(Snapshot(0, P(10, 100)));
         Check(history.System.Count == 1);
+    }),
+    ("Module mappings collapse only exact base, size and case-insensitive path duplicates", () =>
+    {
+        var seen = new HashSet<ModuleObservation>(ModuleMappingComparer.Instance);
+        Check(seen.Count == 0);
+        var module = new ModuleObservation("notepad.exe", @"C:\Windows\SysWOW64\notepad.exe", 0x8B0000, 192512);
+        Check(seen.Add(module));
+        Check(!seen.Add(module with { }));
+        Check(!seen.Add(module with { Name = "other name", Path = module.Path.ToUpperInvariant() }));
+        Check(seen.Add(module with { BaseAddress = 0x9B0000 }));
+        Check(seen.Add(module with { Path = @"C:\Windows\System32\notepad.exe" }));
+        Check(seen.Add(module with { SizeBytes = 233472 }));
+        Check(seen.Count == 4);
+        Check(!ModuleMappingComparer.Instance.Equals(module, null));
+        Check(ModuleMappingComparer.Instance.Equals(null, null));
     })
 };
 var failures = 0;
