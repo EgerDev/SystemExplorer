@@ -36,7 +36,7 @@ public sealed partial class IoAttributionView : UserControl
             ? descending ? capture.Processes.OrderBy(r => r.Name is null).ThenByDescending(r => r.Name, StringComparer.OrdinalIgnoreCase) : capture.Processes.OrderBy(r => r.Name is null).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
             : descending ? capture.Processes.OrderByDescending(Number) : capture.Processes.OrderBy(Number);
         var seconds = capture.ActualDuration.TotalSeconds;
-        string Rate(ulong bytes) => seconds > 0 ? Display.Rate(bytes / seconds) : "Unavailable";
+        string Rate(ulong bytes) => $"{(seconds > 0 ? Display.Rate(bytes / seconds) : "Unavailable")}\n{bytes:N0} B total";
         Rows.ItemsSource = rows.Select(r => new
         {
             Name = r.Name ?? "Name unavailable", r.Pid,
