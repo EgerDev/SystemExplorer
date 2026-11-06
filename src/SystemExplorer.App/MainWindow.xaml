@@ -271,6 +271,23 @@
                                     <controls:InspectorRow x:Name="SelectedParent" Glyph="&#xE8FD;" Label="Parent process" Value="—"/>
                                     <controls:InspectorRow x:Name="SelectedServices" Glyph="&#xE713;" Label="Associated services" Value="—"/>
                                     <controls:InspectorRow x:Name="SelectedNetwork" Glyph="&#xE701;" Label="Network endpoints" Value="—"/>
+                                    <TextBlock Text="Read-only native inspection" Style="{StaticResource SectionLabel}" Margin="0,8,0,0"/>
+                                    <Grid ColumnSpacing="6">
+                                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                        <Button x:Name="ModulesButton" Content="Modules" Tag="Modules" Click="InspectionClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                        <Button x:Name="RegionsButton" Grid.Column="1" Content="Memory regions" Tag="Regions" Click="InspectionClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                    </Grid>
+                            <Grid ColumnSpacing="6">
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <Button x:Name="ThreadsButton" Content="Threads / waits" Click="ThreadsClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                <Button x:Name="HistoryButton" Grid.Column="1" Content="Recent history" Click="HistoryClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                            </Grid>
+                            <Grid ColumnSpacing="6">
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <Button x:Name="SecurityButton" Content="Security" Click="SecurityClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                <Button x:Name="HandlesButton" Grid.Column="1" Content="Handles" Click="HandlesClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                <Button x:Name="ActivityButton" Grid.Column="2" Content="Activity" Click="ActivityClicked" HorizontalAlignment="Stretch" IsEnabled="False" ToolTipService.ToolTip="Context switches and CPU cycles per thread"/>
+                            </Grid>
                                     <Expander Header="Advanced details" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,10,0,0">
                                         <StackPanel Spacing="8">
                                             <TextBlock x:Name="SelectedStatus" Text="No selection" Style="{StaticResource Muted}"/>
@@ -301,34 +318,7 @@
                     </Grid>
                 </Grid>
                 <views:OverviewView x:Name="OverviewPanel" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed"/>
-                <Grid x:Name="DiagnosticsPanel" Grid.Row="2" Visibility="Collapsed" RowSpacing="10">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <Border x:Name="ChartCard" Style="{StaticResource Card}">
-                        <StackPanel Spacing="5">
-                            <TextBlock x:Name="ChartTitle" Text="Recent history" FontWeight="SemiBold"/>
-                            <Canvas x:Name="HistoryChart" Height="110" SizeChanged="ChartSizeChanged"/>
-                            <TextBlock x:Name="ChartLegend" Style="{StaticResource Muted}"/>
-                        </StackPanel>
-                    </Border>
-                    <ListView x:Name="DetailsList" Grid.Row="1" SelectionMode="None" AutomationProperties.Name="Diagnostic measurements">
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <Border Style="{StaticResource Card}" Margin="0,0,0,8">
-                                    <TextBlock Text="{Binding}" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontSize="{StaticResource BodySize}"/>
-                                </Border>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                        <ListView.ItemContainerStyle>
-                            <Style TargetType="ListViewItem">
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                <Setter Property="Padding" Value="0"/>
-                            </Style>
-                        </ListView.ItemContainerStyle>
-                    </ListView>
-                </Grid>
+                <views:DiagnosticsView x:Name="DiagnosticsPanel" Grid.Row="2" Visibility="Collapsed"/>
                 <StackPanel x:Name="SettingsPanel" Grid.Row="2" Visibility="Collapsed" Spacing="16">
                     <TextBlock Text="Appearance" FontSize="18" FontWeight="SemiBold"/>
                     <ComboBox x:Name="ThemeSelector" SelectedIndex="0" SelectionChanged="ThemeChanged" AutomationProperties.Name="Color theme">
