@@ -232,7 +232,7 @@ public sealed partial class MainWindow
             }
             var graph = ServiceGraph.Build(root.Name, inputs, cancellationToken: token);
             bool partial = failures.Count > 0 || examined < names.Length || inventory.Limitations.Except(WindowsRelationshipProvider.BaselineLimitations).Any();
-            Field("Graph / status", partial ? $"Partial / {graph.Status}" : graph.Status.ToString(),
+            Field("Graph / status", partial ? $"Partial / {graph.Status}" : graph.Status == InspectionStatus.Available ? "Available within readable inventory" : graph.Status.ToString(),
                 $"{graph.Detail}\nInventory from Services / WindowsRelationshipProvider at {inventory.CapturedAt:O}. Configuration read separately, not an atomic snapshot.\n{inputs.Count} configurations available; {failures.Count} failed; {names.Length - examined} not queried (512-service / cooperative 10-second bound).\nMissing nodes mean absent from the supplied readable configuration inventory, not proof a service is absent from Windows. Reverse links can be incomplete.\n{string.Join("\n", inventory.Limitations.Concat(failures))}");
             Field("Graph / bounds", graph.Status == InspectionStatus.Truncated ? "Truncated" : "No graph bound reached",
                 $"Maximum depth reached: {graph.MaximumDepthReached}; depth limit {ServiceGraph.DefaultMaximumDepth}, node limit {ServiceGraph.DefaultMaximumNodes}, group-member limit 256, cycle limit {ServiceGraph.MaximumCycles}. Inventory limits are separate above.");

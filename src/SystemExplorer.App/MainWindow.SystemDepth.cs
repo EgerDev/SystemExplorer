@@ -281,7 +281,7 @@ public sealed partial class MainWindow
                 r.ProcessCountsByType.Select(c => new InventoryRow(c.TypeName ?? $"Type {c.TypeIndex}", $"Type index {c.TypeIndex}",
                     c.HandleCount.ToString("N0"), r.SystemCountsByType.FirstOrDefault(s => s.TypeIndex == c.TypeIndex)?.HandleCount.ToString("N0") ?? "—", "",
                     c.HandleCount, r.SystemCountsByType.FirstOrDefault(s => s.TypeIndex == c.TypeIndex)?.HandleCount, null,
-                    Value: r.Handles.Count > 0 ? (object?)c.TypeIndex : null)),
+                    Value: r.Handles.Any(h => h.TypeIndex == c.TypeIndex) ? (object?)c.TypeIndex : null)),
                 "Object type", "This process", "System-wide", "", action: r.Handles.Count > 0 ? "Handle rows" : null, initialSort: 1, reverse: true);
             }
             Summary();
