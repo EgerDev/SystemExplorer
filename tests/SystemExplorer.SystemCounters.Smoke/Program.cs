@@ -155,7 +155,12 @@ Check(NormalizeIdentity(10, new(ProcessCreationStatus.Available, 123, 0), null).
 var emptyGpu = Gpu(Data.GpuEmpty(), Inventory(new DxgiAdapter("inventory only", 99, 10, 20, 2)));
 Check(emptyGpu.Status == InspectionStatus.Available && emptyGpu.Adapters.Single().HeadlineUtilizationPercent.State == CounterValueState.Unavailable && emptyGpu.Detail.Contains("no counter instances"),
     "Inventory-only adapters must be visible without downgrading counters.");
+Check(!emptyGpu.Adapters.Single().HasCounterInstances, "Inventory-only adapters must identify the absence of counter instances.");
 var goodGpu = Data.Gpu();
+Check(Gpu(goodGpu).Adapters.Single().HasCounterInstances, "Counter-backed adapters must identify their counter instances.");
+var memoryOnlyGpu = goodGpu.Arrays.ToDictionary(k => k.Key, k => k.Value);
+memoryOnlyGpu[SystemCounterPaths.Engine] = new(0, [], false);
+Check(Gpu(Sample(memoryOnlyGpu)).Adapters.Single().HasCounterInstances, "Memory-only counter instances must not be mistaken for inventory-only adapters.");
 var knownIdentities = new Dictionary<int, ProcessCreationResult> { [10] = new(ProcessCreationStatus.Available, 123, 0) };
 Check(Gpu(goodGpu, Inventory(new DxgiAdapter("counter adapter", 1, 10, 20, 2), new DxgiAdapter("inventory only", 99, 10, 20, 0)), knownIdentities, knownIdentities).Status == InspectionStatus.Available,
     "Inventory-only adapter must not downgrade a measured active adapter.");

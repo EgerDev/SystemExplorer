@@ -655,7 +655,8 @@ public sealed class WindowsSystemCounterProvider : ISystemCounterProvider
             var headline = Headline(engines);
             return new GpuAdapterRow(luid, native is null ? null : native.Description + ((native.Flags & 2) != 0 ? " (software adapter)" : ""),
                 native?.DedicatedVideoMemory, native?.SharedSystemMemory, Memory(inputs.AdapterDedicated, SystemCounterPaths.AdapterDedicated, luid),
-                Memory(inputs.AdapterShared, SystemCounterPaths.AdapterShared, luid), engines, headline.Value, headline.Type);
+                Memory(inputs.AdapterShared, SystemCounterPaths.AdapterShared, luid), engines, headline.Value, headline.Type)
+            { HasCounterInstances = inputs.AdapterLuids.Contains(luid) };
         }).ToArray();
         var processes = inputs.ProcessKeys.Take(MaximumRows).Select(key =>
         {

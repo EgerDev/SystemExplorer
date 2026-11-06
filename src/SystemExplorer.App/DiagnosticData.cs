@@ -157,7 +157,8 @@ public static class DiagnosticData
                 var value = adapter.HeadlineUtilizationPercent;
                 var measured = value.State == CounterValueState.Measured && value.Value is { } utilization && double.IsFinite(utilization) && utilization is >= 0 and <= 100;
                 var name = adapter.Description ?? $"Adapter 0x{adapter.Luid:X}";
-                if (!name.EndsWith("(software adapter)", StringComparison.OrdinalIgnoreCase)) name += " (adapter type unavailable)";
+                if (adapter.Description is null || (!adapter.HasCounterInstances && !name.EndsWith("(software adapter)", StringComparison.OrdinalIgnoreCase)))
+                    name += " (adapter type unavailable)";
                 result.Add(new($"gpu-{adapter.Luid:X}", null, name,
                     $"GPU utilization: {(measured ? Percent(value.Value!.Value) : "unavailable")}. Maximum over engine types, not a sum. Busiest engine: {adapter.HeadlineEngineType ?? "Unavailable"}. CPU and process I/O are not substituted.",
                     null, measured ? Percent(value.Value!.Value) : "Utilization unavailable", measured ? "Observed" : value.Reason ?? value.State.ToString(), ""));
