@@ -127,7 +127,7 @@ public sealed partial class MainWindow
                             N(p.MaxUtilizationPercent), N(p.DedicatedUsageBytes), N(p.SharedUsageBytes),
                             $"PID {p.Pid} · creation {p.Identity?.CreationTimeFileTime.ToString() ?? "unverified"} · adapter 0x{p.AdapterLuid:X}\n{string.Join("\n", p.Engines.Select(e => $"{e.EngineType}: {V(e.UtilizationPercent, Pct)}"))}\nDedicated: {V(p.DedicatedUsageBytes, B)} · Shared: {V(p.SharedUsageBytes, B)}",
                             p.Identity)));
-                    view.ShowRows($"{g.Status} · {r.CapturedAt.LocalDateTime:T} · {g.Detail} {g.InventoryDetail}{(g.MalformedInstanceCount > 0 ? $" {g.MalformedInstanceCount} malformed counter instance(s) skipped." : "")}",
+                    view.ShowRows($"{g.Status} · {r.CapturedAt.LocalDateTime:T} · {g.Detail} Inventory: {g.InventoryStatus} · {g.InventoryDetail}{(g.MalformedInstanceCount > 0 ? $" {g.MalformedInstanceCount} malformed counter instance(s) skipped. {g.MalformedDetail}" : "")}",
                         rows, "Adapter / process", "Busiest engine", "Dedicated", "Shared", initialSort: 1, reverse: true);
                 });
                 break;
@@ -184,7 +184,7 @@ public sealed partial class MainWindow
                         view.ShowRows($"{r.Status} · {r.Detail} Restart Manager reports registered users only; it is read-only here and nothing is closed or restarted.",
                             r.Users.Select(u => new InventoryRow(u.AppName ?? ProcessName(u.Identity), u.ServiceShortName is { } svc ? $"Service {svc}" : u.AppType.ToString(),
                                 $"PID {u.Identity.Pid}", u.AppType.ToString(), "", u.Identity.Pid, null, null,
-                                $"{u.AppName} · PID {u.Identity.Pid} · creation {u.Identity.CreationTimeFileTime}\nType: {u.AppType} ({u.RawAppType}) · service: {u.ServiceShortName ?? "—"}", u.Identity)),
+                                $"{u.AppName} · PID {u.Identity.Pid} · creation {u.Identity.CreationTimeFileTime}\nType: {u.AppType} ({u.RawAppType}) · service: {u.ServiceShortName ?? "—"}\nRestartable (Restart Manager): {u.Restartable?.ToString() ?? "Unavailable"}. Nothing is restarted.", u.Identity)),
                             "Process", "PID", "Type", "");
                     }
                 });
@@ -237,22 +237,24 @@ public sealed partial class MainWindow
             var t = r.Token;
             Add("Command line", r.CommandLine.LengthCharacters is { } len ? $"{len} characters · select this row, then Show command line" : "Unavailable", r.CommandLine.Status.ToString(), r.CommandLine.Detail);
             Add("User", t.UserAccount ?? t.UserSid ?? "Unavailable", t.Status.ToString(), t.Detail);
+            Add("Token session / groups", $"Session {t.SessionId?.ToString() ?? "Unavailable"} / {t.GroupCount?.ToString("N0") ?? "Unavailable"} groups", t.Status.ToString(), $"SID: {t.UserSid ?? "Unavailable"}\n{t.Detail}");
+            Add("Token virtualization", $"Allowed: {t.VirtualizationAllowed?.ToString() ?? "Unavailable"}; enabled: {t.VirtualizationEnabled?.ToString() ?? "Unavailable"}", t.Status.ToString(), t.Detail);
             Add("Integrity level", t.Integrity?.ToString() ?? "Unavailable", t.Status.ToString(), $"RID 0x{t.IntegrityRid:X}");
             Add("Elevation", t.IsElevated is { } e ? $"{(e ? "Elevated" : "Not elevated")} · {t.ElevationType}" : "Unavailable", t.Status.ToString(), "");
             Add("AppContainer / package", $"{t.IsAppContainer?.ToString() ?? "—"} / {t.HasPackageIdentity?.ToString() ?? "—"}", t.Status.ToString(), "");
-            Add("Protection", r.Protection.LevelName ?? "Unavailable", r.Protection.Status.ToString(), r.Protection.Detail);
+            Add("Protection", r.Protection.LevelName ?? "Unavailable", r.Protection.Status.ToString(), $"{r.Protection.Detail}\nRaw level: {(r.Protection.RawLevel is { } level ? $"0x{level:X8}" : "Unavailable")}");
             Add("In a job object", r.Job.InAnyJob?.ToString() ?? "Unavailable", r.Job.Status.ToString(), r.Job.Detail);
             Add("Privileges", t.Privileges.Count > 0 ? $"{t.Privileges.Count} reported" : t.PrivilegesStatus == InspectionStatus.Available ? "None reported" : "Unavailable", t.PrivilegesStatus.ToString(), t.Detail);
             Add("Mitigations", r.Mitigations.Policies.Count > 0 ? $"{r.Mitigations.Policies.Count} policies reported" : r.Mitigations.Status == InspectionStatus.Available ? "None reported" : "Unavailable", r.Mitigations.Status.ToString(), r.Mitigations.Detail);
             Add("Runtime (.NET)", r.Runtime.Modules.Count > 0 ? $"{r.Runtime.Modules.Count} modules reported" : r.Runtime.Status == InspectionStatus.Available ? "None reported" : "Unavailable", r.Runtime.Status.ToString(), $"{r.Runtime.Detail}\n{r.Runtime.Source}");
             foreach (var p in t.Privileges)
-                Add($"Privilege {p.Name}", p.Enabled ? "Enabled" : p.Removed ? "Removed" : "Present, disabled", t.PrivilegesStatus.ToString(), $"Enabled by default: {p.EnabledByDefault}. Nothing is enabled or changed.");
+                Add($"Privilege {p.Name}", p.Enabled ? "Enabled" : p.Removed ? "Removed" : "Present, disabled", t.PrivilegesStatus.ToString(), $"LUID {unchecked((uint)p.LuidHigh):X8}:{p.LuidLow:X8}; attributes 0x{p.RawAttributes:X8}. Enabled by default: {p.EnabledByDefault}. Nothing is enabled or changed.");
             foreach (var m in r.Mitigations.Policies)
                 Add($"Mitigation {m.Kind}", m.Flags.Count == 0 ? "No flags reported" : string.Join(", ", m.Flags.Where(f => f.Value).Select(f => f.Name).DefaultIfEmpty("All off")), m.Status.ToString(), $"{m.Detail} Raw 0x{m.RawFlags:X}");
             foreach (var m in r.Runtime.Modules)
-                Add($"Runtime {m.RuntimeFamily}", $"{m.ModuleName} {m.FileVersion}", r.Runtime.Status.ToString(), $"{m.Path}\n{r.Runtime.Source}");
+                Add($"Runtime {m.RuntimeFamily}", $"{m.ModuleName} {m.FileVersion}", r.Runtime.Status.ToString(), $"{m.Path}\nProduct version: {m.ProductVersion ?? "Unavailable"}\n{r.Runtime.Source}");
             if (r.Image.Provenance is { } i)
-                Add("Image signature", $"{i.Signature}{(i.SignerSubject is { } s ? $" · {s}" : "")}", i.Status.ToString(), $"{i.Path}\n{i.CompanyName} · {i.ProductName} · {i.FileVersion}\nCatalog: {i.CatalogPath ?? "—"}\n{i.Detail}");
+                Add("Image signature", $"{i.Signature}{(i.SignerSubject is { } s ? $" · {s}" : "")}", i.Status.ToString(), $"{i.Path}\n{i.CompanyName} · {i.ProductName} · {i.FileVersion}\nDescription: {i.FileDescription ?? "Unavailable"}\nProduct version: {i.ProductVersion ?? "Unavailable"}\nResult: {(i.SignatureHResult is { } hr ? $"0x{unchecked((uint)hr):X8}" : "Unavailable")} · verified {i.VerifiedAt.LocalDateTime:O}\nCatalog: {i.CatalogPath ?? "—"}\n{i.Detail}");
             else Add("Image signature", "Unavailable", r.Image.Status.ToString(), r.Image.Detail);
             var commandText = r.CommandLine.Text;
             if (commandText is not null) rows[0] = rows[0] with { Value = "reveal" };
@@ -287,7 +289,7 @@ public sealed partial class MainWindow
         await ShowInventoryAsync($"Thread activity · PID {identity.Pid}", async (view, token) =>
         {
             var r = await threadActivity.CaptureAsync(identity, token);
-            view.ShowRows($"{r.Status} · {r.CapturedAt.LocalDateTime:T} · {r.SampleInterval.TotalMilliseconds:F0} ms sample · process cycles +{r.ProcessCycleDelta?.ToString("N0") ?? "—"} · {r.Detail} Cycle counts are raw CPU cycles, not time.",
+            view.ShowRows($"{r.Status} · {r.CapturedAt.LocalDateTime:T} · {r.SampleInterval.TotalMilliseconds:F0} ms sample · process cycles {r.ProcessCycleTime?.ToString("N0") ?? "Unavailable"} (+{r.ProcessCycleDelta?.ToString("N0") ?? "—"}) · {r.Detail} Cycle counts are raw CPU cycles, not time.",
                 r.Threads.Select(t => new InventoryRow($"Thread {t.Identity.ThreadId}", $"{ObjectInventoryNames.ThreadStateName(t.ThreadState) ?? "State unavailable"} · {ObjectInventoryNames.WaitReasonName(t.WaitReason) ?? "—"} · priority {t.CurrentPriority}/{t.BasePriority}",
                     t.ContextSwitchesPerSecond is { } cs ? $"{cs:F0}/s" : "—", t.CycleDelta?.ToString("N0") ?? "—", t.ContextSwitches?.ToString("N0") ?? "—",
                     t.ContextSwitchesPerSecond is { } c ? (decimal)c : null, t.CycleDelta, t.ContextSwitches,
