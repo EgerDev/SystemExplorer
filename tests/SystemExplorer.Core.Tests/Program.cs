@@ -4,6 +4,34 @@ using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Lifecycle timeline separates baseline, starts, disappearance and PID reuse", () =>
+    {
+        var timeline = new ProcessLifecycleTimeline();
+        timeline.Observe(Snapshot(0, P(10, 100)));
+        timeline.Observe(Snapshot(2, P(10, 100) with { PrivateBytes = 900 }, P(11, 300)));
+        timeline.Observe(Snapshot(4, P(10, 200), P(11, 300)));
+        timeline.Observe(Snapshot(4, P(12, 400)));
+        var e = timeline.Events;
+        Check(e.Count == 4);
+        Check(e[0] is { Kind: ProcessLifecycleKind.RunningAtFirstObservation, Identity.Pid: 10, AfterGap: false });
+        Check(e[1] is { Kind: ProcessLifecycleKind.Started, Identity.Pid: 11 });
+        Check(e[2] is { Kind: ProcessLifecycleKind.Started, Identity.CreationTimeFileTime: 200 });
+        Check(e[3] is { Kind: ProcessLifecycleKind.NoLongerObserved, Identity.CreationTimeFileTime: 100, Observations: 2, PeakPrivateBytes: 900 });
+        Check(e[3].LastObserved == DateTimeOffset.UnixEpoch.AddSeconds(2) && e[3].At == DateTimeOffset.UnixEpoch.AddSeconds(4));
+    }),
+    ("Lifecycle timeline excludes unstable identities, marks gaps and bounds events", () =>
+    {
+        var timeline = new ProcessLifecycleTimeline();
+        timeline.Observe(Snapshot(0, P(10, 100), P(20, 0)));
+        Check(timeline.Events.Count == 1 && timeline.UnstableIdentitiesExcluded == 1);
+        timeline.BreakContinuity();
+        timeline.Observe(Snapshot(2, P(11, 300)));
+        Check(timeline.Events.Skip(1).All(x => x.AfterGap));
+        timeline.Observe(Snapshot(30, P(12, 400)));
+        Check(timeline.Events.Last().AfterGap);
+        for (var i = 0; i < ProcessLifecycleTimeline.MaximumEvents; i++) timeline.Observe(Snapshot(32 + i, P(1000 + i, 1000 + i)));
+        Check(timeline.Events.Count == ProcessLifecycleTimeline.MaximumEvents);
+    }),
     ("Selected history keeps lifetimes separate and absence explicit", () =>
     {
         var history = new SelectedProcessHistory();

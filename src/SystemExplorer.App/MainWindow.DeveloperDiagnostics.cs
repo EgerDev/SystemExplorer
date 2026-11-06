@@ -11,10 +11,12 @@ public sealed partial class MainWindow
     private readonly IServiceInspectionProvider serviceInspection = new WindowsServiceInspectionProvider();
     private readonly IScheduledTaskProvider scheduledTasks = new WindowsScheduledTaskProvider();
     private readonly IThreadDiagnosticsProvider threadDiagnostics = new WindowsThreadDiagnosticsProvider();
+    private readonly ProcessLifecycleTimeline lifecycle = new();
 
     private async void ShowExtraInventory(string kind)
     {
         if (kind == "History") { HistoryClicked(this, new RoutedEventArgs()); return; }
+        if (kind == "Timeline") { ShowLifecycleTimeline(); return; }
         if (kind == "Tasks")
         {
             await ShowInventoryAsync("Local scheduled tasks", async (view, token) =>
@@ -39,6 +41,37 @@ public sealed partial class MainWindow
                     p.TotalBytes, p.InUseBytes, p.PeakUsageBytes,
                     $"{p.Name}\nSize: {p.TotalBytes:N0} bytes\nIn use: {p.InUseBytes:N0} bytes\nHistorical peak: {p.PeakUsageBytes:N0} bytes\nCaptured {result.CapturedAt:O}\nNot system commit, virtual-region span or physical RAM; historical peaks are not clamped.")),
                 "Pagefile", "Size", "In use", "Peak use");
+        });
+    }
+
+    private async void ShowLifecycleTimeline()
+    {
+        var events = lifecycle.Events;
+        var excluded = lifecycle.UnstableIdentitiesExcluded;
+        var overflow = lifecycle.TrackingOverflow;
+        await ShowInventoryAsync("Process start / disappearance timeline", (view, _) =>
+        {
+            static string Kind(ProcessLifecycleKind kind) => kind switch
+            {
+                ProcessLifecycleKind.Started => "Started",
+                ProcessLifecycleKind.NoLongerObserved => "No longer observed",
+                _ => "Running at first observation"
+            };
+            view.ShowRows($"Frozen at open · session-only, newest first, at most {ProcessLifecycleTimeline.MaximumEvents} events · identity = PID + creation time. \"No longer observed\" is not confirmed exit or crash. {excluded} current process(es) without a stable creation time are excluded{(overflow > 0 ? $"; {overflow} identities exceeded tracking bounds" : "")}.",
+                events.Select(e =>
+                {
+                    var lifetime = e.LastObserved - e.FirstObserved;
+                    return new InventoryRow($"{e.Name} · PID {e.Identity.Pid}",
+                        $"{Kind(e.Kind)}{(e.AfterGap ? " · after sampling gap" : "")}",
+                        e.At.LocalDateTime.ToString("HH:mm:ss"), e.Kind == ProcessLifecycleKind.NoLongerObserved ? $"{lifetime.TotalSeconds:F0} s observed" : "—",
+                        DiagnosticData.Bytes(e.PeakPrivateBytes),
+                        e.At.ToUnixTimeMilliseconds(), e.Kind == ProcessLifecycleKind.NoLongerObserved ? (decimal)lifetime.TotalSeconds : null, e.PeakPrivateBytes,
+                        $"{e.Name} · PID {e.Identity.Pid} · creation {e.Identity.CreationTimeFileTime}\n{Kind(e.Kind)} at {e.At:O}{(e.AfterGap ? " (after a sampling gap; the transition time is uncertain)" : "")}\nProcess creation time: {e.CreatedAt?.ToString("O") ?? "Unavailable"}\nParent PID at first observation: {e.ParentPid?.ToString() ?? "Unavailable"} (parent PID values can be reused)\nPath: {e.ExecutablePath ?? "Unavailable"}\nObserved {e.FirstObserved:O} – {e.LastObserved:O} in {e.Observations} sample(s)\nPeak observed private commit: {DiagnosticData.Bytes(e.PeakPrivateBytes)} · working set: {DiagnosticData.Bytes(e.PeakWorkingSetBytes)} · CPU: {DiagnosticData.Percent(e.PeakCpuPercent)}\nPeaks are maxima of retained samples, not true lifetime peaks. Absence is not proof of exit; processes shorter than one sampling interval are never observed.",
+                        e.Identity);
+                }),
+                "Process", "Event time", "Lifetime", "Peak private", reverse: true, initialSort: 1);
+            if (events.Count == 0) view.ShowMessage("No process lifetimes have been observed yet.");
+            return Task.CompletedTask;
         });
     }
 

@@ -101,7 +101,8 @@
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
                 <Button x:Name="PagefilesButton" Content="Pagefiles" Tag="Pagefiles" Click="InventoryClicked" Visibility="Collapsed"/>
                 <Button x:Name="RecentButton" Content="Recent history" Tag="History" Click="InventoryClicked" Visibility="Collapsed"/>
-                <Button x:Name="TasksButton" Content="Scheduled tasks" Tag="Tasks" Click="InventoryClicked" Visibility="Collapsed"/>
+                <Button x:Name="TimelineButton" Content="Process timeline" Tag="Timeline" Click="InventoryClicked" Visibility="Collapsed"/>
+            <Button x:Name="TasksButton" Content="Scheduled tasks" Tag="Tasks" Click="InventoryClicked" Visibility="Collapsed"/>
             </StackPanel>
         </Grid>
     </Grid>

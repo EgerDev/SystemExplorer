@@ -88,6 +88,7 @@ public sealed partial class MainWindow : Window
                         throw new InvalidOperationException("An out-of-order observation was ignored.");
                     Model.Apply(next);
                     selectedHistory.Observe(next);
+                    lifecycle.Observe(next);
                     overviewData.Observe(next);
                     StartDescriptionRefresh();
                     overviewStale = false;
@@ -143,6 +144,7 @@ public sealed partial class MainWindow : Window
                 overviewData.BreakContinuity();
                 Model.History.BreakContinuity();
                 selectedHistory.BreakContinuity();
+        lifecycle.BreakContinuity();
                 overviewStale = true;
                 RefreshDiagnostics();
                 StatusText.Text = $"Refresh failed; previous data is stale: {ex.Message}";
@@ -481,6 +483,7 @@ public sealed partial class MainWindow : Window
             overviewData.BreakContinuity();
             Model.History.BreakContinuity();
             selectedHistory.BreakContinuity();
+        lifecycle.BreakContinuity();
         }
         RefreshDiagnostics();
         if (Model.Snapshot is { } snapshot) tray.Update(snapshot, paused);

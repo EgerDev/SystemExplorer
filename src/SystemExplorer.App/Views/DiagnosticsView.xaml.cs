@@ -45,6 +45,7 @@ public sealed partial class DiagnosticsView : UserControl
         NameHeader.Content = headers[0]; FirstHeader.Content = headers[1]; SecondHeader.Content = headers[2]; ThirdHeader.Content = headers[3];
         MemorySummary.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
         PagefilesButton.Visibility = RecentButton.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
+        TimelineButton.Visibility = section == "CPU" ? Visibility.Visible : Visibility.Collapsed;
         TasksButton.Visibility = section == "Startup" ? Visibility.Visible : Visibility.Collapsed;
         ChartCard.Visibility = section is "Memory" or "CPU" ? Visibility.Visible : Visibility.Collapsed;
         ChartSeries.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
