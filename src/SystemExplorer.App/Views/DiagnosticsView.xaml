@@ -4,8 +4,9 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:SystemExplorer.App"
     xmlns:views="using:SystemExplorer.App.Views"
-    xmlns:controls="using:SystemExplorer.App.Controls">
-    <Grid RowSpacing="8">
+    xmlns:controls="using:SystemExplorer.App.Controls"
+    SizeChanged="ViewSizeChanged">
+    <Grid x:Name="Layout" RowSpacing="8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
@@ -17,12 +18,13 @@
             <controls:SummaryCard x:Name="CommitCard" Grid.Column="2" Label="System commit / limit" Glyph="&#xE8EF;"/>
         </Grid>
         <Border x:Name="ChartCard" Grid.Row="1" Style="{StaticResource Card}" Padding="12">
-            <Grid RowSpacing="4">
-                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="72"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Grid x:Name="ChartLayout" RowSpacing="4">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition x:Name="PlotRow" Height="72"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <TextBlock x:Name="ChartTitle" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                    <ComboBox x:Name="ChartSeries" Grid.Column="1" SelectedIndex="0" SelectionChanged="SeriesChanged" AutomationProperties.Name="Memory history metric">
+                    <Button x:Name="HistoryToggle" Grid.Column="1" Content="Hide chart" Click="HistoryClicked" Margin="0,0,8,0" AutomationProperties.Name="Show or hide diagnostic history chart"/>
+                    <ComboBox x:Name="ChartSeries" Grid.Column="2" SelectedIndex="0" SelectionChanged="SeriesChanged" AutomationProperties.Name="Memory history metric">
                         <x:String>Physical used</x:String><x:String>System commit</x:String>
                     </ComboBox>
                 </Grid>
@@ -55,13 +57,13 @@
                                         <ColumnDefinition Width="114"/><ColumnDefinition Width="114"/><ColumnDefinition Width="114"/><ColumnDefinition Width="76"/>
                                     </Grid.ColumnDefinitions>
                                     <StackPanel VerticalAlignment="Center" Spacing="2" Margin="0,0,8,0">
-                                        <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                        <TextBlock Text="{x:Bind Detail, Mode=OneWay}" FontSize="11" TextTrimming="CharacterEllipsis" Style="{StaticResource Muted}"/>
+                                        <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                                        <TextBlock Text="{x:Bind Detail, Mode=OneWay}" FontSize="11" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Style="{StaticResource Muted}"/>
                                     </StackPanel>
                                     <TextBlock Grid.Column="1" Text="{x:Bind Pid, Mode=OneWay}" VerticalAlignment="Center" FontSize="12"/>
-                                    <TextBlock Grid.Column="2" Text="{x:Bind First, Mode=OneWay}" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis" Margin="6,0"/>
-                                    <TextBlock Grid.Column="3" Text="{x:Bind Second, Mode=OneWay}" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis" Margin="6,0"/>
-                                    <TextBlock Grid.Column="4" Text="{x:Bind Third, Mode=OneWay}" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis" Margin="6,0"/>
+                                    <TextBlock Grid.Column="2" Text="{x:Bind First, Mode=OneWay}" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="6,0"/>
+                                    <TextBlock Grid.Column="3" Text="{x:Bind Second, Mode=OneWay}" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="6,0"/>
+                                    <TextBlock Grid.Column="4" Text="{x:Bind Third, Mode=OneWay}" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="6,0"/>
                                     <Button Grid.Column="5" Content="Inspect" FontSize="12" Padding="8,4" VerticalAlignment="Center" Tag="{x:Bind}" Click="InspectClicked" IsEnabled="{x:Bind CanInspect, Mode=OneWay}" AutomationProperties.Name="{x:Bind Name, Mode=OneWay}"/>
                                 </Grid>
                             </DataTemplate>

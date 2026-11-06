@@ -19,6 +19,8 @@ public sealed partial class DiagnosticsView : UserControl
     private ScrollViewer? scroll;
     private bool ready;
     private bool detailsOpen;
+    private bool compact;
+    private bool historyExpanded = true;
 
     public DiagnosticsView() { InitializeComponent(); ready = true; }
 
@@ -138,6 +140,27 @@ public sealed partial class DiagnosticsView : UserControl
         return null;
     }
     private void SeriesChanged(object sender, SelectionChangedEventArgs args) { if (ready) DrawHistory(); }
+    private void ViewSizeChanged(object sender, SizeChangedEventArgs args)
+    {
+        if (!ready || ActualHeight <= 0) return;
+        var nextCompact = ActualHeight < 520;
+        if (compact != nextCompact) { compact = nextCompact; historyExpanded = !compact; }
+        UpdateHistoryLayout();
+    }
+    private void HistoryClicked(object sender, RoutedEventArgs args)
+    {
+        historyExpanded = !historyExpanded;
+        UpdateHistoryLayout();
+    }
+    private void UpdateHistoryLayout()
+    {
+        Layout.RowSpacing = compact ? 6 : 8;
+        ChartCard.Padding = historyExpanded ? new Thickness(12) : new Thickness(8, 4, 8, 4);
+        ChartLayout.RowSpacing = historyExpanded ? 4 : 0;
+        PlotRow.Height = new GridLength(historyExpanded ? 72 : 0);
+        Trend.Visibility = ChartLegend.Visibility = historyExpanded ? Visibility.Visible : Visibility.Collapsed;
+        HistoryToggle.Content = historyExpanded ? "Hide chart" : "Show chart";
+    }
     private void DrawHistory()
     {
         if (snapshot is null || section is not ("Memory" or "CPU")) return;
