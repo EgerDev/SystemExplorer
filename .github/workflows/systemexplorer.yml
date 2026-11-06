@@ -40,6 +40,10 @@ jobs:
         run: dotnet run --project tests/SystemExplorer.Threads.Smoke -c Release
       - name: Read-only scheduled task checks
         run: dotnet run --project tests/SystemExplorer.ScheduledTasks.Smoke -c Release
+        run: dotnet run --project tests/SystemExplorer.SystemCounters.Smoke -c Release
+        run: dotnet run --project tests/SystemExplorer.ObjectInventories.Smoke -c Release
+        run: dotnet run --project tests/SystemExplorer.ProcessSecurity.Smoke -c Release
+        run: dotnet run --project tests/SystemExplorer.Persistence.Smoke -c Release
       - name: Publish unsigned portable test build
         shell: pwsh
         run: ./tools/Build-SystemExplorer.ps1
