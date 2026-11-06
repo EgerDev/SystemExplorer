@@ -1,0 +1,64 @@
+name: SystemExplorer managed Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, feature/systemexplorer-integration]
+    paths: ['src/**', 'tests/**', 'tools/tests/**', 'tools/Build-SystemExplorer.ps1', '.github/workflows/systemexplorer.yml']
+  pull_request:
+    branches: [master, feature/systemexplorer-integration, feature/phase2-validation-components, feature/read-only-process-inspection, 'feature/design-fidelity-*', 'feature/se-*']
+    paths: ['src/**', 'tests/**', 'tools/tests/**', 'tools/Build-SystemExplorer.ps1', '.github/workflows/systemexplorer.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-portable:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: '10.0.403'
+      - name: Core contract and history tests
+        run: dotnet run --project tests/SystemExplorer.Core.Tests -c Release
+      - name: Live Windows provider checks
+        run: dotnet run --project tests/SystemExplorer.Windows.Smoke -c Release
+      - name: Endpoint, service and offline trust checks
+        run: dotnet run --project tests/SystemExplorer.Relationships.Smoke -c Release
+      - name: Pagefile inventory checks
+        run: dotnet run --project tests/SystemExplorer.Pagefiles.Smoke -c Release
+      - name: Service configuration and startup checks
+        run: dotnet run --project tests/SystemExplorer.ServiceInspection.Smoke -c Release
+      - name: Thread timing, wait-chain and lifetime checks
+        run: dotnet run --project tests/SystemExplorer.Threads.Smoke -c Release
+      - name: Read-only scheduled task checks
+        run: dotnet run --project tests/SystemExplorer.ScheduledTasks.Smoke -c Release
+      - name: Read-only system counter checks
+        run: dotnet run --project tests/SystemExplorer.SystemCounters.Smoke -c Release
+      - name: Read-only object inventory checks
+        run: dotnet run --project tests/SystemExplorer.ObjectInventories.Smoke -c Release
+      - name: Read-only process security checks
+        run: dotnet run --project tests/SystemExplorer.ProcessSecurity.Smoke -c Release
+      - name: Read-only persistence inventory checks
+        run: dotnet run --project tests/SystemExplorer.Persistence.Smoke -c Release
+      - name: Opt-in I/O attribution checks
+        run: dotnet run --project tests/SystemExplorer.IoAttribution.Smoke -c Release
+      - name: Acceptance preflight predicate tests
+        shell: pwsh
+        run: ./tools/tests/Windows11-Acceptance-Preflight.Tests.ps1
+      - name: Publish unsigned portable test build
+        shell: pwsh
+        run: ./tools/Build-SystemExplorer.ps1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: SystemExplorer-unsigned-win-x64
+          path: artifacts/SystemExplorer-win-x64
+          if-no-files-found: error
+          retention-days: 14

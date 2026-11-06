@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/SystemExplorer.Core/SystemExplorer.Core.csproj" />
+    <Compile Include="../../src/SystemExplorer.App/OverviewData.cs" Link="Presentation/OverviewData.cs" />
+    <Compile Include="../../src/SystemExplorer.App/ApplicationDescriptions.cs" Link="Presentation/ApplicationDescriptions.cs" />
+    <Compile Include="../../src/SystemExplorer.App/ProcessDescriptionIndex.cs" Link="Presentation/ProcessDescriptionIndex.cs" />
+    <Compile Include="../../src/SystemExplorer.App/DiagnosticData.cs" Link="Presentation/DiagnosticData.cs" />
+  </ItemGroup>
+</Project>

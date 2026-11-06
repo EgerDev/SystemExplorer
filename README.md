@@ -1,3 +1,13 @@
+## SystemExplorer
+
+The new read-only Windows diagnostics application is developed in [`src/`](src/README.md).
+See its [build instructions](src/README.md), [milestone status](docs/development/PROJECT_STATUS.md)
+and [quality gates](docs/testing/QUALITY_GATES.md). It is a separate native WinUI application;
+the original System Informer projects and notices remain preserved below. Unsigned test
+builds are not a public release or evidence that every acceptance gate has passed.
+
+---
+
 <p align="center">
     <a href="https://systeminformer.com">
         <img src="https://github.com/winsiderss/systeminformer/raw/master/SystemInformer/resources/systeminformer-128x128.png"/>
