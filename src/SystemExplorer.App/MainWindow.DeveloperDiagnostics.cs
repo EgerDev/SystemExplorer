@@ -17,6 +17,7 @@ public sealed partial class MainWindow
     {
         if (kind == "History") { HistoryClicked(this, new RoutedEventArgs()); return; }
         if (kind == "Timeline") { ShowLifecycleTimeline(); return; }
+        if (kind is "Disk" or "FileUsers" or "Adapters" or "Cores" or "Gpu" or "DllUsers" or "MemoryLists" or "PoolTags" or "Drivers" or "Persistence") { ShowSystemDepth(kind); return; }
         if (kind == "Tasks")
         {
             await ShowInventoryAsync("Local scheduled tasks", async (view, token) =>

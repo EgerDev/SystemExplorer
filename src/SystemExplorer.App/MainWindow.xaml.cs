@@ -343,7 +343,7 @@ public sealed partial class MainWindow : Window
     private void RefreshInspector()
     {
         HistoryButton.IsEnabled = selectedHistory.HasHistory;
-        ModulesButton.IsEnabled = RegionsButton.IsEnabled = ThreadsButton.IsEnabled = selectedIdentity is { IsStable: true } identity && Model.Snapshot?.Processes.Any(p => p.Identity == identity) == true;
+        SecurityButton.IsEnabled = HandlesButton.IsEnabled = ActivityButton.IsEnabled = ModulesButton.IsEnabled = RegionsButton.IsEnabled = ThreadsButton.IsEnabled = selectedIdentity is { IsStable: true } identity && Model.Snapshot?.Processes.Any(p => p.Identity == identity) == true;
         var process = SelectedProcess;
         if (process is null)
         {
