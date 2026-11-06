@@ -271,6 +271,23 @@
                                     <controls:InspectorRow x:Name="SelectedParent" Glyph="&#xE8FD;" Label="Parent process" Value="—"/>
                                     <controls:InspectorRow x:Name="SelectedServices" Glyph="&#xE713;" Label="Associated services" Value="—"/>
                                     <controls:InspectorRow x:Name="SelectedNetwork" Glyph="&#xE701;" Label="Network endpoints" Value="—"/>
+                                    <TextBlock Text="Read-only native inspection" Style="{StaticResource SectionLabel}" Margin="0,8,0,0"/>
+                                    <Grid ColumnSpacing="6">
+                                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                        <Button x:Name="ModulesButton" Content="Modules" Tag="Modules" Click="InspectionClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                        <Button x:Name="RegionsButton" Grid.Column="1" Content="Memory regions" Tag="Regions" Click="InspectionClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                    </Grid>
+                            <Grid ColumnSpacing="6">
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <Button x:Name="ThreadsButton" Content="Threads / waits" Click="ThreadsClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                <Button x:Name="HistoryButton" Grid.Column="1" Content="Recent history" Click="HistoryClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                            </Grid>
+                            <Grid ColumnSpacing="6">
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <Button x:Name="SecurityButton" Content="Security" Click="SecurityClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                <Button x:Name="HandlesButton" Grid.Column="1" Content="Handles" Click="HandlesClicked" HorizontalAlignment="Stretch" IsEnabled="False"/>
+                                <Button x:Name="ActivityButton" Grid.Column="2" Content="Activity" Click="ActivityClicked" HorizontalAlignment="Stretch" IsEnabled="False" ToolTipService.ToolTip="Context switches and CPU cycles per thread"/>
+                            </Grid>
                                     <Expander Header="Advanced details" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,10,0,0">
                                         <StackPanel Spacing="8">
                                             <TextBlock x:Name="SelectedStatus" Text="No selection" Style="{StaticResource Muted}"/>

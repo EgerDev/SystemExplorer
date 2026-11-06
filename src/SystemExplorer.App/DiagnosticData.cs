@@ -152,9 +152,20 @@ public static class DiagnosticData
         }
         else if (section == "GPU")
         {
-            if (snapshot.GpuPercent is { } gpu && double.IsFinite(gpu) && gpu is >= 0 and <= 100)
+            foreach (var adapter in snapshot.GpuAdapters)
+            {
+                var value = adapter.HeadlineUtilizationPercent;
+                var measured = value.State == CounterValueState.Measured && value.Value is { } utilization && double.IsFinite(utilization) && utilization is >= 0 and <= 100;
+                var name = adapter.Description ?? $"Adapter 0x{adapter.Luid:X}";
+                if (adapter.Description is null || (!adapter.HasCounterInstances && !name.EndsWith("(software adapter)", StringComparison.OrdinalIgnoreCase)))
+                    name += " (adapter type unavailable)";
+                result.Add(new($"gpu-{adapter.Luid:X}", null, name,
+                    $"GPU utilization: {(measured ? Percent(value.Value!.Value) : "unavailable")}. Maximum over engine types, not a sum. Busiest engine: {adapter.HeadlineEngineType ?? "Unavailable"}. CPU and process I/O are not substituted.",
+                    null, measured ? Percent(value.Value!.Value) : "Utilization unavailable", measured ? "Observed" : value.Reason ?? value.State.ToString(), ""));
+            }
+            if (result.Count == 0 && snapshot.GpuPercent is { } gpu && double.IsFinite(gpu) && gpu is >= 0 and <= 100)
                 result.Add(new("gpu", null, $"GPU utilization: {Percent(gpu)}", "Observed provider GPU utilization; no CPU or process-I/O estimate is substituted.", null, "Observed", "", ""));
-            else
+            else if (result.Count == 0)
                 result.Add(new("gpu", null, "GPU utilization unavailable", "No valid GPU utilization reading is available. CPU and process I/O are not substituted.", null, "Unsupported", "", ""));
         }
         else
@@ -186,7 +197,15 @@ public static class DiagnosticData
     private static string Endpoint(string address, int? port) => $"{(address.Contains(':') ? $"[{address}]" : address)}:{port?.ToString() ?? "—"}";
     private static decimal? Number(double? number) => number is { } value && double.IsFinite(value) && value >= 0 && value <= (double)decimal.MaxValue ? (decimal)value : null;
     private static string Count(int? count) => count?.ToString() ?? "—";
-    public static string Bytes(ulong? bytes) => bytes is { } value ? value >= 1024UL * 1024 * 1024 ? $"{value / (1024d * 1024 * 1024):F2} GiB" : $"{value / (1024d * 1024):F1} MiB" : "—";
+    public static string Bytes(ulong? bytes) => bytes switch
+    {
+        null => "—",
+        >= 1024UL * 1024 * 1024 * 1024 => $"{bytes.Value / (1024d * 1024 * 1024 * 1024):F2} TiB",
+        >= 1024UL * 1024 * 1024 => $"{bytes.Value / (1024d * 1024 * 1024):F2} GiB",
+        >= 1024UL * 1024 => $"{bytes.Value / (1024d * 1024):F1} MiB",
+        >= 1024UL => $"{bytes.Value / 1024d:F1} KiB",
+        _ => $"{bytes.Value:N0} B"
+    };
     public static string Percent(double? value) => value is { } number ? $"{number:F1}%" : "—";
     public static string Rate(double? value) => value is { } number ? number >= 1024 * 1024 ? $"{number / (1024 * 1024):F1} MiB/s" : $"{number / 1024:F0} KiB/s" : "—";
 }
