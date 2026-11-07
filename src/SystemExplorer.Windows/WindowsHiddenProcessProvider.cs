@@ -20,6 +20,7 @@ public sealed class WindowsHiddenProcessProvider : IProcessCrossViewProvider
     private static ProcessCrossViewSnapshot Capture(BoundedItems<ProcessIdentity>? recheck, CancellationToken token)
     {
         var at = DateTimeOffset.UtcNow;
+        var elevation = WindowsHiddenEnvironment.GetElevation();
         var rows = new List<ProcessSighting>();
         var statuses = new List<ProcessSourceStatus>();
         bool truncated = recheck?.Truncated == true;
@@ -32,7 +33,12 @@ public sealed class WindowsHiddenProcessProvider : IProcessCrossViewProvider
             string detail = "Read-only, current-token bounded enumeration.";
             try { read(local); }
             catch (SourceFailure ex) { status = ex.Status; detail = ex.Message; }
-            catch (Win32Exception ex) { status = Error(ex.NativeErrorCode); detail = $"Windows error {ex.NativeErrorCode}: {ex.Message}"; }
+            catch (Win32Exception ex)
+            {
+                var requirement = ProcessSourceErrors.AdministratorRequirement(source, ex.NativeErrorCode, elevation.IsElevated);
+                status = requirement is null ? Error(ex.NativeErrorCode) : InspectionStatus.AccessDenied;
+                detail = requirement ?? $"Windows error {ex.NativeErrorCode}: {ex.Message}";
+            }
             catch (EntryPointNotFoundException) { status = InspectionStatus.Unsupported; detail = "Native entry point unavailable."; }
             catch (InvalidDataException ex) { status = InspectionStatus.Failed; detail = ex.Message; }
             token.ThrowIfCancellationRequested();
@@ -125,7 +131,6 @@ public sealed class WindowsHiddenProcessProvider : IProcessCrossViewProvider
             Source(ProcessSightingSource.UdpOwner, list => ReadEndpoints(list, false, token));
             Source(ProcessSightingSource.ServiceOwner, list => ReadServices(list, token));
         }
-        var elevation = WindowsHiddenEnvironment.GetElevation();
         return new(at, truncated ? InspectionStatus.Truncated : statuses.Any(s => s.Status != InspectionStatus.Available) ? InspectionStatus.Partial : InspectionStatus.Available,
             $"{elevation.Detail} PID probe scope: multiples of four through {MaximumProbePid}, plus observed higher PIDs; max {SourceCap} rows per source. NtGetNextProcess only returns processes accessible for limited query. Recheck delay is caller-owned.",
             elevation.IsElevated == true, new(statuses, 8), new(rows, SourceCap * 8, truncated));

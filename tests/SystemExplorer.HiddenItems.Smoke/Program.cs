@@ -21,6 +21,11 @@ if (args.Contains("--expect-filtered-token"))
 {
     Require(!new WindowsPrincipal(currentIdentity).IsInRole(WindowsBuiltInRole.Administrator), "Test must run with the administrator role disabled.");
     Require(elevation.IsElevated == false, "Filtered token must not claim administrator coverage.");
+    var filtered = await provider.CaptureAsync(token);
+    var etw = filtered.Sources.Items.Single(s => s.Source == ProcessSightingSource.EtwOwner);
+    Console.WriteLine($"ETW owners: {etw.Status}; {etw.Detail}");
+    Require(etw.Status == InspectionStatus.Available || etw.Status == InspectionStatus.AccessDenied && etw.Detail == ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.EtwOwner, 4200, false), "ETW must enumerate successfully or report the administrator requirement for Win32 4200.");
+    Console.WriteLine(etw.Status == InspectionStatus.AccessDenied ? "PASS filtered-token ETW 4200 administrator reason" : "PASS filtered-token ETW enumeration available; Win32 4200 not returned");
     Console.WriteLine("PASS filtered token reports reduced administrator coverage");
     return;
 }

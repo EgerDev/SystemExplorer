@@ -1365,6 +1365,11 @@ static class HiddenItemsTests
         Require(SuspiciousLeadRules.Evaluate(persistence).Items.Count == 3);
         Require(SuspiciousLeadRules.Evaluate(input with { Persistence = B(missing with { Status = InspectionStatus.AccessDenied }, missing with { IsReference = true }, missing with { Exists = null }) }).Items.Count == 0);
         Require(SuspiciousLeadRules.Evaluate(persistence, cap: 1).Truncated);
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.EtwOwner, 4200, false) == "Requires administrator: ETW provider-owner enumeration is denied without elevation (Win32 4200)");
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.EtwOwner, 4200, true) is null);
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.EtwOwner, 4200, null) is null);
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.Toolhelp, 4200, false) is null);
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.EtwOwner, 5, false) is null);
         var unsigned = SuspiciousLeadRules.SignatureLead(Image(@"C:\apps\chrome.exe", SignatureState.Unsigned), id)!;
         Require(unsigned.Title == "Unsigned image");
         Require(SuspiciousLeadRules.SignatureLead(Image(@"C:\x.exe", SignatureState.NotTrusted))!.Title == "Signature not trusted");

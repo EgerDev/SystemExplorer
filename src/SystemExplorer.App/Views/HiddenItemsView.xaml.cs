@@ -23,7 +23,13 @@ public sealed partial class HiddenItemsView : UserControl
         ShowSelected();
     }
     public void SetElevation(string text) => Elevation.Text = text;
-    private void HiddenSizeChanged(object sender, SizeChangedEventArgs args) => LayoutRoot.Height = Math.Max(640, args.NewSize.Height);
+    private void HiddenSizeChanged(object sender, SizeChangedEventArgs args)
+    {
+        if (InventoryCard is null || PageScroll is null || LayoutRoot.ActualHeight == 0) return;
+        double headerHeight = LayoutRoot.ActualHeight - InventoryCard.ActualHeight;
+        double height = Math.Max(360, PageScroll.ActualHeight - headerHeight);
+        if (Math.Abs(InventoryCard.Height - height) > 0.5) InventoryCard.Height = height;
+    }
     public void SetBusy(bool value)
     {
         busy = value; Selector.IsEnabled = !value; RunButton.Content = value ? "Cancel" : "Run";

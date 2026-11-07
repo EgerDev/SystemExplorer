@@ -18,6 +18,12 @@ public sealed record ProcessSighting(ProcessIdentity Identity, ProcessSightingSo
     string? ImageName = null, string? ImagePath = null, bool Exited = false, InspectionStatus Status = InspectionStatus.Available,
     uint? ExitCode = null, string? ImageDetail = null);
 public sealed record ProcessSourceStatus(ProcessSightingSource Source, InspectionStatus Status, string Detail, double ElapsedMilliseconds = 0);
+public static class ProcessSourceErrors
+{
+    public static string? AdministratorRequirement(ProcessSightingSource source, int win32Error, bool? isElevated) =>
+        source == ProcessSightingSource.EtwOwner && win32Error == 4200 && isElevated == false
+            ? "Requires administrator: ETW provider-owner enumeration is denied without elevation (Win32 4200)" : null;
+}
 public sealed record ProcessCrossViewSnapshot(DateTimeOffset CapturedAt, InspectionStatus Status, string Detail,
     bool IsElevated, BoundedItems<ProcessSourceStatus> Sources, BoundedItems<ProcessSighting> Sightings);
 public enum ProcessDiscrepancyKind { Consistent, StartedDuringScan, ExitedDuringScan, PidReused, Zombie, ProtectedDenied, StaleOwner, Unknown, Unavailable }
