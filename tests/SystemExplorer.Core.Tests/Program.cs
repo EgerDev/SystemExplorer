@@ -20,6 +20,27 @@ var tests = new (string Name, Action Run)[]
         Check(MetricFormatting.Bytes(null) == "—" && DiagnosticData.Rate(null) == "—");
         Check(MetricFormatting.Rate(double.NaN) == "—" && MetricFormatting.Rate(double.PositiveInfinity) == "—" && MetricFormatting.Rate(-1) == "—");
     }),
+    ("Chart scales round up by binary units and hold until below half", () =>
+    {
+        Check(ChartScale.Next(0, 0) == 1 && ChartScale.Next(0, 191) == 200);
+        Check(ChartScale.Next(0, 501) == 1000 && ChartScale.Next(0, 1500, true) == 2048);
+        Check(ChartScale.Next(1000, 1001, true) == 1024);
+        Check(ChartScale.Next(200, 201) == 500);
+        Check(ChartScale.Next(1000, 800) == 1000 && ChartScale.Next(1000, 500) == 1000);
+        Check(ChartScale.Next(1000, 499) == 500 && ChartScale.Next(1000, 0) == 1);
+        Check(ChartScale.Next(10240, 5120, true) == 10240 && ChartScale.Next(10240, 4096, true) == 5120);
+        Check(ChartScale.Next(0, 14, minimum: 100) == 100 && ChartScale.Next(100, 101, minimum: 100) == 200);
+    }),
+    ("Chart scales retain unavailable history and bound extreme values", () =>
+    {
+        foreach (var invalid in new[] { double.NaN, double.PositiveInfinity, -1d })
+            Check(ChartScale.Next(500, invalid) == 500 && ChartScale.Next(0, invalid) == 1);
+        foreach (var value in new[] { double.Epsilon, 1d, 1023, 1024, 1024 * 1024d, (double)ulong.MaxValue, double.MaxValue })
+        {
+            var scale = ChartScale.Next(0, value, true);
+            Check(double.IsFinite(scale) && scale >= value && scale > 0);
+        }
+    }),
     ("Keyed live rows retain identities across colliding labels, refreshes and eviction", () =>
     {
         var first = (Key: 101L, Name: "12:00:00", Value: 1);

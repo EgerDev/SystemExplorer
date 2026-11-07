@@ -5,6 +5,7 @@
     Foreground="{ThemeResource InteractionAccent}">
     <Grid>
         <Canvas x:Name="Plot" SizeChanged="PlotSizeChanged" AutomationProperties.AccessibilityView="Raw"/>
+        <TextBlock x:Name="ScaleLabel" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" IsHitTestVisible="False"/>
         <TextBlock x:Name="HistoryDescription" Style="{StaticResource Muted}" VerticalAlignment="Bottom"/>
     </Grid>
 </UserControl>
