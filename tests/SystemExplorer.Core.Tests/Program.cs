@@ -4,6 +4,23 @@ using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("CSV exports have unique headers and round-trip RAM tabs, Hidden, Storage and Trace", CsvExportTests.Run),
+    ("Trace and Storage CSV capture metadata occurs once with event-only linear growth", CsvExportTests.MetadataSize),
+    ("Filtered Trace JSON includes only referenced process lifetimes and ancestors with valid remapped indices", TraceJsonExportTests.Run),
+    ("Storage denied child folders mark completed scans partial and preserve evidence", StorageCompletenessTests.Run),
+    ("Task cross-view comparisons never infer absence from unavailable or truncated views", HiddenTaskAvailabilityTests.Run),
+    ("RAM process status distinguishes Idle and unverifiable identities from exited or reused lifetimes", () =>
+    {
+        foreach (long? creation in new long?[] { null, 0 })
+        {
+            Check(RamAttributionPresentation.ProcessStatusName(new(0, creation), RamReadingStatus.IdentityMismatch) == "Idle (no creation time)");
+            Check(RamAttributionPresentation.ProcessStatusName(new(123, creation), RamReadingStatus.IdentityMismatch) == "Unverifiable identity");
+        }
+        Check(RamAttributionPresentation.ProcessStatusName(new(123, 1), RamReadingStatus.IdentityMismatch) == "Exited / PID reused");
+        foreach (var status in Enum.GetValues<RamReadingStatus>().Where(s => s != RamReadingStatus.IdentityMismatch))
+            Check(RamAttributionPresentation.ProcessStatusName(new(123, null), status) == RamAttributionPresentation.StatusName(status));
+    }),
+    ("Activity trace Core model", ActivityTraceTests.Run),
     ("Byte and rate formatting preserve small nonzero values and exact zero", () =>
     {
         Check(MetricFormatting.Bytes(0) == "0 B" && MetricFormatting.Rate(0) == "0 B/s");
@@ -1111,7 +1128,166 @@ var tests = new (string Name, Action Run)[]
         for (var i = 0; i < 10000; i++) comparer.Compare(left, right);
         Check(GC.GetAllocatedBytesForCurrentThread() == allocated);
     })
+    ,("Storage bounded aggregation, partial results and metadata", () =>
+    {
+        var now = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        StorageEntry File(string name, long logical = 100, long allocated = 10, long id = 0, int days = 0) => new(name, false, logical, allocated, 0, 0, id, now.UtcDateTime.AddDays(-days), now.UtcDateTime);
+        StorageEntry Dir(string name, uint tag = 0, FileAttributes attrs = 0) => new(name, true, 0, 0, attrs, tag, 0, default, default);
+        var a = new StorageScanAggregator("C:/", new(DirectoryNodes: 2, HardLinkIds: 1, LargestFiles: 2, Extensions: 1, Problems: 1), true, now);
+        var sub = a.AddListing(0, "C:/", [Dir("kept"), Dir("rolled"), Dir("junction", 0xA0000003, FileAttributes.ReparsePoint), Dir("link", 0xA000000C, FileAttributes.ReparsePoint), Dir("cloud", 0x9000001A, FileAttributes.ReparsePoint), Dir("offline", 0, FileAttributes.ReparsePoint | FileAttributes.Offline), Dir("."), File("one.txt", id: 1), File("duplicate.txt", id: 1), File("two.bin", id: 2, days: 50), File("three.zz", days: 100), File("four.zz", days: 500), File("five.zz", days: 900), new("unknown", false, 100, 0, 0, 0, 0, default, default)]);
+        Check(sub.Count == 4 && sub[0].Node == 1 && sub[1].Node == 0);
+        foreach (var (node, path) in sub) a.AddListing(node, path, [File("sparse", 1000, 0)]);
+        a.AddDenied(0, "C:/private", "denied"); a.AddDenied(1, "C:/private2", "denied");
+        Check(a.Progress.Files == 10 && a.Progress.Denied == 2);
+        var r = a.Complete(StorageScanState.Cancelled, TimeSpan.FromSeconds(1), "synthetic", []);
+        Check(r.IsPartial && r.DirectoryCapReached && r.HardLinkCapReached && r.HardLinkIdsTracked == 1);
+        Check(r.HardLinkDuplicates == 1 && r.HardLinkLogicalBytes == 100 && r.HardLinkAllocatedBytes == 10);
+        Check(r.ReparseTotal == 2 && r.ReparsePoints.Count == 1 && r.ReparsePoints[0].Reason.Contains("junction"));
+        Check(r.DeniedTotal == 2 && r.DeniedPaths.Count == 1 && r.Nodes.Sum(n => n.Denied) == 2);
+        Check(r.Totals.Files == 10 && r.Totals.Directories == 4 && r.Totals.LogicalBytes == 4600 && r.Totals.AllocatedBytes == 50);
+        Check(r.Nodes[1].LogicalBytes == 1000 && r.FullPath(1) == @"C:\kept");
+        Check(r.LargestFiles.Count == 2 && r.Extensions.Count == 2 && r.Extensions.Any(e => e.Name == "(other)"));
+        Check(r.AgeBuckets.Select(b => b.Count).SequenceEqual(new long[] { 5, 1, 1, 1, 1, 1 }));
+        var threw = false; try { a.AddListing(0, "C:/", []); } catch (InvalidOperationException) { threw = true; } Check(threw);
+        Check(StorageBusTypes.Name(17) == "NVMe" && StorageBusTypes.Name(100) == "Unknown (100)");
+        Check(StorageBusTypes.Media(null, 17).Value == "SSD" && StorageBusTypes.Media(true, 11).Value == "HDD" && StorageBusTypes.Media(null, null).Display.Contains("Unavailable"));
+        Check(StorageBusTypes.Media(false, 14).Value!.Contains("Virtual disk"));
+        var empty = new StorageScanAggregator("C:/", new(), false, now).Complete(StorageScanState.Completed, TimeSpan.Zero, "empty", []);
+        Check(empty.Totals.Files == 0 && !empty.IsPartial);
+        Check(StorageFileSystems.HasStableFileIds("ntfs") && StorageFileSystems.HasStableFileIds("ReFS"));
+        Check(new string?[] { "FAT", "FAT32", "exFAT", "other", null }.All(fs => !StorageFileSystems.HasStableFileIds(fs)));
+        var reading = new StorageReading(null, "not reported");
+        var volume = new StorageVolume("C:/", "disk", "NTFS", "Fixed", 100, 25, 20, 4096, reading, reading, reading, reading, reading, null);
+        Check(volume.UsedBytes == 75 && volume.UsedFraction == 0.75);
+        Check((volume with { TotalBytes = null }).UsedBytes == null && (volume with { FreeBytes = 200 }).UsedFraction == null);
+        Check((volume with { TotalBytes = 0, FreeBytes = 0 }).UsedFraction == null);
+    }),
+    ("Storage developer artifacts, projects, catalogs and AI leads", () =>
+    {
+        var now = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var a = new StorageScanAggregator("C:/", new(), false, now);
+        StorageEntry F(string name, int days = 0) => new(name, false, 100, 10, 0, 0, 0, now.UtcDateTime.AddDays(-days), now.UtcDateTime.AddMinutes(-2));
+        StorageEntry D(string name) => new(name, true, 0, 0, 0, 0, 0, default, default);
+        int Add(int parent, string path, string name, params StorageEntry[] files)
+        {
+            var child = a.AddListing(parent, path, [D(name)]).Single();
+            a.AddListing(child.Node, child.Path, files); return child.Node;
+        }
+        var repo = Add(0, "C:/", "repo", D(".git"), F("package.json"), F("app.csproj"), F("Cargo.toml"), F("AGENTS.md"));
+        var pkg = Add(repo, "C:/repo", "pkg", F("package.json"));
+        var nm = Add(pkg, "C:/repo/pkg", "node_modules", F("data"));
+        Add(nm, "C:/repo/pkg/node_modules", "node_modules", F("nested"));
+        Add(repo, "C:/repo", "bin", F("assembly")); Add(repo, "C:/repo", "obj", F("obj")); Add(repo, "C:/repo", "target", F("target"));
+        Add(repo, "C:/repo", ".venv", F("pyvenv.cfg")); Add(repo, "C:/repo", "venv", F("notvenv"));
+        Add(0, "C:/", "bin", F("unrelated")); Add(0, "C:/", "target", F("unrelated"));
+        Add(0, "C:/", "old", F("go.mod", 500));
+        var bulk = Add(repo, "C:/repo", "bulk"); a.AddListing(bulk, "C:/repo/bulk", Enumerable.Range(0, 200).Select(i => F(i + ".cs")).ToArray());
+        Add(repo, "C:/repo", "worktrees", F(".git"));
+        var local = Add(0, "C:/", "local"); var packages = Add(local, "C:/local", "Packages"); var ubuntu = Add(packages, "C:/local/Packages", "FooCanonicalUbuntu"); Add(ubuntu, "C:/local/Packages/FooCanonicalUbuntu", "LocalState", F("disk.vhdx"));
+        var otherUbuntu = Add(packages, "C:/local/Packages", "OtherCanonicalUbuntu"); Add(otherUbuntu, "C:/local/Packages/OtherCanonicalUbuntu", "LocalState", F("disk.vhdx"));
+        var home = Add(0, "C:/", "home"); var codex = Add(home, "C:/home", ".codex", F("config")); Add(codex, "C:/home/.codex", "sessions", F("chat"));
+        Add(0, "C:/", "custom-nuget", F("package"));
+        var nuget = Add(local, "C:/local", "NuGet"); Add(nuget, "C:/local/NuGet", "v3-cache", F("http-cache"));
+        Add(0, "C:/", "temp", F("in-use"));
+        var scan = a.Complete(StorageScanState.Completed, TimeSpan.Zero, "names only", []);
+        var ctx = new DeveloperLocationContext("C:/home", "C:/local", "D:/roaming", "D:/programdata", "C:/temp", new Dictionary<string, string> { ["NUGET_PACKAGES"] = "C:/custom-nuget" });
+        var report = DeveloperBloatAnalyzer.Analyze(scan, ctx, now, TimeSpan.FromDays(90));
+        var project = report.Projects.Single(p => p.Path == @"C:\repo");
+        Check(!report.Projects.Any(p => p.Path == @"C:\repo\pkg") && project.RegenerableBytes == 60 && project.Artifacts.Count == 5);
+        Check(!report.Items.Any(i => i.Path == @"C:\bin" || i.Path == @"C:\target" || i.Path == @"C:\repo\venv"));
+        Check(report.Projects.Single(p => p.Path == @"C:\old").IsStale && !project.IsStale);
+        Check(report.Items.Where(i => i.Tool.StartsWith("WSL — ") && i.Path.EndsWith("LocalState") && i.ReclaimableBytes == null).Select(i => i.Tool).Distinct().Count() == 2);
+        Check(report.Items.Any(i => i.Tool == "NuGet packages" && i.Path == @"C:\custom-nuget"));
+        Check(report.Items.Any(i => i.Tool == "NuGet HTTP cache" && i.Path == @"C:\local\NuGet\v3-cache"));
+        Check(report.Items.Single(i => i.Tool == "User temp") is { Confidence: BloatConfidence.Medium, ReclaimableBytes: 10, Reason: "files may be in use by running programs; delete only items not in use" });
+        Check(report.NotScanned.Any(i => i.Reason == "Not scanned (outside scanned folder)") && report.AbsentCatalogEntries > 0);
+        Check(report.Items.Any(i => i.IsLead && i.Tool == "Bulk creation") && report.Items.Any(i => i.IsLead && i.Tool == "Git worktree" && i.Confidence == BloatConfidence.Medium));
+        Check(report.Items.Where(i => i.IsLead).All(i => i.Reason.StartsWith("Lead:")));
+        Check(report.CategoryTotals.Single(c => c.Category == "AI tools and models").AllocatedBytes == 20);
+        Check(report.Items.Where(i => i.Kind == "AI tool data").All(i => i.ReclaimableBytes == 0));
+        Check(DeveloperBloatAnalyzer.Analyze(new StorageScanAggregator("Z:/", new(), false).Complete(StorageScanState.Failed, TimeSpan.Zero, "failed", []), ctx, now, TimeSpan.Zero).Projects.Count == 0);
+    }),
+    ("Storage category known sums and unknown counts share global path de-duplication", () =>
+    {
+        BloatItem Item(string category, string path, long allocated, long? reclaim, bool lead = false) =>
+            new(category, "fixture", path, allocated, reclaim, null, BloatConfidence.High, "metadata", null, null, "Cache", lead);
+        BloatItem[] items = [
+            Item("Global caches", @"C:\cache", 100, 100),
+            Item("Global caches", @"C:\global-unknown", 40, null),
+            Item("Global caches", @"C:\cache\unknown", 10, null),
+            Item("Artifacts", "c:/CACHE", 100, 100),
+            Item("Artifacts", @"C:\cache\nested", 25, 25),
+            Item("Artifacts", @"C:\project\bin", 60, 60),
+            Item("Artifacts", @"C:\artifact-unknown", 20, null),
+            Item("AI", @"C:\disk", 500, null),
+            Item("AI", @"C:\disk\model", 80, 80),
+            Item("Settings", @"C:\settings", 10, 0),
+            Item("Leads", @"C:\lead", 200, null, true)
+        ];
+        var totals = DeveloperBloatAnalyzer.Summarize(items);
+        var global = totals.Single(x => x.Category == "Global caches");
+        var artifacts = totals.Single(x => x.Category == "Artifacts");
+        var ai = totals.Single(x => x.Category == "AI");
+        var settings = totals.Single(x => x.Category == "Settings");
+        Check(global is { AllocatedBytes: 140, ReclaimableBytes: 100, UnknownItems: 1 });
+        Check(artifacts is { AllocatedBytes: 80, ReclaimableBytes: 60, UnknownItems: 1 });
+        Check(ai is { AllocatedBytes: 500, ReclaimableBytes: null, UnknownItems: 1 });
+        Check(settings is { ReclaimableBytes: 0, UnknownItems: 0 } && totals.Count == 4);
+        var report = new DeveloperBloatReport(items, [], totals, [], 0);
+        Check(report.KnownReclaimableBytes == 160 && report.KnownReclaimableBytes == totals.Sum(x => x.ReclaimableBytes ?? 0) && report.UnknownItems == 3);
+        var empty = new DeveloperBloatReport([], [], DeveloperBloatAnalyzer.Summarize([]), [], 0);
+        Check(empty.CategoryTotals.Count == 0 && empty.KnownReclaimableBytes == 0 && empty.UnknownItems == 0);
+        var scan = new StorageScanAggregator(@"C:\", new(), false).Complete(StorageScanState.Completed, TimeSpan.Zero, "metadata", []);
+        using var json = System.Text.Json.JsonDocument.Parse(StorageExport.ToJson(scan, report));
+        var exported = json.RootElement.GetProperty("Bloat");
+        Check(exported.GetProperty("KnownReclaimableBytes").GetInt64() == 160 && exported.GetProperty("UnknownItems").GetInt32() == 3);
+        var exportedGlobal = exported.GetProperty("CategoryTotals").EnumerateArray().Single(x => x.GetProperty("Category").GetString() == "Global caches");
+        Check(exportedGlobal.GetProperty("ReclaimableBytes").GetInt64() == 100 && exportedGlobal.GetProperty("UnknownItems").GetInt32() == 1);
+    }),
+    ("Storage exports escape CSV cells and JSON metadata", () =>
+    {
+        var a = new StorageScanAggregator("=root,\"quoted\"\nline", new(), false);
+        foreach (var text in new[] { "=formula", "+plus", "-minus", "@function", "\ttab", "\rreturn" }) a.AddDenied(0, text, "quote\"comma,\nline");
+        var scan = a.Complete(StorageScanState.Cancelled, TimeSpan.Zero, "test", []);
+        var csv = StorageExport.ToCsv(scan);
+        Check(csv.Contains("\"'=root,\"\"quoted\"\"\nline\"") && csv.Contains("\"Partial\"") && csv.Contains("quote\"\"comma,\nline"));
+        foreach (var text in new[] { "=formula", "+plus", "-minus", "@function", "\ttab", "\rreturn" }) Check(csv.Contains("\"'" + text + "\""));
+        using var json = System.Text.Json.JsonDocument.Parse(StorageExport.ToJson(scan));
+        Check(json.RootElement.GetProperty("Scan").GetProperty("IsPartial").GetBoolean());
+        Check(json.RootElement.GetProperty("Scan").GetProperty("Root").GetString() == scan.Root);
+        var native = new StorageScanAggregator("C:/fixture", new(), false);
+        var child = native.AddListing(0, "C:/fixture", [new("folder", true, 0, 0, 0, 0, 0, default, default)]).Single();
+        native.AddListing(child.Node, child.Path, [new("package.json", false, 1, 1, 0, 0, 0, default, default)]);
+        native.AddDenied(child.Node, "C:/fixture/folder/denied", "Access denied");
+        var nativeScan = native.Complete(StorageScanState.Completed, TimeSpan.Zero, "metadata", []);
+        var nativeReport = DeveloperBloatAnalyzer.Analyze(nativeScan, new("C:/fixture", "D:/local", "D:/roaming", "D:/data", "D:/temp"), DateTimeOffset.UtcNow, TimeSpan.FromDays(90));
+        Check(child.Path == @"C:\fixture\folder" && nativeScan.Root == @"C:\fixture" && nativeScan.FullPath(child.Node) == child.Path);
+        Check(nativeScan.LargestFiles.Single().Path == @"C:\fixture\folder\package.json" && nativeScan.DeniedPaths.Single().Path == @"C:\fixture\folder\denied");
+        Check(nativeReport.Projects.Single().Path == child.Path && nativeReport.NotScanned.All(p => !p.Path.Contains('/')));
+        Check(StoragePaths.Join("//server/share", "folder/file") == @"\\server\share\folder\file");
+        Check(StoragePaths.Native("") == "" && StoragePaths.Native(@"C:\") == @"C:\");
+        var nativeCsv = StorageExport.ToCsv(nativeScan, nativeReport);
+        Check(nativeCsv.Contains(@"C:\fixture\folder\package.json") && !nativeCsv.Contains("C:/"));
+        using var nativeJson = System.Text.Json.JsonDocument.Parse(StorageExport.ToJson(nativeScan, nativeReport));
+        Check(nativeJson.RootElement.GetProperty("Bloat").GetProperty("Projects")[0].GetProperty("Path").GetString() == child.Path);
+    }),
+    ("Storage million-file bounded-memory performance sanity", () =>
+    {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var a = new StorageScanAggregator("C:/", new(LargestFiles: 10, Extensions: 10), false);
+        var entries = Enumerable.Range(0, 20).Select(i => new StorageEntry(i + ".bin", false, 100, 10, 0, 0, 0, DateTime.UnixEpoch, DateTime.UnixEpoch)).ToArray();
+        Parallel.For(0, 50_000, new ParallelOptions { MaxDegreeOfParallelism = 4 }, i =>
+        {
+            var d = a.AddListing(0, "C:/", [new(i.ToString(), true, 0, 0, 0, 0, 0, default, default)]).Single();
+            a.AddListing(d.Node, d.Path, entries);
+        });
+        var r = a.Complete(StorageScanState.Completed, timer.Elapsed, "synthetic", []);
+        Console.WriteLine($"Storage perf: 1,000,000 files / 50,000 dirs in {timer.Elapsed}; retained {r.Nodes.Count} nodes, {r.LargestFiles.Count} files");
+        Check(r.Totals.Files == 1_000_000 && r.Nodes.Count == 50_001 && r.LargestFiles.Count == 10 && r.Totals.AllocatedBytes == 10_000_000);
+        Check(timer.Elapsed < TimeSpan.FromMinutes(2));
+    })
 };
+tests = tests.Append(("Hidden item classification and conservative lead rules", (Action)HiddenItemsTests.Run)).ToArray();
 var failures = 0;
 foreach (var (name, run) in tests)
 {
@@ -1269,5 +1445,439 @@ static class AreaCDiagnosticsTests
         Require(status.Contains($"not observed since {missing.At.LocalDateTime:HH:mm:ss}"));
         Require(status.Contains("retained samples stay visible (missing is not confirmed exit)"));
         Require(ProcessHistoryStatus.Build(history with { Points = [missing, observed with { At = at.AddSeconds(2) }] }) == baseline);
+    }
+}
+
+static class RamAttributionTests
+{
+    [System.Runtime.CompilerServices.ModuleInitializer]
+    internal static void Run()
+    {
+        var tests = new (string Name, Action Run)[]
+        {
+            ("RAM working-set attributes and proportional bound", WorkingSet),
+            ("RAM reconciliation exact, overlap, missing and compression", Reconcile),
+            ("RAM pool tag string leads, protected bit and cap", Tags),
+            ("RAM PFN and memory-list x64 decoding", Physical)
+        };
+        foreach (var (name, run) in tests)
+        {
+            try { run(); Console.WriteLine($"PASS {name}"); }
+            catch (Exception ex) { throw new InvalidOperationException($"FAIL {name}: {ex.Message}", ex); }
+        }
+        Console.WriteLine($"{tests.Length}/{tests.Length} RAM attribution passed");
+    }
+
+    private static void Require(bool value) { if (!value) throw new InvalidOperationException("Assertion failed"); }
+    private static void Throws<T>(Action action) where T : Exception
+    { try { action(); } catch (T) { return; } throw new InvalidOperationException("Expected " + typeof(T).Name); }
+
+    private static void WorkingSet()
+    {
+        var result = RamAttribution.AggregateWorkingSet(new(1, 2), "test", [0x12345000, 256, 256 | 32, 256 | 64, 256 | 224], 4096, true);
+        Require(result.PagesScanned == 5 && result.PrivateResidentBytes == 4096 && result.ShareableResidentBytes == 16384);
+        Require(result.ActuallySharedBytes == 8192 && result.ShareableSoleBytes == 8192);
+        Require(Math.Abs(result.ProportionalEstimateBytes - (4096 * 3 + 2048 + 4096d / 7)) < .001);
+        Require(result.Truncated && result.Status == RamReadingStatus.Truncated && result.Detail.Contains("lower bounds") && result.Detail.Contains("saturates"));
+        var empty = RamAttribution.AggregateWorkingSet(default, "empty", [], 4096);
+        Require(empty.PagesScanned == 0 && empty.PrivateResidentBytes == 0 && empty.ProportionalEstimateBytes == 0);
+        Throws<ArgumentOutOfRangeException>(() => RamAttribution.AggregateWorkingSet(default, "", [], 0));
+        Throws<OperationCanceledException>(() => RamAttribution.AggregateWorkingSet(default, "", [0], 4096, false, new CancellationToken(true)));
+    }
+
+    private static void Reconcile()
+    {
+        ProcessSnapshot P(string name, ulong bytes) => new() { Identity = new(1, 2), Name = name, PrivateWorkingSetBytes = bytes, WorkingSetBytes = bytes };
+        var input = new RamMachineInputs(120, 100, 10, [5, 5, 0, 0, 0, 0, 0, 0], 10, 5, 5, 5, 5, 5, [P("app", 20), P("Memory Compression", 10)]);
+        var result = RamAttribution.Reconcile(input);
+        Require(result.HardwareReservedBytes == 20 && result.Categories.Sum(r => r.Bytes) == 100);
+        Require(result.Categories[0].Bytes == 20 && result.Categories[1].Bytes == 10 && result.Categories.Last().Bytes == 15);
+        var overlap = RamAttribution.Reconcile(input with { UsableBytes = 50 });
+        Require(overlap.Categories.Last().Bytes == -35 && overlap.Categories.Last().Name.StartsWith("Overlap"));
+        var missing = RamAttribution.Reconcile(input with { NonPagedPoolBytes = null });
+        Require(missing.Categories.Last().Bytes is null && missing.Categories.Last().Status == RamReadingStatus.Unavailable);
+        var empty = RamAttribution.Reconcile(input with { Processes = [] });
+        Require(empty.Categories[0].Bytes == 0 && empty.Categories[1].Bytes == 0 && empty.Categories[1].Detail.Contains("Off") && empty.Categories.Last().Bytes == 45);
+        Require(RamAttribution.Reconcile(input with { InstalledBytes = null }).Categories.Sum(c => c.Bytes) == 100);
+    }
+
+    private static void Tags()
+    {
+        const uint tag = 0x64636261;
+        Require(PoolTagDriverMatcher.Match([0, 97, 98, 99, 100, 0], new HashSet<uint> { tag }).Contains(tag));
+        Require(PoolTagDriverMatcher.Match([97, 98, 99, 228], new HashSet<uint> { tag }).Contains(tag));
+        Require(PoolTagDriverMatcher.Match([97, 98, 99, 100], new HashSet<uint> { tag | 0x80000000 }).Contains(tag | 0x80000000));
+        Require(PoolTagDriverMatcher.Match([], new HashSet<uint> { tag }).Count == 0);
+        Require(PoolTagDriverMatcher.Lead(tag, []).Detail.Contains("Unknown"));
+        var capped = PoolTagDriverMatcher.Lead(tag, Enumerable.Range(0, 12).Select(i => $"{i}.sys"));
+        Require(capped.TotalMatches == 12 && capped.CandidateFiles.Count == 8 && capped.Detail.Contains("not proof"));
+        Throws<ArgumentOutOfRangeException>(() => PoolTagDriverMatcher.Lead(tag, [], -1));
+    }
+
+    private static void Physical()
+    {
+        var bytes = new byte[24];
+        void Write(int offset, ulong value) => System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(offset), value);
+        Write(0, 8 | (2UL << 4) | 128 | 256 | (5UL << 57) | (1UL << 60)); Write(8, 123); Write(16, 456);
+        var p = PhysicalMemoryParser.ParseIdentity(bytes);
+        Require(p.Use == PhysicalPageUse.Metafile && p.List == PhysicalPageList.Standby && p.Priority == 5 && p.Cold && p.Pinned && p.NonTradeable && p.PageFrameIndex == 123 && p.FileObject == 456);
+        var accumulator = new PhysicalMemoryAccumulator(); accumulator.Add(bytes);
+        var result = accumulator.Build(RamReadingStatus.Available, "test", null);
+        Require(result.PagesScanned == 1 && result.Counts.Single().Pages == 1 && result.FileObjects.Single().PagesByList[2] == 1 && result.Detail.Contains("unavailable"));
+        for (var i = 0; i < 260; i++) { Write(16, (ulong)i); accumulator.Add(bytes); }
+        result = accumulator.Build(RamReadingStatus.Truncated, "", null);
+        Require(result.FileObjects.Count == 257 && result.FileObjects.Sum(r => (long)r.PagesByList.Sum(v => (decimal)v)) == 261);
+        var lists = new byte[176];
+        for (var i = 0; i < 22; i++) System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(lists.AsSpan(i * 8), (ulong)i);
+        var parsed = PhysicalMemoryParser.ParseMemoryLists(lists);
+        Require(parsed.Zero == 0 && parsed.Free == 1 && parsed.Modified == 2 && parsed.ModifiedNoWrite == 3 && parsed.Bad == 4 && parsed.StandbyByPriority[0] == 5 && parsed.StandbyByPriority[7] == 12 && parsed.RepurposedByPriority[7] == 20 && parsed.ModifiedPageFile == 21);
+        Require(PhysicalMemoryParser.NotAdministrator().Status == RamReadingStatus.RequiresAdministrator && PhysicalMemoryParser.NotAdministrator().PagesScanned == 0);
+        Require(new PhysicalMemoryAccumulator().Build(RamReadingStatus.Available, "", null).Counts.Count == 0);
+        Throws<ArgumentException>(() => PhysicalMemoryParser.ParseIdentity(new byte[23]));
+        Throws<ArgumentException>(() => PhysicalMemoryParser.ParseMemoryLists(new byte[175]));
+        Throws<ArgumentException>(() => accumulator.Add(new byte[25]));
+        foreach (var list in new[] { PhysicalPageList.Zero, PhysicalPageList.Free, PhysicalPageList.Bad })
+        {
+            var unused = new PhysicalMemoryAccumulator(); Write(0, 8 | ((ulong)list << 4)); unused.Add(bytes);
+            var row = unused.Build(RamReadingStatus.Available, "", null);
+            Require(row.Counts.Single().Use == PhysicalPageUse.Unused && row.Counts.Single().List == list && row.FileObjects.Count == 0);
+        }
+    }
+}
+
+static class RamPresentationTests
+{
+    [System.Runtime.CompilerServices.ModuleInitializer]
+    internal static void Run()
+    {
+        static void Require(bool value) { if (!value) throw new InvalidOperationException("RAM presentation assertion failed"); }
+        Require(RamAttributionPresentation.PoolTag(0x6c66744e) == "Ntfl" && RamAttributionPresentation.PoolTag(0x7f002041) == "A \\x00\\x7F");
+        Require(RamAttributionPresentation.UseName(PhysicalPageUse.Unknown12) == "Use 12 (undocumented)");
+        Require(RamAttributionPresentation.StatusName(RamReadingStatus.IdentityMismatch) == "Exited / PID reused");
+        Require(RamAttributionPresentation.StatusName(RamReadingStatus.RequiresAdministrator) == "Requires administrator");
+        Require(RamAttributionPresentation.StatusName(RamReadingStatus.TimedOut) == "Timed out");
+        Require(RamAttributionPresentation.StatusName(RamReadingStatus.Available) == "Available");
+        var paletteNames = new[] { "Process private working sets (excluding compression)", "Compression store", "System cache resident", "Paged pool resident", "Nonpaged pool", "Driver images resident", "Kernel code resident", "Modified (including no-write)", "Free / zero", "Other in-use" }
+            .Concat(Enumerable.Range(0, 8).Select(i => $"Standby priority {i}"));
+        Require(paletteNames.Select(RamAttributionPresentation.CategoryColor).Distinct().Count() == 18);
+        Require(RamAttributionPresentation.CategoryColor("") == RamAttributionPresentation.CategoryColor("Other in-use"));
+        var category = new RamCategory("a", 25, "source", RamReadingStatus.Available, "", RamCategoryKind.Measured);
+        var breakdown = new RamBreakdown(null, 100, null, [category, category with { Name = "b", Bytes = 75 }]);
+        Require(RamAttributionPresentation.BarSegments(breakdown).Select(s => s.Fraction).SequenceEqual(new[] { .25, .75 }));
+        Require(RamAttributionPresentation.BarSegments(breakdown with { Categories = [category with { Bytes = -1 }] }).Count == 0);
+        Require(RamAttributionPresentation.BarSegments(breakdown with { Categories = [category with { Bytes = null }] }).Count == 0);
+        Require(RamAttributionPresentation.BarSegments(breakdown with { UsableBytes = 0, Categories = [] }).Count == 0);
+        var document = new RamExportDocument(DateTimeOffset.UnixEpoch, "Overview", [new("machine", "Available", "a,\"b\"\r\nc", new Dictionary<string, string> { ["Size"] = "25" })]);
+        var csv = RamAttributionPresentation.Csv(document);
+        Require(csv.Contains("\"a,\"\"b\"\"\r\nc\"") && csv.Contains("1970-01-01") && csv.Contains("\"Size\""));
+        using var json = System.Text.Json.JsonDocument.Parse(RamAttributionPresentation.Json(document));
+        Require(json.RootElement.GetProperty("Tab").GetString() == "Overview" && json.RootElement.GetProperty("Rows")[0].GetProperty("Values").GetProperty("Size").GetString() == "25");
+        Require(RamAttributionPresentation.Csv(document with { Rows = [] }).Split("\r\n").Length == 2);
+        Console.WriteLine("PASS RAM presentation: unused/unknown labels, pool text, bar proportions, CSV escaping and JSON shape");
+    }
+}
+
+static class HiddenItemsTests
+{
+    internal static void Run()
+    {
+        void Require(bool condition) { if (!condition) throw new InvalidOperationException("Hidden items assertion failed"); }
+        var at = DateTimeOffset.UnixEpoch;
+        var id = new ProcessIdentity(42, 100);
+        BoundedItems<T> B<T>(params T[] rows) => new(rows, 100);
+        ProcessSighting S(ProcessSightingSource source, bool exited = false, InspectionStatus status = InspectionStatus.Available, long time = 100) => new(new(42, time), source, Exited: exited, Status: status);
+        ProcessCrossViewSnapshot Snap(params ProcessSighting[] rows) => new(at, InspectionStatus.Available, "", false,
+            B(new ProcessSourceStatus(ProcessSightingSource.Toolhelp, InspectionStatus.Available, ""), new(ProcessSightingSource.NtSystemInformation, InspectionStatus.Available, "")), B(rows));
+        ProcessDiscrepancyKind Classify(ProcessCrossViewSnapshot a, ProcessCrossViewSnapshot b) => ProcessCrossView.Compare(a, b).Items.Single().Classification;
+        var tool = S(ProcessSightingSource.Toolhelp);
+        var nt = S(ProcessSightingSource.NtSystemInformation);
+        var probe = S(ProcessSightingSource.PidProbe);
+        var owner = S(ProcessSightingSource.TcpOwner);
+        Require(Classify(Snap(tool, nt), Snap(tool, nt)) == ProcessDiscrepancyKind.Consistent);
+        Require(Classify(Snap(probe), Snap(tool, nt, probe)) == ProcessDiscrepancyKind.StartedDuringScan);
+        Require(Classify(Snap(probe), Snap(tool, probe)) == ProcessDiscrepancyKind.StartedDuringScan);
+        Require(Classify(Snap(nt), Snap(S(ProcessSightingSource.PidProbe, status: InspectionStatus.Exited))) == ProcessDiscrepancyKind.ExitedDuringScan);
+        Require(Classify(Snap(owner), Snap(S(ProcessSightingSource.PidProbe, status: InspectionStatus.Exited))) == ProcessDiscrepancyKind.StaleOwner);
+        Require(Classify(Snap(probe), Snap(S(ProcessSightingSource.NtGetNextProcess, exited: true))) == ProcessDiscrepancyKind.Zombie);
+        Require(Classify(Snap(probe), Snap(S(ProcessSightingSource.PidProbe, status: InspectionStatus.AccessDenied))) == ProcessDiscrepancyKind.ProtectedDenied);
+        Require(Classify(Snap(probe), Snap(probe)) == ProcessDiscrepancyKind.Unknown);
+        Require(Classify(Snap(probe), Snap()) == ProcessDiscrepancyKind.Unavailable);
+        Require(Classify(Snap(tool, nt), Snap(S(ProcessSightingSource.Toolhelp, time: 200))) == ProcessDiscrepancyKind.PidReused);
+        Require(Classify(Snap(tool, S(ProcessSightingSource.NtSystemInformation, time: 200)), Snap()) == ProcessDiscrepancyKind.PidReused);
+        Require(ProcessCrossView.Compare(Snap(), Snap()).Items.Count == 0);
+        Require(ProcessCrossView.ToLead(ProcessCrossView.Compare(Snap(probe), Snap(probe)).Items.Single())?.Severity == LeadSeverity.High);
+        Require(ProcessCrossView.ToLead(ProcessCrossView.Compare(Snap(tool, nt), Snap(tool, nt)).Items.Single()) is null);
+        Require(ProcessCrossView.Compare(Snap(probe), Snap(probe), 0).Truncated);
+        var denied = Snap(probe) with { Sources = B(new ProcessSourceStatus(ProcessSightingSource.Toolhelp, InspectionStatus.AccessDenied, "denied")) };
+        Require(Classify(denied, Snap(probe)) == ProcessDiscrepancyKind.Unavailable);
+        var services = new ServiceCrossViewSnapshot(at, InspectionStatus.Available, InspectionStatus.Available, "", 1,
+            B(new ServiceRegistryEntry("deleted", 16, 2, true, null), new("ignored", null, null, false, null)),
+            B(new ServiceSnapshot { Name = "user_ab123", DisplayName = "", State = "Stopped" }));
+        var serviceDiff = ConfigurationCrossView.CompareServices(services);
+        Require(serviceDiff.Items.Count == 2 && serviceDiff.Items.Any(d => d.Reason.Contains("DeleteFlag")));
+        Require(ConfigurationCrossView.CompareServices(services with { RegistryStatus = InspectionStatus.AccessDenied, ScmStatus = InspectionStatus.AccessDenied }).Items.Count == 0);
+        Require(ConfigurationCrossView.CompareServices(services, 1).Truncated);
+        Require(ConfigurationCrossView.CompareServices(services with { Registry = B<ServiceRegistryEntry>(), Scm = B<ServiceSnapshot>() }).Items.Count == 0);
+        var tasks = new TaskCrossViewSnapshot(at, InspectionStatus.Available, InspectionStatus.Available, InspectionStatus.Available,
+            InspectionStatus.Available, "", true, B(new ScheduledTaskObservation(@"\com", "", "", null, "", "", InspectionStatus.Available, "")),
+            B(new TaskTreeEntry(@"\tree", "id", false)), B<TaskCacheEntry>(), B(@"\file"));
+        var taskDiff = ConfigurationCrossView.CompareTasks(tasks);
+        foreach (var kind in new[] { ConfigurationDiscrepancyKind.MissingSecurityDescriptor, ConfigurationDiscrepancyKind.TreeIdNotInTasks,
+            ConfigurationDiscrepancyKind.RegistryNotCom, ConfigurationDiscrepancyKind.ComNotRegistry, ConfigurationDiscrepancyKind.FileNotRegistry, ConfigurationDiscrepancyKind.RegistryNotFile })
+            Require(taskDiff.Items.Any(d => d.Kind == kind));
+        var matched = tasks with { Com = B(new ScheduledTaskObservation(@"\TREE", "", "", null, "", "", InspectionStatus.Available, "")),
+            Tree = B(new TaskTreeEntry(@"\tree", "id", true)), Cache = B(new TaskCacheEntry("ID", @"\tree")), Files = B("tree") };
+        Require(ConfigurationCrossView.CompareTasks(matched).Items.Count == 0);
+        Require(ConfigurationCrossView.CompareTasks(tasks with { FilesStatus = InspectionStatus.AccessDenied }).Items.All(d => d.Kind != ConfigurationDiscrepancyKind.RegistryNotFile));
+        Require(ConfigurationCrossView.CompareTasks(tasks, 0).Truncated);
+        Require(ConfigurationCrossView.CompareTasks(tasks with { Com = B<ScheduledTaskObservation>(), Tree = B<TaskTreeEntry>(), Cache = B<TaskCacheEntry>(), Files = B<string>() }).Items.Count == 0);
+        var paths = new[] { (@"C:\Users\a\AppData\Local\Temp\x.exe", UnusualLocation.Temp), (@"C:\Users\a\AppData\Roaming\x.exe", UnusualLocation.AppData),
+            (@"C:\Users\a\Downloads\x.exe", UnusualLocation.Downloads), (@"C:\ProgramData\x.exe", UnusualLocation.ProgramDataRoot),
+            (@"C:\$Recycle.Bin\x.exe", UnusualLocation.RecycleBin), (@"C:\x.exe:payload", UnusualLocation.AlternateDataStream), (@"C:\Users\Public\x.exe", UnusualLocation.Public) };
+        foreach (var (path, expected) in paths) Require(SuspiciousLeadRules.ClassifyLocation(path) == expected);
+        foreach (var path in new string?[] { null, "", @"C:\ProgramData\Vendor\x.exe", @"C:\Windows\System32\svchost.exe", @"C:\Users\Publicity\x.exe", @"C:\Users\Public\..\x.exe" }) Require(SuspiciousLeadRules.ClassifyLocation(path) == UnusualLocation.None);
+        Require(SuspiciousLeadRules.ClassifyLocation(@"D:\Scratch\x.exe", @"D:\Scratch") == UnusualLocation.Temp);
+        foreach (var raw in new[] { "", "relative.exe", @"%windir%\x.exe", @"C:\Program Files\x.exe -arg", "\"C:\\x.exe", "\"C:\\x.exe\"junk", @"C:\x.exe:ads", @"C:\x.exe,C:\y.exe", @"C:\Windows\System32\rundll32.exe C:\x.dll,Entry", @"C:\a\..\x.exe", "C:\\x.exe\nsecret" })
+            Require(SuspiciousLeadRules.ParsePersistenceTarget(raw).Path is null);
+        Require(SuspiciousLeadRules.ParsePersistenceTarget("\"C:\\Program Files\\x.exe\" -secret").Path == @"C:\Program Files\x.exe");
+        Require(SuspiciousLeadRules.ParsePersistenceTarget(@"C:\x.exe -args").Path == @"C:\x.exe");
+        Require(SuspiciousLeadRules.ParsePersistenceTarget(@"\\server\share\x.dll").Path == @"\\server\share\x.dll");
+        ImageProvenance Image(string path, SignatureState signature) => new(path, InspectionStatus.Available, "", null, null, null, null, null, null, null, signature, null, null, null, at);
+        foreach (var state in Enum.GetValues<SignatureState>()) Require((SuspiciousLeadRules.SignatureLead(Image(@"C:\x.exe", state)) is not null) == (state is SignatureState.Unsigned or SignatureState.NotTrusted));
+        Require(SuspiciousLeadRules.SignatureLead(Image(@"C:\x.exe", SignatureState.Unsigned) with { Status = InspectionStatus.AccessDenied }) is null);
+        var process = new ProcessSnapshot { Identity = id, Name = "svchost.exe", ExecutablePath = @"C:\Windows\System32\svchost.exe", ParentPid = 7 };
+        var parent = new ProcessSnapshot { Identity = new(7, 50), Name = "wrong.exe" };
+        var input = new LeadSweepInput(B(new ProcessLeadInput(process, parent, false, false, null)), B<ConnectionSnapshot>(), B<PersistenceTarget>(), true);
+        Require(SuspiciousLeadRules.Evaluate(input).Items.Count == 0);
+        Require(SuspiciousLeadRules.Evaluate(input with { Processes = B<ProcessLeadInput>() }).Items.Count == 0);
+        var verified = input with { Processes = B(new ProcessLeadInput(process, parent, true, null, null)) };
+        Require(SuspiciousLeadRules.Evaluate(verified).Items.Single().Category == LeadCategory.ParentMismatch);
+        foreach (var p in new[] { parent with { Identity = new(7, 150) }, parent with { Identity = new(7, null) }, parent with { Name = "services.exe" } })
+            Require(SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(process, p, true, null, null)) }).Items.Count == 0);
+        var unusual = process with { ExecutablePath = @"C:\Users\a\Downloads\svchost.exe" };
+        var leads = SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(unusual, null, false, false, Image(unusual.ExecutablePath, SignatureState.Unsigned))) });
+        foreach (var category in new[] { LeadCategory.UnusualLocation, LeadCategory.NoVisibleWindow, LeadCategory.Masquerading, LeadCategory.Signature }) Require(leads.Items.Any(l => l.Category == category));
+        Require(leads.Items.All(l => !string.IsNullOrWhiteSpace(l.BenignNote) && l.ProcessIdentity == id));
+        Require(SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(process with { ExecutablePath = @"C:\Apps\scvhost.exe" }, null, false, null, null)) }).Items.Single().Severity == LeadSeverity.High);
+        SuspiciousLead[] Masquerades(string path, SignatureState state, string? signer = null, string? dev = null, bool verifiedParent = false) =>
+            SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(process with { ExecutablePath = path }, parent, verifiedParent, null,
+                Image(path, state) with { SignerSubject = signer }, dev)) }, tempDirectory: @"C:\Temp").Items
+                .Where(l => l.Category is LeadCategory.Masquerading or LeadCategory.ParentMismatch).ToArray();
+        var exactTemp = Masquerades(@"C:\Temp\svchost.exe", SignatureState.Unsigned).Single();
+        Require(exactTemp.Severity == LeadSeverity.High && exactTemp.Evidence.Contains("Name match: exact of svchost.exe") && exactTemp.Evidence.Contains("user-writable") && exactTemp.Evidence.Contains("Signer: unsigned") && exactTemp.Evidence.Contains("Parent: unverified"));
+        foreach (var name in new[] { "svch0st", "lsasss", "scvhost", "svchоst", "ѕνсһοѕт", "svchst", "servicex", "ｗｉｎｌｏｇｏｎ" })
+        {
+            var near = Masquerades(@"C:\Temp\" + name + ".exe", SignatureState.Unsigned).Single();
+            Require(near.Severity == LeadSeverity.High && near.Evidence.Contains("Name match: lookalike"));
+        }
+        foreach (var name in new[] { "lsass", "csrss", "smss", "wininit", "services" })
+        {
+            var badParent = Masquerades(@"C:\Windows\System32\" + name + ".exe", SignatureState.CatalogTrusted, "Microsoft Windows", verifiedParent: true).Single();
+            Require(badParent.Category == LeadCategory.ParentMismatch && badParent.Severity == LeadSeverity.High && badParent.Evidence.Contains("Parent: verified unexpected"));
+        }
+        var copied = Masquerades(@"C:\Temp\svchost.exe", SignatureState.CatalogTrusted, "Microsoft Windows Publisher").Single();
+        Require(copied.Severity == LeadSeverity.Medium && copied.Evidence.Contains("Signer: Microsoft"));
+        var devLead = Masquerades(@"C:\src\project\bin\svchost.exe", SignatureState.Unsigned, dev: @"Build output directory: bin; Project marker .git in C:\src\project").Single();
+        Require(devLead.Severity == LeadSeverity.Medium && devLead.Evidence.Contains("Dev context:") && devLead.Evidence.Contains(".git"));
+        Require(Masquerades(@"C:\src\bin\svchost.exe", SignatureState.Unsigned).Single().Severity == LeadSeverity.Medium);
+        foreach (var folder in new[] { "WinSxS", "servicing", "Temp" })
+        {
+            var installed = Masquerades(@"C:\Windows\" + folder + @"\component\svchost.exe", SignatureState.EmbeddedTrusted, "Microsoft Corporation").Single();
+            Require(installed.Severity == LeadSeverity.Low && installed.Evidence.Contains("expected-but-unusual Microsoft location"));
+        }
+        Require(Masquerades(@"C:\Temp\svchost.exe", SignatureState.EmbeddedTrusted, "Other Publisher").Single().Severity == LeadSeverity.High);
+        foreach (var name in new[] { "svchost", "svch0st" })
+        {
+            foreach (var state in new[] { SignatureState.EmbeddedTrusted, SignatureState.CatalogTrusted })
+            {
+                var developer = Masquerades(@"C:\src\project\bin\" + name + ".exe", state, "Other Publisher").Single();
+                Require(developer.Severity == LeadSeverity.Medium && developer.Evidence.Contains("Signer: Other Publisher") && developer.Evidence.Contains("Dev context: Build output directory: bin") && developer.Evidence.Contains("locally trusted"));
+                var outside = Masquerades(@"C:\Temp\" + name + ".exe", state, "Other Publisher").Single();
+                Require(outside.Severity == LeadSeverity.High && outside.Evidence.Contains("Signer: Other Publisher"));
+            }
+            foreach (var (state, label) in new[] { (SignatureState.Unsigned, "Unsigned"), (SignatureState.NotTrusted, "Not trusted"), (SignatureState.NotChecked, "Not checked"), (SignatureState.Unreadable, "Unreadable") })
+            {
+                var developer = Masquerades(@"C:\src\project\bin\" + name + ".exe", state, "Other Publisher").Single();
+                Require(developer.Severity == LeadSeverity.Medium && developer.Evidence.Contains("Dev context:") && developer.Evidence.Contains($"Signature state: {label}; treated as unsigned for tiering"));
+                var outside = Masquerades(@"C:\Temp\" + name + ".exe", state, "Other Publisher").Single();
+                Require(outside.Severity == LeadSeverity.High && outside.Evidence.Contains($"Signature state: {label}; treated as unsigned for tiering"));
+            }
+        }
+        var unknownSigner = Masquerades(@"C:\Temp\svchost.exe", SignatureState.EmbeddedTrusted).Single();
+        Require(unknownSigner.Severity == LeadSeverity.High && unknownSigner.Evidence.Contains("signer unknown; treated as not Microsoft-signed"));
+        Require(Masquerades(@"C:\Temp\svchost.exe", SignatureState.NotTrusted, "Microsoft Corporation").Single().Severity == LeadSeverity.High);
+        Require(Masquerades(@"C:\Windows\System32\svchost.exe", SignatureState.CatalogTrusted, "Microsoft Windows").Length == 0);
+        Require(Masquerades(@"C:\Windows\explorer.exe", SignatureState.EmbeddedTrusted, "Microsoft Windows").Length == 0);
+        Require(Masquerades(@"C:\Apps\ordinary.exe", SignatureState.Unsigned).Length == 0);
+        Require(Masquerades(@"C:\Apps\lsm1.exe", SignatureState.Unsigned).Length == 0);
+        Require(Masquerades(@"C:\Windows\SysWOW64\svchost.exe", SignatureState.Unsigned).Length == 0);
+        Require(Masquerades(@"C:\Windows\System32\lsass.exe", SignatureState.CatalogTrusted, "Microsoft Windows").Length == 0);
+        var expectedParentLead = SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(process with { ExecutablePath = @"C:\Temp\svchost.exe" }, parent with { Name = "services.exe" }, true, null, null)) }).Items.Single(l => l.Category == LeadCategory.Masquerading);
+        Require(expectedParentLead.Evidence.Contains("Parent: verified expected"));
+        Require(SuspiciousLeadRules.DeveloperPathContext(@"C:\tools\Docker\svchost.exe") is not null);
+        Require(SuspiciousLeadRules.DeveloperPathContext(@"C:\binary\svchost.exe") is null);
+        var endpoint = new ConnectionSnapshot { Protocol = "TCP", LocalAddress = "0.0.0.0", LocalPort = 12, OwningPid = 999, State = "Listen" };
+        Require(SuspiciousLeadRules.Evaluate(input with { Endpoints = B(endpoint) }).Items.Single().Category == LeadCategory.EndpointOwner);
+        Require(SuspiciousLeadRules.Evaluate(input with { Endpoints = B(endpoint with { OwningPid = 42, OwnerIdentity = id }) }).Items.Count == 0);
+        Require(SuspiciousLeadRules.Evaluate(input with { Endpoints = B(endpoint with { State = "Established" }) }).Items.Count == 0);
+        Require(SuspiciousLeadRules.Evaluate(input with { Endpoints = B(endpoint with { Protocol = "UDP", State = null }) }).Items.Count == 1);
+        var missing = new PersistenceTarget("entry", @"C:\missing.exe", InspectionStatus.Available, false, null);
+        var persistence = input with { Persistence = B(missing, missing, missing with { Name = "unsigned", Exists = true, Provenance = Image(missing.ParsedPath!, SignatureState.Unsigned) }, missing with { Name = "unparseable", ParsedPath = null }) };
+        Require(SuspiciousLeadRules.Evaluate(persistence).Items.Count == 3);
+        Require(SuspiciousLeadRules.Evaluate(input with { Persistence = B(missing with { Status = InspectionStatus.AccessDenied }, missing with { IsReference = true }, missing with { Exists = null }) }).Items.Count == 0);
+        Require(SuspiciousLeadRules.Evaluate(persistence, cap: 1).Truncated);
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.EtwOwner, 4200, false) == "Requires administrator: ETW provider-owner enumeration is denied without elevation (Win32 4200)");
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.EtwOwner, 4200, true) is null);
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.EtwOwner, 4200, null) is null);
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.Toolhelp, 4200, false) is null);
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.EtwOwner, 5, false) is null);
+        var unsigned = SuspiciousLeadRules.SignatureLead(Image(@"C:\apps\chrome.exe", SignatureState.Unsigned), id)!;
+        Require(unsigned.Title == "Unsigned image");
+        Require(SuspiciousLeadRules.SignatureLead(Image(@"C:\x.exe", SignatureState.NotTrusted))!.Title == "Signature not trusted");
+        var otherIdentity = new ProcessIdentity(81, 200);
+        var grouped = SuspiciousLeadRules.Aggregate(B(unsigned, unsigned with { ProcessIdentity = otherIdentity, Path = @"c:\APPS\chrome.exe" }), new HashSet<ProcessIdentity> { otherIdentity }, 1);
+        Require(grouped.Items.Count == 1 && grouped.Items[0].ProcessIdentity == otherIdentity);
+        Require(grouped.Items[0].Evidence.Contains("2 running instances") && grouped.Items[0].Evidence.Contains("remaining PIDs omitted"));
+        Require(SuspiciousLeadRules.Aggregate(B(unsigned), new HashSet<ProcessIdentity>()).Items[0].ProcessIdentity is null);
+        Require(SuspiciousLeadRules.Aggregate(B<SuspiciousLead>(), new HashSet<ProcessIdentity>()).Items.Count == 0);
+        Require(SuspiciousLeadRules.Aggregate(new BoundedItems<SuspiciousLead>([unsigned], 1, true), new HashSet<ProcessIdentity>()).Truncated);
+        var coverage = new SuspiciousLead(LeadCategory.Persistence, LeadSeverity.Info, "Persistence target unavailable", "Cannot parse", "entry A", "Indirect launcher");
+        var coverageRows = SuspiciousLeadRules.Aggregate(B(coverage, coverage with { Evidence = "entry B" }), new HashSet<ProcessIdentity>());
+        Require(coverageRows.Items.Count == 1 && coverageRows.Items[0].Evidence.Contains("2 configuration observations"));
+        bool invalidDetailCap = false;
+        try { SuspiciousLeadRules.Aggregate(B(unsigned), new HashSet<ProcessIdentity>(), 0); } catch (ArgumentOutOfRangeException) { invalidDetailCap = true; }
+        Require(invalidDetailCap);
+        Require(new BoundedItems<int>([1, 2], 1).Items.SequenceEqual([1]) && new BoundedItems<int>([], 0).Items.Count == 0);
+        Require(new BoundedItems<int>([], 2, true).Truncated);
+        Require(new AdsObservation("x", ":Zone.Identifier:$DATA", 10).Severity == LeadSeverity.Info);
+        Require(new AdsObservation("x", ":payload:$DATA", 10).Severity == LeadSeverity.Low);
+        using var cancel = new CancellationTokenSource();
+        cancel.Cancel();
+        bool cancelled = false;
+        try { SuspiciousLeadRules.Evaluate(input, cancellationToken: cancel.Token); } catch (OperationCanceledException) { cancelled = true; }
+        Require(cancelled);
+    }
+}
+
+static class ActivityTraceTests
+{
+    private static readonly DateTimeOffset At = DateTimeOffset.UtcNow;
+    private static void Require(bool condition) { if (!condition) throw new InvalidOperationException("Activity trace assertion failed"); }
+    internal static void Run()
+    {
+        var tests = new (string Name, Action Run)[]
+        {
+            ("clamping, ring overflow and bounded intern pool", Bounds),
+            ("PID reuse, seeded parents, tree and descendants", Processes),
+            ("category, text, time and process filtering; 500k under 1s", Filtering),
+            ("bounded summaries and Partial diagnostics", Summaries),
+            ("RFC4180 CSV formula guard and streaming JSON metadata", Exports),
+            ("live tail, exclusion, immutable final and empty/error cases", Lifecycle)
+        };
+        foreach (var (name, run) in tests) { run(); Console.WriteLine($"PASS Activity trace {name}"); }
+    }
+    private static TraceRecorderState State(int processCap = 16384, int stringCap = 100000) => new(new(ExcludeSelf: false), At, processCap: processCap, stringCap: stringCap);
+    private static void Bounds()
+    {
+        Require(new TraceOptions().Duration == TimeSpan.FromMinutes(2) && new TraceOptions().EventCap == 200000);
+        var low = new TraceOptions(TraceCategories.All, TimeSpan.MinValue, -1);
+        var high = new TraceOptions((TraceCategories)127, TimeSpan.MaxValue, int.MaxValue);
+        Require(low.Duration.TotalSeconds == 5 && low.EventCap == 10000 && low.ExcludeSelf);
+        Require(high.Duration.TotalMinutes == 10 && high.EventCap == 500000 && high.Categories == TraceCategories.All);
+        var ring = new TraceRingBuffer(2);
+        for (int i = 1; i <= 4; i++) ring.Add(new(i, At.UtcTicks, 1, 0, -1, TraceOperation.FileRead));
+        Require(ring.Dropped == 2 && ring.Snapshot().Select(e => e.Sequence).SequenceEqual(new long[] { 3, 4 }));
+        Require(ring.Snapshot(1)[0].Sequence == 4 && ring.Snapshot(0).Length == 0);
+        var pool = new TraceStringPool(1); var name = new string('x', 3);
+        Require(ReferenceEquals(pool.Intern(name), pool.Intern(new string('x', 3))));
+        var other = new string('y', 3); Require(ReferenceEquals(other, pool.Intern(other)) && pool.Count == 1 && pool.Capped && pool.Intern(null) is null);
+    }
+    private static void Processes()
+    {
+        var state = State();
+        state.Seed([new(2, 1, 200, "child"), new(1, 0, 100, "parent"), new(3, 4, 300, "orphan"), new(4, 0, 400, "too new")]);
+        state.Record(At, 2, 0, TraceOperation.FileRead);
+        state.Record(At, 2, 0, TraceOperation.ProcessStop, exitCode: 7);
+        state.Record(At, 2, 0, TraceOperation.FileRead);
+        state.Record(At, 2, 0, TraceOperation.ProcessStart, processStart: new(2, 1, 500, "replacement"));
+        state.RecordThread(2, true); state.RecordThread(2, false);
+        state.Record(At, 2, 0, TraceOperation.FileWrite);
+        var r = state.Complete(At);
+        Require(r.Processes[0].ParentIndex == 1 && r.Processes[0].Seeded && r.Processes[0].StartUtc is null);
+        Require(r.Processes[2].ParentIndex == -1 && r.Processes[0].ExitCode == 7);
+        Require(r.Events[0].ProcessIndex == 0 && r.Events[2].ProcessIndex == 0 && r.Events[^1].ProcessIndex == 4);
+        Require(r.Processes[4].ThreadsStarted == 1 && r.Processes[4].ThreadsStopped == 1);
+        Require(TraceTree.Descendants(r.Processes, 1).SetEquals(new[] { 0, 1, 4 }));
+        Require(TraceTree.Build(r.Processes).Single(row => row.Process.Index == 0).Depth == 1);
+        var capped = State(processCap: 1); capped.Seed([new(1, 0, 1, "one"), new(1, 0, 2, "two")]);
+        capped.Record(At, 1, 0, TraceOperation.FileRead);
+        var c = capped.Complete(At); Require(c.ProcessTableTruncated && c.Status == TraceStatus.Partial && c.Events[0].ProcessIndex == -1);
+    }
+    private static void Filtering()
+    {
+        var s = State(); s.Seed([new(1, 0, 1, "Alpha"), new(2, 1, 2, "Beta")]);
+        s.Record(At, 1, 1, TraceOperation.FileRead, "C:\\target", detail: "detail");
+        s.Record(At.AddSeconds(1), 2, 1, TraceOperation.NetSend, "endpoint");
+        var r = s.Complete(At);
+        Require(new TraceFilter(Categories: TraceCategories.File, Text: "TARGET").Match(r.Events, r.Processes).SequenceEqual(new[] { 0 }));
+        Require(new TraceFilter(Text: "ALPHA").Match(r.Events, r.Processes).Length == 1);
+        Require(new TraceFilter(Text: "detail").Match(r.Events, r.Processes).Length == 1);
+        Require(new TraceFilter(Text: "2", FromUtc: At.AddSeconds(1), ToUtc: At.AddSeconds(1)).Match(r.Events, r.Processes).SequenceEqual(new[] { 1 }));
+        Require(new TraceFilter(0).Match(r.Events, r.Processes).Length == 2 && new TraceFilter(0, false).Match(r.Events, r.Processes).Length == 1);
+        Require(new TraceFilter(Text: "absent").Match(r.Events, r.Processes).Length == 0);
+        var events = Enumerable.Range(0, 500000).Select(i => new TraceEvent(i, At.UtcTicks, 1, 1, 0, TraceOperation.FileRead, "C:\\target")).ToArray();
+        var filter = new TraceFilter(0, true, TraceCategories.File, "target", At, At);
+        filter.Match(r.Events, r.Processes);
+        var watch = System.Diagnostics.Stopwatch.StartNew(); var found = filter.Match(events, r.Processes); watch.Stop();
+        Require(found.Length == 500000 && watch.Elapsed < TimeSpan.FromSeconds(1));
+        Console.WriteLine($"Activity trace 500k filter: {watch.Elapsed.TotalMilliseconds:F1} ms");
+    }
+    private static void Summaries()
+    {
+        var s = State(); s.Seed([new(1, 0, 1, "one")]);
+        for (int i = 0; i < 1025; i++) s.Record(At, 1, 1, TraceOperation.FileRead, "file" + i, 2);
+        s.Record(At, 1, 1, TraceOperation.FileWrite, "file0", 3);
+        s.Record(At, 1, 1, TraceOperation.NetSend, "endpoint", 4);
+        s.Record(At, 1, 1, TraceOperation.NetReceive, "endpoint", 5);
+        s.Record(At, 1, 1, TraceOperation.RegistryOpen, "key"); s.Record(At, 1, 1, TraceOperation.ImageLoad);
+        var r = s.Complete(At); var summary = TraceProcessSummary.Build(r, 0);
+        Require(summary.Files.DistinctRetained == 1024 && summary.Files.UntrackedObservations == 1 && summary.Capped && summary.Files.Top[0].Count == 2);
+        Require(summary.BytesRead == 2050 && summary.BytesWritten == 3 && summary.BytesSent == 4 && summary.BytesReceived == 5 && summary.ImagesLoaded == 1);
+        Require(summary.RegistryKeys.DistinctRetained == 1 && summary.Endpoints.DistinctRetained == 1 && r.CapsHit && r.Status == TraceStatus.Partial);
+        Require(TraceProcessSummary.Build(r, 999).Files.DistinctRetained == 0);
+        Require(State().Complete(At, eventsLost: 1).Status == TraceStatus.Partial);
+        var unresolved = State(); unresolved.ReportDiagnostics(unresolvedNames: 5);
+        var unresolvedResult = unresolved.Complete(At);
+        Require(unresolvedResult.Status == TraceStatus.Completed && unresolvedResult.UnresolvedNames == 5 && unresolvedResult.Detail.Contains("5 events with unresolved names"));
+        var strings = State(stringCap: 0); strings.Record(At, 1, 0, TraceOperation.FileRead, "x"); Require(strings.Complete(At).Status == TraceStatus.Partial);
+        var overflow = State(); for (int i = 0; i < 200001; i++) overflow.Record(At, 1, 0, TraceOperation.FileRead);
+        var o = overflow.Complete(At); Require(o.BufferDropped == 1 && o.Status == TraceStatus.Partial && o.Events[0].Sequence == 2);
+    }
+    private static void Exports()
+    {
+        var s = State();
+        foreach (var text in new[] { "=formula", "+formula", "-formula", "@formula", "\tformula", "\rformula", "comma,quote\"\r\nline" }) s.Record(At, 1, 1, TraceOperation.FileRead, text, detail: "detail");
+        var r = s.Complete(At, eventsLost: 2); using var csv = new StringWriter(); TraceExport.WriteCsv(csv, r);
+        var value = csv.ToString();
+        Require(value.Contains("'=formula") && value.Contains("'+formula") && value.Contains("'-formula") && value.Contains("'@formula") && value.Contains("'\tformula") && value.Contains("'\rformula"));
+        Require(value.Contains("\"comma,quote\"\"\r\nline\"") && value.Contains("Sequence,TimeUtc,RelativeMs,Category,Operation,PID,TID,Process,ParentPID,Path,Bytes,Detail\r\n"));
+        using var stream = new MemoryStream(); TraceExport.WriteJson(stream, r, new(Text: "=formula")); stream.Position = 0;
+        using var json = System.Text.Json.JsonDocument.Parse(stream); var root = json.RootElement;
+        Require(root.GetProperty("status").GetString() == "Partial" && root.GetProperty("eventsLost").GetInt64() == 2 && root.GetProperty("bufferDropped").GetInt64() == 0);
+        Require(root.GetProperty("filter").GetProperty("text").GetString() == "=formula" && root.GetProperty("events").GetArrayLength() == 1 && root.TryGetProperty("limitations", out _));
+        using var empty = new MemoryStream(); TraceExport.WriteJson(empty, State().Complete(At)); empty.Position = 0; using var parsed = System.Text.Json.JsonDocument.Parse(empty); Require(parsed.RootElement.GetProperty("events").GetArrayLength() == 0);
+    }
+    private static void Lifecycle()
+    {
+        var s = new TraceRecorderState(new(), At, 99);
+        s.Record(At, 99, 0, TraceOperation.FileRead);
+        for (int i = 0; i < 200; i++) s.Record(At, 1, 0, TraceOperation.FileRead);
+        var live = s.Live(At.AddSeconds(1), 1000); Require(live.Tail.Count == 100 && live.Stored == 200 && live.ExcludedSelf == 1 && live.EventsSeen == 201);
+        s.Record(At, 1, 0, (TraceOperation)999); s.ReportDiagnostics(2, 3, true);
+        var r = s.Complete(At); Require(r.Malformed == 3 && r.UnresolvedNames == 3 && r.Status == TraceStatus.Partial);
+        s.Record(At, 1, 0, TraceOperation.FileRead); Require(ReferenceEquals(r, s.Complete(At)) && r.Events.Count == 200);
+        Require(State().Complete(At).Status == TraceStatus.Completed && State().Complete(At, TraceStatus.Cancelled, eventsLost: 1).Status == TraceStatus.Cancelled);
+        Require(State().Complete(At, TraceStatus.Failed).Status == TraceStatus.Failed);
+        bool threw = false; try { _ = new TraceRingBuffer(0); } catch (ArgumentOutOfRangeException) { threw = true; } Require(threw);
     }
 }
