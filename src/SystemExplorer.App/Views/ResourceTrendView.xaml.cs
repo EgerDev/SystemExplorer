@@ -29,7 +29,8 @@ public sealed partial class ResourceTrendView : UserControl
         this.metric = metric;
         trend = next;
         maximum = rate ? ChartScale.Next(maximum, next?.MaximumObserved ?? double.NaN, binaryUnits: true) : next?.Maximum ?? 100;
-        string Value(double value) => bytes ? MetricFormatting.ByteSize(value) : rate ? Display.Rate(value) : $"{value:F1}%";
+        string Value(double value) => bytes ? MetricFormatting.ByteSize(value) : rate ? Display.Rate(value) :
+            value == Math.Truncate(value) ? $"{value:F0}%" : $"{value:F1}%";
         var description = next is { SampleCount: > 0, MinimumObserved: { } min, MaximumObserved: { } max }
             ? $"{label} history: {next.SampleCount} observed samples, range {Value(min)} to {Value(max)}. Axis 0 to {Value(maximum)}. Gridlines at zero, half and full scale. Gaps are not connected."
             : $"{label}: no measured history available.";
