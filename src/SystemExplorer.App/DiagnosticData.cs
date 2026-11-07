@@ -36,18 +36,34 @@ public sealed class DiagnosticRows
 
     public void Apply(IEnumerable<DiagnosticItem> items, bool reorder)
     {
-        var desired = items.ToArray();
-        var keys = desired.Select(item => item.Key).ToHashSet(StringComparer.Ordinal);
+        var desired = items as IReadOnlyList<DiagnosticItem> ?? items.ToArray();
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in desired) keys.Add(item.Key);
         for (var i = Rows.Count - 1; i >= 0; i--)
             if (!keys.Contains(Rows[i].Key)) Rows.RemoveAt(i);
-        var existing = Rows.ToDictionary(row => row.Key, StringComparer.Ordinal);
-        for (var i = 0; i < desired.Length; i++)
+        var existing = new Dictionary<string, (DiagnosticRow Row, int Index)>(StringComparer.Ordinal);
+        for (var i = 0; i < Rows.Count; i++) existing.Add(Rows[i].Key, (Rows[i], i));
+        // Prefix counts locate remaining rows without searching the collection after each move.
+        var remaining = reorder ? new int[Rows.Count + 1] : [];
+        for (var i = 1; i < remaining.Length; i++) remaining[i] = i & -i;
+        int Before(int index)
+        {
+            var count = 0;
+            for (var j = index; j > 0; j -= j & -j) count += remaining[j];
+            return count;
+        }
+        for (var i = 0; i < desired.Count; i++)
         {
             var item = desired[i];
-            if (existing.TryGetValue(item.Key, out var row))
+            if (existing.TryGetValue(item.Key, out var current))
             {
-                row.Update(item);
-                if (reorder && Rows.IndexOf(row) != i) Rows.Move(Rows.IndexOf(row), i);
+                current.Row.Update(item);
+                if (reorder)
+                {
+                    var index = i + Before(current.Index);
+                    if (index != i) Rows.Move(index, i);
+                    for (var j = current.Index + 1; j < remaining.Length; j += j & -j) remaining[j]--;
+                }
             }
             else if (reorder) Rows.Insert(i, new DiagnosticRow(item));
             else Rows.Add(new DiagnosticRow(item));
@@ -133,9 +149,10 @@ public static class DiagnosticData
         {
             foreach (var service in relationships.Services)
             {
-                var owner = CurrentOwner(service.OwnerIdentity, snapshot, relationships.CapturedAt);
-                result.Add(new(service.Name, owner, service.DisplayName, $"{service.Name} · {(owner is null ? "Owner unverified or stale" : "Owner verified")}", service.ProcessId,
-                    service.State, service.StartType ?? "Unavailable", owner is null ? "Owner unavailable" : OwnerName(owner, snapshot)));
+                var noProcess = service.ProcessId is null or 0;
+                var owner = noProcess ? null : CurrentOwner(service.OwnerIdentity, snapshot, relationships.CapturedAt);
+                result.Add(new(service.Name, owner, service.DisplayName, $"{service.Name} · {(noProcess ? "Not running; no owner process" : owner is null ? "Owner unverified or stale" : "Owner verified")}", service.ProcessId,
+                    service.State, service.StartType ?? "Unavailable", noProcess ? "No process" : owner is null ? "Owner unavailable" : OwnerName(owner, snapshot)));
             }
         }
         else if (section == "Startup")
@@ -160,7 +177,7 @@ public static class DiagnosticData
                 if (adapter.Description is null || (!adapter.HasCounterInstances && !name.EndsWith("(software adapter)", StringComparison.OrdinalIgnoreCase)))
                     name += " (adapter type unavailable)";
                 result.Add(new($"gpu-{adapter.Luid:X}", null, name,
-                    $"GPU utilization: {(measured ? Percent(value.Value!.Value) : "unavailable")}. Maximum over engine types, not a sum. Busiest engine: {adapter.HeadlineEngineType ?? "Unavailable"}. CPU and process I/O are not substituted.",
+                    $"GPU utilization: {(measured ? Percent(value.Value!.Value) : $"unavailable ({value.Reason ?? value.State.ToString()})")}. Maximum over engine types, not a sum. Busiest engine: {adapter.HeadlineEngineType ?? "Unavailable"}. CPU and process I/O are not substituted.",
                     null, measured ? Percent(value.Value!.Value) : "Utilization unavailable", measured ? "Observed" : value.Reason ?? value.State.ToString(), ""));
             }
             if (result.Count == 0 && snapshot.GpuPercent is { } gpu && double.IsFinite(gpu) && gpu is >= 0 and <= 100)
@@ -172,7 +189,9 @@ public static class DiagnosticData
             result.Add(new("help", null, "Read-only Windows diagnostics",
                 "Private commit is not physical RAM. Working sets include shared pages; do not sum them into physical usage. Unknown values are not zero. Sort a column to rank current readings; rows retain their order during live updates. Inspect uses PID plus creation time, never PID alone. No process control, driver installation or automatic elevation.", null, "", "", ""));
         // Windows can report duplicate endpoint tuples. They are one displayed observation, not a bandwidth count.
-        return result.DistinctBy(item => item.Key).ToArray();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        result.RemoveAll(item => !seen.Add(item.Key));
+        return result;
     }
 
     public static IReadOnlyList<DiagnosticItem> FilterAndSort(IEnumerable<DiagnosticItem> items, string query, int column, bool descending, bool numeric)

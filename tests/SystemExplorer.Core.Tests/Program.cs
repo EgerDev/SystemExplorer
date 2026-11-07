@@ -721,3 +721,124 @@ sealed class ManualTimeProvider : TimeProvider
     public override DateTimeOffset GetUtcNow() => current;
     public void Advance(TimeSpan duration) => current += duration;
 }
+
+// Area C: diagnostics labels and history status
+static class AreaCDiagnosticsTests
+{
+    [System.Runtime.CompilerServices.ModuleInitializer]
+    internal static void Run()
+    {
+        var tests = new (string Name, Action Run)[]
+        {
+            ("Area C rows retain instances, reorder, append and remove", Rows),
+            ("Area C service ownership distinguishes no process from unverified", Services),
+            ("Area C GPU notes include unavailable reasons", Gpu),
+            ("Area C history status distinguishes missing and observed samples", History),
+            ("Area C missing rates remain unavailable", () => Require(DiagnosticData.Rate(null) == "—" && DiagnosticData.Rate(0) == "0 B/s"))
+        };
+        foreach (var (name, run) in tests)
+        {
+            try { run(); Console.WriteLine($"PASS {name}"); }
+            catch (Exception ex) { throw new InvalidOperationException($"FAIL {name}: {ex.Message}", ex); }
+        }
+        Console.WriteLine($"{tests.Length}/{tests.Length} Area C passed");
+    }
+
+    private static void Require(bool condition)
+    {
+        if (!condition) throw new InvalidOperationException("Assertion failed");
+    }
+
+    private static DiagnosticItem Item(string key, string detail = "") => new(key, null, key, detail, null, "", "", "");
+
+    private static void Rows()
+    {
+        var rows = new DiagnosticRows();
+        rows.Apply([], true);
+        Require(rows.Rows.Count == 0);
+        rows.Apply([Item("a"), Item("b"), Item("c")], true);
+        var a = rows.Rows[0];
+        var b = rows.Rows[1];
+        var c = rows.Rows[2];
+        var moves = new List<int>();
+        rows.Rows.CollectionChanged += (_, e) =>
+        {
+            if (e.Action is System.Collections.Specialized.NotifyCollectionChangedAction.Move) moves.Add(e.NewStartingIndex);
+        };
+        rows.Apply([Item("c", "updated"), Item("d"), Item("a"), Item("b")], true);
+        Require(rows.Rows.Select(r => r.Key).SequenceEqual(["c", "d", "a", "b"]));
+        Require(ReferenceEquals(c, rows.Rows[0]) && ReferenceEquals(a, rows.Rows[2]) && ReferenceEquals(b, rows.Rows[3]));
+        Require(c.Detail == "updated" && moves.SequenceEqual([0]));
+        rows.Apply([Item("b", "new"), Item("e"), Item("a")], false);
+        Require(rows.Rows.Select(r => r.Key).SequenceEqual(["a", "b", "e"]));
+        Require(ReferenceEquals(a, rows.Rows[0]) && ReferenceEquals(b, rows.Rows[1]) && b.Detail == "new");
+        var random = new Random(23);
+        for (var pass = 0; pass < 50; pass++)
+        {
+            var desired = Enumerable.Range(0, 25).OrderBy(_ => random.Next()).Take(random.Next(26)).Select(n => Item(n.ToString())).ToArray();
+            var retained = rows.Rows.ToDictionary(r => r.Key);
+            rows.Apply(desired, true);
+            Require(rows.Rows.Select(r => r.Key).SequenceEqual(desired.Select(r => r.Key)));
+            foreach (var row in rows.Rows)
+                if (retained.TryGetValue(row.Key, out var old)) Require(ReferenceEquals(row, old));
+        }
+        rows.Apply([], false);
+        Require(rows.Rows.Count == 0);
+    }
+
+    private static void Services()
+    {
+        var at = DateTimeOffset.UnixEpoch;
+        var identity = new ProcessIdentity(42, 123);
+        var snapshot = new MonitorSnapshot { CapturedAt = at, Processes = [new ProcessSnapshot { Identity = identity, Name = "owner" }] };
+        var service = new ServiceSnapshot { Name = "svc", DisplayName = "Service", State = "Stopped" };
+        DiagnosticItem[] Create(params ServiceSnapshot[] services) => DiagnosticData.Create("Services", snapshot,
+            new RelationshipSnapshot { CapturedAt = at, Services = services }, [], new(), _ => null).ToArray();
+        Require(Create().Length == 0);
+        foreach (var pid in new int?[] { null, 0 })
+        {
+            var row = Create(service with { ProcessId = pid, OwnerIdentity = identity }).Single();
+            Require(row.Third == "No process" && row.Detail == "svc · Not running; no owner process" && row.Identity is null);
+        }
+        var running = service with { State = "Running", ProcessId = 42 };
+        var unknown = Create(running).Single();
+        Require(unknown.Third == "Owner unavailable" && unknown.Detail.Contains("Owner unverified or stale"));
+        var verified = Create(running with { OwnerIdentity = identity }).Single();
+        Require(verified.Third == "owner" && verified.Identity == identity);
+        var stale = Create(running with { OwnerIdentity = new(42, 456) }).Single();
+        Require(stale.Third == "Owner unavailable");
+        var duplicate = Create(service, running);
+        Require(duplicate.Length == 1 && duplicate[0].Third == "No process");
+    }
+
+    private static void Gpu()
+    {
+        var missing = CounterValue.Unavailable("Provider denied access");
+        var adapter = new GpuAdapterRow(1, "Adapter", 0, 0, missing, missing, [], missing, null);
+        DiagnosticItem Create(CounterValue value) => DiagnosticData.Create("GPU",
+            new MonitorSnapshot { CapturedAt = DateTimeOffset.UnixEpoch, Processes = [], GpuAdapters = [adapter with { HeadlineUtilizationPercent = value }] },
+            null, [], new(), _ => null).Single();
+        Require(Create(missing).Detail.Contains("GPU utilization: unavailable (Provider denied access)"));
+        var warmup = CounterValue.Warmup("First sample");
+        Require(Create(warmup).Detail.Contains("unavailable (First sample)"));
+        var invalid = CounterValue.Measured(double.NaN);
+        Require(Create(invalid).Detail.Contains($"unavailable ({invalid.State})"));
+        Require(Create(CounterValue.Measured(0)).Detail.Contains("GPU utilization: 0.0%"));
+    }
+
+    private static void History()
+    {
+        var at = DateTimeOffset.UnixEpoch;
+        var history = new ProcessHistorySnapshot(new(42, 123), "owner", []);
+        var baseline = ProcessHistoryStatus.Build(null);
+        Require(baseline.Contains("updates every second · 8 lifetimes / 180 samples"));
+        Require(ProcessHistoryStatus.Build(history) == baseline);
+        var observed = new ProcessHistoryPoint(at, true, false, 1, 2, 3, 0, 0, 0);
+        Require(ProcessHistoryStatus.Build(history with { Points = [observed] }) == baseline);
+        var missing = observed with { At = at.AddSeconds(1), Observed = false };
+        var status = ProcessHistoryStatus.Build(history with { Points = [observed, missing] });
+        Require(status.Contains($"not observed since {missing.At.LocalDateTime:HH:mm:ss}"));
+        Require(status.Contains("retained samples stay visible (missing is not confirmed exit)"));
+        Require(ProcessHistoryStatus.Build(history with { Points = [missing, observed with { At = at.AddSeconds(2) }] }) == baseline);
+    }
+}

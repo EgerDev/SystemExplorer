@@ -21,7 +21,8 @@ public sealed partial class MainWindow
         var toggle = new Button { Content = "Show table" };
         var chart = new ProcessHistoryChart();
         var table = new InventoryView { Visibility = Visibility.Collapsed };
-        var status = new TextBlock { Text = "Live session history · 8 lifetimes / 180 samples. Missing is not confirmed exit; gaps are not zero.", TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        if (table.FindName("Search") is TextBox search) search.PlaceholderText = "Filter live history samples…";
+        var status = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
         var content = new Grid { RowSpacing = 5 };
         void ResizeContent()
         {
@@ -50,6 +51,7 @@ public sealed partial class MainWindow
         void Render()
         {
             var history = histories.FirstOrDefault(h => h.Identity == identity);
+            status.Text = ProcessHistoryStatus.Build(history);
             if (chart.Visibility == Visibility.Visible) chart.Update(history);
             else if (history is null)
             {
