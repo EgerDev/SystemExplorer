@@ -74,6 +74,7 @@ public sealed partial class MainWindow : Window
         tray = new NativeTray(this);
         ready = true;
         InitializeOverview();
+        InitializeTrace();
         DiagnosticsPanel.InspectRequested += InspectOverviewProcess;
         DiagnosticsPanel.ServiceRequested += InspectService;
         DiagnosticsPanel.InventoryRequested += ShowExtraInventory;
@@ -97,6 +98,7 @@ public sealed partial class MainWindow : Window
         };
         Closed += async (_, _) =>
         {
+            TracePanel.Shutdown();
             CancelProcessAnchor();
             tray.Dispose();
             shutdown.Cancel();
@@ -234,13 +236,15 @@ public sealed partial class MainWindow : Window
             "Network" => "Observed TCP connections and UDP endpoints. No inferred bandwidth, DNS or geography.",
             "Services" => "Read-only Windows service inventory with verified process-lifetime associations.",
             "Insights" => "Local, deterministic explanations supported by observed measurements.",
+            "Trace" => "Opt-in, read-only activity recording via ETW. Requires administrator. Nothing is saved unless you export.",
             "Startup" => "Observed startup entries. Presence does not measure startup impact.",
             _ => "Read-only diagnostics from your local Windows system. Unavailable measurements are explicit."
         };
         ProcessesPanel.Visibility = section == "Processes" ? Visibility.Visible : Visibility.Collapsed;
         OverviewPanel.Visibility = section == "Overview" ? Visibility.Visible : Visibility.Collapsed;
+        TracePanel.Visibility = section == "Trace" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPanel.Visibility = section == "Settings" ? Visibility.Visible : Visibility.Collapsed;
-        DiagnosticsPanel.Visibility = section is "Processes" or "Overview" or "Settings" ? Visibility.Collapsed : Visibility.Visible;
+        DiagnosticsPanel.Visibility = section is "Processes" or "Overview" or "Settings" or "Trace" ? Visibility.Collapsed : Visibility.Visible;
         if (section == "Processes") ProcessSearch.Text = GlobalSearch.Text;
         RefreshDiagnostics();
     }

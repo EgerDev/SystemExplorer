@@ -50,6 +50,8 @@ jobs:
         run: dotnet run --project tests/SystemExplorer.Persistence.Smoke -c Release
       - name: Opt-in I/O attribution checks
         run: dotnet run --project tests/SystemExplorer.IoAttribution.Smoke -c Release
+      - name: Opt-in activity trace checks
+        run: dotnet run --project tests/SystemExplorer.ActivityTrace.Smoke -c Release
       - name: Acceptance preflight predicate tests
         shell: pwsh
         run: ./tools/tests/Windows11-Acceptance-Preflight.Tests.ps1
