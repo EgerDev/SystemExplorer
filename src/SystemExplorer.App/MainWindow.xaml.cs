@@ -225,7 +225,7 @@ public sealed partial class MainWindow : Window
     {
         if (!ready || args.SelectedItem is not NavigationViewItem item) return;
         section = item.Tag?.ToString() ?? "Processes";
-        PageTitle.Text = section;
+        PageTitle.Text = section == "Hidden" ? "Hidden & suspicious" : section;
         PageSubtitle.Text = section switch
         {
             "Overview" => "Live resource use, top consumers, and system insights.",
@@ -234,13 +234,15 @@ public sealed partial class MainWindow : Window
             "Network" => "Observed TCP connections and UDP endpoints. No inferred bandwidth, DNS or geography.",
             "Services" => "Read-only Windows service inventory with verified process-lifetime associations.",
             "Insights" => "Local, deterministic explanations supported by observed measurements.",
+            "Hidden" => "Read-only cross-view checks and local leads. Click Run to scan.",
             "Startup" => "Observed startup entries. Presence does not measure startup impact.",
             _ => "Read-only diagnostics from your local Windows system. Unavailable measurements are explicit."
         };
         ProcessesPanel.Visibility = section == "Processes" ? Visibility.Visible : Visibility.Collapsed;
         OverviewPanel.Visibility = section == "Overview" ? Visibility.Visible : Visibility.Collapsed;
+        HiddenPanel.Visibility = section == "Hidden" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPanel.Visibility = section == "Settings" ? Visibility.Visible : Visibility.Collapsed;
-        DiagnosticsPanel.Visibility = section is "Processes" or "Overview" or "Settings" ? Visibility.Collapsed : Visibility.Visible;
+        DiagnosticsPanel.Visibility = section is "Processes" or "Overview" or "Settings" or "Hidden" ? Visibility.Collapsed : Visibility.Visible;
         if (section == "Processes") ProcessSearch.Text = GlobalSearch.Text;
         RefreshDiagnostics();
     }
