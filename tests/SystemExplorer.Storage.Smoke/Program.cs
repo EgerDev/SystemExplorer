@@ -9,7 +9,8 @@ static void Check(bool value, string reason) { if (!value) throw new InvalidOper
 static void Native(bool value) { if (!value) throw new Win32Exception(); }
 static void Command(string command, string args)
 {
-    using var process = Process.Start(new ProcessStartInfo(command, args) { UseShellExecute = false, CreateNoWindow = true })!;
+    using var process = Process.Start(new ProcessStartInfo(command, args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!;
+    Console.Write(process.StandardOutput.ReadToEnd());
     process.WaitForExit(); Check(process.ExitCode == 0, command + " failed: " + process.ExitCode);
 }
 
@@ -79,11 +80,14 @@ try
     var compressed = Path.Combine(fixture, "compressed.bin");
     using (var file = File.Create(compressed))
     {
-        Native(NativeSmoke.DeviceIoControl(file.SafeFileHandle, 0x9C040, new byte[] { 1, 0 }, 2, IntPtr.Zero, 0, out _, IntPtr.Zero));
         var zeros = new byte[1024 * 1024];
         for (var i = 0; i < 8; i++) file.Write(zeros);
+        file.Flush(true);
     }
+    using (var file = File.Open(compressed, FileMode.Open, FileAccess.ReadWrite))
+        Native(NativeSmoke.DeviceIoControl(file.SafeFileHandle, 0x9C040, new byte[] { 1, 0 }, 2, IntPtr.Zero, 0, out _, IntPtr.Zero));
     Command("compact.exe", $"/c /f \"{compressed}\"");
+    Check((File.GetAttributes(compressed) & FileAttributes.Compressed) != 0, "Fixture compression attribute missing");
     originals.Add(compressed);
     var sparse = Path.Combine(fixture, "sparse.bin");
     using (var file = File.Create(sparse))
