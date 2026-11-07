@@ -123,7 +123,7 @@ public sealed partial class WindowsActivityTraceRecorder : IDisposable, IAsyncDi
             try { session?.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { status = TraceStatus.Failed; detail += " Session disposal failed."; }
             session = null;
         }
-        return state.Complete(DateTimeOffset.UtcNow, status, detail, lost);
+        return state.Complete(DateTimeOffset.UtcNow, status, detail + decodeDiagnostics.Summary, lost);
     }
 
     private void OnProcessExit(object? sender, EventArgs args) => StopAsync().GetAwaiter().GetResult();

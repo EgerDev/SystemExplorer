@@ -8,7 +8,28 @@ namespace SystemExplorer.Windows;
 
 public sealed partial class WindowsActivityTraceRecorder
 {
+    private readonly DecodeDiagnostics decodeDiagnostics = new();
     private const string UnknownName = "(unresolved)";
+    internal sealed class DecodeDiagnostics
+    {
+        private readonly Dictionary<(Guid Provider, int Id, int Version, string Reason), long> counts = [];
+        private long unlisted;
+        internal void Add(Guid provider, int id, int version, string reason)
+        {
+            var key = (provider, id, version, reason);
+            if (counts.TryGetValue(key, out long count)) counts[key] = count + 1;
+            else if (counts.Count < 16) counts[key] = 1;
+            else unlisted++;
+        }
+        internal string Summary => counts.Count == 0 ? "" : " Decode failures (metadata only): " +
+            string.Join("; ", counts.Select(pair => $"provider={pair.Key.Provider}, id={pair.Key.Id}, version={pair.Key.Version}, reason={pair.Key.Reason}, count={pair.Value}")) +
+            (unlisted == 0 ? "." : $"; unlisted failures={unlisted}.");
+    }
+    private void Malformed(EtwEvent data, string reason)
+    {
+        state.ReportDiagnostics(malformedSkipped: 1);
+        decodeDiagnostics.Add(data.ProviderGuid, (int)data.ID, data.Version, reason);
+    }
     private static object Required(EtwEvent data, string field) => data.PayloadByName(field) ?? throw new FormatException("Missing ETW field.");
     private static int Int(EtwEvent data, string field) => Convert.ToInt32(Required(data, field), CultureInfo.InvariantCulture);
     private static ulong Unsigned(EtwEvent data, string field) => Required(data, field) switch
@@ -42,7 +63,7 @@ public sealed partial class WindowsActivityTraceRecorder
             else if (data.ProviderGuid == NetworkProvider) NetworkEvent(data, at);
         }
         catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException or ArgumentException or IndexOutOfRangeException)
-        { state.ReportDiagnostics(malformedSkipped: 1); }
+        { Malformed(data, ex.GetType().Name); }
     }
 
     private void ProcessEvent(EtwEvent data, DateTimeOffset at)
@@ -50,7 +71,7 @@ public sealed partial class WindowsActivityTraceRecorder
         int id = (int)data.ID;
         if (id is < 1 or > 5) return;
         if ((id == 1 && data.Version > 3) || (id == 2 && data.Version > 2) || (id is 3 or 4 && data.Version > 1) || (id == 5 && data.Version != 0))
-        { state.ReportDiagnostics(malformedSkipped: 1); return; }
+        { Malformed(data, "unsupported version"); return; }
         int pid = Int(data, "ProcessID");
         if (id is 3 or 4) { state.RecordThread(pid, id == 3); return; }
         if (id == 1)
@@ -94,13 +115,13 @@ public sealed partial class WindowsActivityTraceRecorder
         int id = (int)data.ID;
         if (id is 10 or 11)
         {
-            if (data.Version != 0) { state.ReportDiagnostics(malformedSkipped: 1); return; }
+            if (data.Version != 0) { Malformed(data, "unsupported version"); return; }
             ulong key = Unsigned(data, "FileKey");
             if (id == 10) Map(fileKeys, key, Text(data, "FileName")); else fileKeys.Remove(key);
             return;
         }
         if (id is not (12 or 14 or 15 or 16 or 26 or 27)) return;
-        if (data.Version > 1) { state.ReportDiagnostics(malformedSkipped: 1); return; }
+        if (data.Version > 1) { Malformed(data, "unsupported version"); return; }
         ulong obj = Unsigned(data, "FileObject");
         if (id == 14) { fileObjects.Remove(obj); return; }
         int tid = data.Version == 1 ? Int(data, "IssuingThreadId") : unchecked((int)Unsigned(data, "ThreadId"));
@@ -130,7 +151,7 @@ public sealed partial class WindowsActivityTraceRecorder
     {
         int id = (int)data.ID;
         if (id is not (1 or 2 or 3 or 5 or 6 or 13)) return;
-        if (data.Version != 0) { state.ReportDiagnostics(malformedSkipped: 1); return; }
+        if (data.Version != 0) { Malformed(data, "unsupported version"); return; }
         ulong obj = Unsigned(data, "KeyObject");
         if (id == 13) { registryKeys.Remove(obj); return; }
         string? path; string? detail = null;
@@ -175,7 +196,7 @@ public sealed partial class WindowsActivityTraceRecorder
             13 or 29 => TraceOperation.NetDisconnect, _ => (TraceOperation)(-1)
         };
         if ((int)operation < 0) return;
-        if (data.Version != 0) { state.ReportDiagnostics(malformedSkipped: 1); return; }
+        if (data.Version != 0) { Malformed(data, "unsupported version"); return; }
         int pid = Int(data, "PID");
         string source = Address(Required(data, "saddr")), destination = Address(Required(data, "daddr"));
         int sourcePort = Port(Int(data, "sport")), destinationPort = Port(Int(data, "dport"));

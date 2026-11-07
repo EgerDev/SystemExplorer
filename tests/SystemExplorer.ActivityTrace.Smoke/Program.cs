@@ -20,6 +20,13 @@ if (args.Contains("--nonadmin"))
     return;
 }
 using var own = Process.GetCurrentProcess();
+var diagnostics = new WindowsActivityTraceRecorder.DecodeDiagnostics();
+Check(diagnostics.Summary.Length == 0, "No decoder diagnostics for an empty capture.");
+for (int id = 0; id < 17; id++) diagnostics.Add(Guid.Empty, id, 3, "unsupported version");
+diagnostics.Add(Guid.Empty, 0, 3, "unsupported version");
+Check(diagnostics.Summary.Contains("id=0, version=3, reason=unsupported version, count=2") &&
+    diagnostics.Summary.Contains("id=15,") && !diagnostics.Summary.Contains("id=16,") && diagnostics.Summary.Contains("unlisted failures=1"), "Decode diagnostics must aggregate and remain bounded.");
+Console.WriteLine("PASS: empty and bounded metadata-only decoder diagnostics.");
 TraceProcessSeed[] seeds = [new(Environment.ProcessId, -1, own.StartTime.ToUniversalTime().ToFileTimeUtc(), own.ProcessName)];
 var before = TraceEventSession.GetActiveSessionNames().Where(n => n.StartsWith(WindowsActivityTraceRecorder.SessionPrefix, StringComparison.Ordinal)).ToHashSet();
 using var preCancelled = new CancellationTokenSource(); preCancelled.Cancel();
@@ -108,6 +115,7 @@ await using (var trace = await WindowsActivityTraceRecorder.StartAsync(new(Durat
         Console.WriteLine($"10s capture: status={result.Status}; events={result.Events.Count}; lost={result.EventsLost}; dropped={result.BufferDropped}; malformed={result.Malformed}; unresolved={result.UnresolvedNames}");
         Console.WriteLine($"Measurement (smoke + recorder + generated load): elapsed={watch.Elapsed.TotalSeconds:F2}s; CPU={(own.TotalProcessorTime - initialCpu).TotalMilliseconds:F1}ms; sampled capture peak WS={sampledPeak / 1048576d:F1}MiB; process lifetime peak WS={own.PeakWorkingSet64 / 1048576d:F1}MiB");
         Check(result.Status is TraceStatus.Completed or TraceStatus.Partial, "Live capture must finish, not fail.");
+        if (result.Malformed != 0) Console.WriteLine(result.Detail);
         Check(result.Malformed == 0, "Host-supported event decoding must not be malformed.");
         if (result.EventsLost == 0 && result.BufferDropped == 0 && !result.CapsHit) Check(result.Status == TraceStatus.Completed, "Unresolved names alone must not make a capture Partial.");
         if (result.UnresolvedNames > 0) Check(result.Detail.Contains("events with unresolved names"), "Unresolved count must remain an explicit limitation.");
