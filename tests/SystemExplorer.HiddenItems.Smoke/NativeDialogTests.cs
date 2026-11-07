@@ -41,6 +41,20 @@ internal static class NativeDialogTests
             uint length = GetShortPathNameW(directory, shortPath, (uint)shortPath.Capacity);
             Require(length > 0 && length < shortPath.Capacity);
             Require(NativeFileDialogs.NormalizeExistingPath(shortPath.ToString()) == canonical);
+            foreach (var format in new[] { "csv", "json" })
+            {
+                foreach (var extension in new[] { format, format.ToUpperInvariant() })
+                    Require(NativeFileDialogs.NormalizeSavePath(Path.Combine(shortPath.ToString(), "export." + extension), format)
+                        == Path.Combine(canonical, "export." + extension));
+                foreach (var filename in new[] { "export." + (format == "csv" ? "json" : "csv"), "export.txt", "export", "export." })
+                {
+                    bool rejected = false;
+                    try { NativeFileDialogs.NormalizeSavePath(Path.Combine(directory, filename), format); }
+                    catch (IOException ex) { rejected = ex.Message.Contains("." + format); }
+                    Require(rejected);
+                }
+            }
+            Console.WriteLine("PASS native save path requires the chosen CSV/JSON extension (including case-insensitive matches and missing/wrong extension rejection)");
             bool missing = false;
             try { NativeFileDialogs.NormalizeExistingPath(Path.Combine(directory, "missing")); }
             catch (System.ComponentModel.Win32Exception) { missing = true; }

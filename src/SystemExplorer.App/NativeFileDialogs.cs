@@ -98,6 +98,13 @@ internal static class NativeFileDialogs
     private static extern bool GetSaveFileName([In, Out] OpenFileName options);
     [DllImport("comdlg32.dll")]
     private static extern uint CommDlgExtendedError();
+    internal static string NormalizeSavePath(string path, string format)
+    {
+        if (format is not ("csv" or "json")) throw new ArgumentOutOfRangeException(nameof(format));
+        if (!Path.GetExtension(path).Equals("." + format, StringComparison.OrdinalIgnoreCase))
+            throw new IOException($"The selected {format.ToUpperInvariant()} format requires a .{format} filename. Choose Export again with the matching extension.");
+        return Path.Combine(NormalizeExistingPath(Path.GetDirectoryName(path)!), Path.GetFileName(path));
+    }
     internal static string? ChooseSave(nint owner, string format, string title, string suggestedName)
     {
         if (format is not ("csv" or "json")) throw new ArgumentOutOfRangeException(nameof(format));
@@ -117,7 +124,7 @@ internal static class NativeFileDialogs
             if (GetSaveFileName(options))
             {
                 string path = Marshal.PtrToStringUni(options.File) ?? throw new IOException("Save dialog returned no path.");
-                return Path.Combine(NormalizeExistingPath(Path.GetDirectoryName(path)!), Path.GetFileName(path));
+                return NormalizeSavePath(path, format);
             }
             uint error = CommDlgExtendedError();
             if (error != 0) throw new Win32Exception((int)error);
