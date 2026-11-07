@@ -1,0 +1,177 @@
+<UserControl
+    x:Class="SystemExplorer.App.Views.StorageView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:SystemExplorer.App.Controls"
+    SizeChanged="LayoutChanged">
+    <UserControl.Resources>
+        <DataTemplate x:Key="StorageTabHeader"><TextBlock Text="{Binding}" FontSize="14"/></DataTemplate>
+        <Style x:Key="StorageListItem" TargetType="ListViewItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Padding" Value="4,2"/>
+        </Style>
+        <DataTemplate x:Key="StorageRowTemplate">
+            <Grid Padding="4,8" RowSpacing="4" ColumnSpacing="12" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="0,0,0,1">
+                <Grid.ContextFlyout>
+                    <MenuFlyout>
+                        <MenuFlyoutItem Text="Open in Explorer" Click="OpenRowClicked" Tag="{Binding}"/>
+                        <MenuFlyoutItem Text="Copy path" Click="CopyRowClicked" Tag="{Binding}"/>
+                    </MenuFlyout>
+                </Grid.ContextFlyout>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions><PathIcon Data="M1,4 L7,4 L9,6 L19,6 L19,17 L1,17 Z" Width="16" Height="14" Visibility="{Binding FolderVisibility}"/><FontIcon Visibility="{Binding GlyphVisibility}" Glyph="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="14"/><TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Path}"/></Grid>
+                <Border Grid.Column="1" Background="{ThemeResource HeaderSurface}" CornerRadius="4" Padding="5,1" Visibility="{Binding BadgeVisibility}"><TextBlock Text="{Binding Badge}" Style="{StaticResource Muted}" FontSize="12"/></Border>
+                <TextBlock Grid.Column="2" Text="{Binding Size}" Style="{StaticResource NumericCell}" Margin="0"/>
+                <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="{Binding Detail}" Style="{StaticResource Muted}" FontSize="12" MaxLines="2" TextTrimming="CharacterEllipsis"/>
+                <ProgressBar Grid.Row="2" Grid.ColumnSpan="3" Value="{Binding Percent}" Maximum="100" Height="3" Margin="0,3,0,0"/>
+            </Grid>
+        </DataTemplate>
+        <DataTemplate x:Key="VolumeTemplate">
+            <Border Style="{StaticResource Card}" Margin="0,0,12,12" VerticalAlignment="Top">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="{Binding Title}" Style="{StaticResource SectionLabel}"/>
+                    <ProgressBar Value="{Binding UsedPercent}" Foreground="{Binding CapacityBrush}"/>
+                    <TextBlock Text="{Binding Capacity}" TextWrapping="Wrap"/>
+                    <ItemsControl ItemsSource="{Binding Properties}">
+                        <ItemsControl.ItemTemplate><DataTemplate>
+                            <Grid ColumnSpacing="12" Margin="0,3">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="92"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding Label}" Style="{StaticResource Muted}"/>
+                                <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap" IsTextSelectionEnabled="True" Visibility="{Binding ValueVisibility}"/>
+                                <TextBlock Grid.Column="1" Text="{Binding Value}" Style="{StaticResource Muted}" IsTextSelectionEnabled="True" Visibility="{Binding UnavailableVisibility}"/>
+                            </Grid>
+                        </DataTemplate></ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Button Content="Analyze space" Tag="{Binding Root}" Click="AnalyzeDriveClicked" HorizontalAlignment="Left"/>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+    <Grid RowSpacing="4">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <TextBlock Text="Read-only storage inventory. Live throughput and physical disk counters are on the Disks page." Style="{StaticResource Muted}"/>
+        <TextBlock x:Name="Message" Grid.Row="1" Style="{StaticResource Muted}" Visibility="Collapsed"/>
+        <Pivot x:Name="Tabs" Grid.Row="2" HeaderTemplate="{StaticResource StorageTabHeader}" SelectionChanged="TabChanged">
+            <PivotItem Header="Drives">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="12">
+                        <Button x:Name="RefreshButton" Content="Refresh drives" Click="RefreshClicked" HorizontalAlignment="Left"/>
+                        <ItemsRepeater x:Name="DriveCards" ItemTemplate="{StaticResource VolumeTemplate}">
+                            <ItemsRepeater.Layout><UniformGridLayout x:Name="DriveLayout" MinItemWidth="320" Orientation="Horizontal" ItemsStretch="Fill" MaximumRowsOrColumns="3"/></ItemsRepeater.Layout>
+                        </ItemsRepeater>
+                    </StackPanel>
+                </ScrollViewer>
+            </PivotItem>
+            <PivotItem Header="Space analyzer">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="12">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <ComboBox x:Name="RootPicker" HorizontalAlignment="Stretch" DisplayMemberPath="Label" SelectionChanged="RootChanged" AutomationProperties.Name="Volume or folder to analyze"/>
+                            <Button Grid.Column="1" Content="Choose folder…" Click="ChooseFolderClicked"/>
+                            <Button x:Name="ScanButton" Grid.Column="2" Content="Scan" Style="{StaticResource AccentButtonStyle}" Click="ScanClicked"/>
+                            <Button x:Name="CancelButton" Grid.Column="3" Content="Cancel" IsEnabled="False" Click="CancelClicked"/>
+                        </Grid>
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBlock x:Name="RootCaption" Text="Choose a volume or folder to begin." Style="{StaticResource Muted}" TextTrimming="CharacterEllipsis" MaxLines="1" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="SizeMode" Grid.Column="1" SelectedIndex="0" SelectionChanged="SizeModeChanged" AutomationProperties.Name="Size semantics">
+                                <x:String>Size: Allocated</x:String><x:String>Size: Logical</x:String>
+                            </ComboBox>
+                            <DropDownButton x:Name="ExportButton" Grid.Column="2" Content="Export" IsEnabled="False">
+                                <DropDownButton.Flyout><MenuFlyout><MenuFlyoutItem Text="CSV…" Tag="csv" Click="ExportClicked"/><MenuFlyoutItem Text="JSON…" Tag="json" Click="ExportClicked"/></MenuFlyout></DropDownButton.Flyout>
+                            </DropDownButton>
+                        </Grid>
+                        <StackPanel x:Name="ProgressPanel" Spacing="6" Visibility="Collapsed">
+                            <TextBlock x:Name="ProgressText" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="CurrentPath" Style="{StaticResource Muted}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                            <ProgressBar IsIndeterminate="True"/>
+                        </StackPanel>
+                        <Border Style="{StaticResource Card}" VerticalAlignment="Top" MinHeight="0" Padding="16,12">
+                            <StackPanel Spacing="4">
+                                <TextBlock x:Name="ResultTitle" Text="No scan yet" Style="{StaticResource SectionLabel}"/>
+                                <TextBlock x:Name="ResultDetail" Text="Allocated is the space on disk; logical is the file's reported length. Only metadata is enumerated." Style="{StaticResource Muted}"/>
+                                <TextBlock x:Name="ResultNotes" Style="{StaticResource Muted}"/>
+                            </StackPanel>
+                        </Border>
+                        <Grid x:Name="SpaceColumns" ColumnSpacing="12" RowSpacing="12">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <Border x:Name="FoldersCard" Style="{StaticResource Card}">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Folders" Style="{StaticResource SectionLabel}"/>
+                                    <BreadcrumbBar x:Name="Breadcrumb" ItemClicked="BreadcrumbClicked"/>
+                                    <TextBlock Text="Double-click or press Enter to drill in · size / % of parent · files · modified" Style="{StaticResource Muted}" FontSize="12"/>
+                                    <ListView x:Name="ChildrenList" Height="360" ItemContainerStyle="{StaticResource StorageListItem}" ItemTemplate="{StaticResource StorageRowTemplate}" DoubleTapped="FolderDoubleTapped" KeyDown="FolderKeyDown" SelectionMode="Single" AutomationProperties.Name="Folders by size"/>
+                                    <TextBlock x:Name="ChildrenNote" Style="{StaticResource Muted}"/>
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="InsightsCard" Grid.Column="1" Style="{StaticResource Card}">
+                                <Pivot HeaderTemplate="{StaticResource StorageTabHeader}">
+                                    <PivotItem Header="Largest files"><StackPanel Spacing="8"><TextBlock Text="Top 100 of the bounded largest-files list" Style="{StaticResource Muted}"/><ListView x:Name="LargestList" Height="360" ItemContainerStyle="{StaticResource StorageListItem}" ItemTemplate="{StaticResource StorageRowTemplate}"/></StackPanel></PivotItem>
+                                    <PivotItem Header="File types"><ListView x:Name="TypesList" Height="400" ItemContainerStyle="{StaticResource StorageListItem}" ItemTemplate="{StaticResource StorageRowTemplate}"/></PivotItem>
+                                    <PivotItem Header="Age"><ListView x:Name="AgeList" Height="400" ItemContainerStyle="{StaticResource StorageListItem}" ItemTemplate="{StaticResource StorageRowTemplate}"/></PivotItem>
+                                    <PivotItem Header="Skipped"><StackPanel Spacing="8"><TextBlock x:Name="SkippedSummary" Text="Access denials and reparse points are counted and listed, not hidden." Style="{StaticResource Muted}"/><ListView x:Name="SkippedList" Height="340" ItemContainerStyle="{StaticResource StorageListItem}" ItemTemplate="{StaticResource StorageRowTemplate}"/></StackPanel></PivotItem>
+                                </Pivot>
+                            </Border>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </PivotItem>
+            <PivotItem Header="Developer &amp; AI">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="Read-only leads, not proof of authorship. Sessions and chats are never read. Reclaim estimates need your review; overlapping items are not additive." Style="{StaticResource Muted}"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="ProfileButton" Content="Analyze my user profile" Style="{StaticResource AccentButtonStyle}" Click="ProfileClicked"/>
+                            <Button x:Name="UseScanButton" Content="Use current scan" IsEnabled="False" Click="UseScanClicked"/>
+                        </StackPanel>
+                        <TextBlock x:Name="DeveloperStatus" Text="Scan a folder to discover projects, regenerable artifacts, tool data and model stores." Style="{StaticResource Muted}"/>
+                        <Grid x:Name="SummaryGrid" ColumnSpacing="12" RowSpacing="12">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <controls:SummaryCard x:Name="FootprintCard" Label="Developer / AI" Value="Not scanned" Glyph="&#xEDA2;"/>
+                            <Border x:Name="ReclaimContainer" Grid.Column="1" Style="{StaticResource Card}" Padding="12,10" MinHeight="72"><Grid ColumnSpacing="10"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions><FontIcon Glyph="&#xE9D9;" FontSize="{StaticResource ContentIconSize}" VerticalAlignment="Top" Margin="0,2,0,0" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="Est. reclaimable" FontSize="{StaticResource CaptionSize}" FontWeight="SemiBold"/><TextBlock x:Name="ReclaimValue" Text="Not scanned" FontSize="{StaticResource SummaryValueSize}" FontWeight="SemiBold"/><TextBlock x:Name="UnknownItems" Text="+ unknown items" Style="{StaticResource Muted}" FontSize="12" Visibility="Collapsed"/></StackPanel></Grid></Border>
+                            <controls:SummaryCard x:Name="ProjectsCard" Grid.Column="2" Label="Projects" Value="Not scanned" Glyph="&#xE8B7;"/>
+                            <controls:SummaryCard x:Name="AICard" Grid.Column="3" Label="AI tools / models" Value="Not scanned" Glyph="&#xEA80;"/>
+                        </Grid>
+                        <ListView x:Name="CategoriesList" MaxHeight="160" SelectionMode="None" ItemContainerStyle="{StaticResource StorageListItem}" ItemTemplate="{StaticResource StorageRowTemplate}"/>
+                        <Grid x:Name="DeveloperColumns" ColumnSpacing="12" RowSpacing="12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="1.6*"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <Border x:Name="BloatCard" Style="{StaticResource Card}">
+                                <Pivot HeaderTemplate="{StaticResource StorageTabHeader}">
+                                    <PivotItem Header="Where is the bloat"><ListView x:Name="BloatList" Height="360" SelectionChanged="RowSelected" ItemContainerStyle="{StaticResource StorageListItem}" ItemTemplate="{StaticResource StorageRowTemplate}"/></PivotItem>
+                                    <PivotItem Header="Projects">
+                                        <StackPanel Spacing="8">
+                                            <StackPanel Orientation="Horizontal" Spacing="12"><ComboBox x:Name="StaleAfter" SelectedIndex="1" SelectionChanged="StaleChanged" AutomationProperties.Name="Stale after"><x:String>Stale after 3 months</x:String><x:String>Stale after 6 months</x:String><x:String>Stale after 12 months</x:String></ComboBox><CheckBox x:Name="OnlyStale" Content="Only stale" Checked="StaleFilterChanged" Unchecked="StaleFilterChanged"/></StackPanel>
+                                            <ListView x:Name="ProjectsList" Height="310" SelectionChanged="RowSelected" ItemContainerStyle="{StaticResource StorageListItem}" ItemTemplate="{StaticResource StorageRowTemplate}"/>
+                                        </StackPanel>
+                                    </PivotItem>
+                                    <PivotItem Header="AI tools &amp; models"><ListView x:Name="AIList" Height="360" SelectionChanged="RowSelected" ItemContainerStyle="{StaticResource StorageListItem}" ItemTemplate="{StaticResource StorageRowTemplate}"/></PivotItem>
+                                    <PivotItem Header="Leads"><ListView x:Name="LeadsList" Height="360" SelectionChanged="RowSelected" ItemContainerStyle="{StaticResource StorageListItem}" ItemTemplate="{StaticResource StorageRowTemplate}"/></PivotItem>
+                                </Pivot>
+                            </Border>
+                            <Border x:Name="DetailCard" Grid.Column="1" Style="{StaticResource Card}">
+                                <StackPanel Spacing="10">
+                                    <TextBlock x:Name="DetailTitle" Text="Select an item" Style="{StaticResource SectionLabel}"/>
+                                    <TextBlock x:Name="DetailPath" Style="{StaticResource Muted}" IsTextSelectionEnabled="True"/>
+                                    <TextBlock x:Name="DetailReason" Text="Only names, sizes, dates and file attributes are inspected." Style="{StaticResource Muted}" IsTextSelectionEnabled="True"/>
+                                    <TextBlock x:Name="DetailConfidence" Style="{StaticResource Muted}"/>
+                                    <StackPanel x:Name="CleanupPanel" Spacing="8" Visibility="Collapsed">
+                                        <TextBlock x:Name="CleanupText" FontFamily="Consolas" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+                                        <TextBlock Text="SystemExplorer never runs this. Review before running it yourself; it permanently deletes data." Style="{StaticResource Muted}"/>
+                                        <TextBlock x:Name="CleanupWarning" Style="{StaticResource Muted}"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="8"><Button x:Name="OpenDetail" Content="Open in Explorer" Click="OpenDetailClicked" IsEnabled="False"/><Button x:Name="CopyDetail" Content="Copy path" Click="CopyDetailClicked" IsEnabled="False"/></StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                        <Expander Header="Not scanned — catalog coverage" HorizontalAlignment="Stretch"><TextBlock x:Name="NotScannedText" Style="{StaticResource Muted}" IsTextSelectionEnabled="True"/></Expander>
+                    </StackPanel>
+                </ScrollViewer>
+            </PivotItem>
+        </Pivot>
+    </Grid>
+</UserControl>
