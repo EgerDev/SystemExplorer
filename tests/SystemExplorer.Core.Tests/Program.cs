@@ -6,6 +6,7 @@ var tests = new (string Name, Action Run)[]
 {
     ("CSV exports have unique headers and round-trip RAM tabs, Hidden, Storage and Trace", CsvExportTests.Run),
     ("Trace and Storage CSV capture metadata occurs once with event-only linear growth", CsvExportTests.MetadataSize),
+    ("Filtered Trace JSON includes only referenced process lifetimes and ancestors with valid remapped indices", TraceJsonExportTests.Run),
     ("Storage denied child folders mark completed scans partial and preserve evidence", StorageCompletenessTests.Run),
     ("Task cross-view comparisons never infer absence from unavailable or truncated views", HiddenTaskAvailabilityTests.Run),
     ("RAM process status distinguishes Idle and unverifiable identities from exited or reused lifetimes", () =>

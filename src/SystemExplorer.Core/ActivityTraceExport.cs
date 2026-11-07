@@ -32,6 +32,17 @@ public static class TraceExport
     public static void WriteJson(Stream stream, TraceResult result, TraceFilter? filter = null)
     {
         filter ??= new();
+        var matches = filter.Match(result.Events, result.Processes);
+        var included = new HashSet<int>();
+        foreach (int position in matches)
+        {
+            int index = result.Events[position].ProcessIndex;
+            while (index >= 0 && index < result.Processes.Count && included.Add(index))
+                index = result.Processes[index].ParentIndex;
+        }
+        var processIndices = included.Order().ToArray();
+        var remap = processIndices.Select((original, index) => (original, index)).ToDictionary(p => p.original, p => p.index);
+        int Remap(int index) => remap.GetValueOrDefault(index, -1);
         using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = false });
         writer.WriteStartObject();
         writer.WriteString("status", result.Status.ToString()); writer.WriteString("detail", result.Detail);
@@ -43,16 +54,17 @@ public static class TraceExport
         writer.WritePropertyName("options"); writer.WriteStartObject(); writer.WriteString("categories", result.Options.Categories.ToString());
         writer.WriteNumber("durationSeconds", result.Options.Duration.TotalSeconds); writer.WriteNumber("eventCap", result.Options.EventCap); writer.WriteBoolean("excludeSelf", result.Options.ExcludeSelf); writer.WriteEndObject();
         writer.WritePropertyName("filter"); writer.WriteStartObject();
-        if (filter.ProcessIndex is int index) writer.WriteNumber("processIndex", index); else writer.WriteNull("processIndex");
+        if (filter.ProcessIndex is int selected && Remap(selected) >= 0) writer.WriteNumber("processIndex", Remap(selected)); else writer.WriteNull("processIndex");
         writer.WriteBoolean("includeDescendants", filter.IncludeDescendants); writer.WriteString("categories", filter.Categories.ToString()); writer.WriteString("text", filter.Text);
         if (filter.FromUtc is { } from) writer.WriteString("fromUtc", from); else writer.WriteNull("fromUtc");
         if (filter.ToUtc is { } to) writer.WriteString("toUtc", to); else writer.WriteNull("toUtc");
         writer.WriteEndObject(); writer.WriteString("limitations", Limitations);
         writer.WritePropertyName("categoryCounts"); writer.WriteStartObject(); foreach (var pair in result.CategoryCounts) writer.WriteNumber(pair.Key.ToString(), pair.Value); writer.WriteEndObject();
         writer.WritePropertyName("processes"); writer.WriteStartArray();
-        foreach (var p in result.Processes)
+        foreach (int original in processIndices)
         {
-            writer.WriteStartObject(); writer.WriteNumber("index", p.Index); writer.WriteNumber("pid", p.Pid); writer.WriteNumber("parentPid", p.ParentPid); writer.WriteNumber("parentIndex", p.ParentIndex);
+            var p = result.Processes[original];
+            writer.WriteStartObject(); writer.WriteNumber("index", Remap(original)); writer.WriteNumber("pid", p.Pid); writer.WriteNumber("parentPid", p.ParentPid); writer.WriteNumber("parentIndex", Remap(p.ParentIndex));
             writer.WriteString("imageName", p.ImageName); writer.WriteString("imagePath", p.ImagePath);
             if (p.CreateTimeFileTime is long created) writer.WriteNumber("createTimeFileTime", created); else writer.WriteNull("createTimeFileTime");
             if (p.StartUtc is { } start) writer.WriteString("startUtc", start); else writer.WriteNull("startUtc");
@@ -61,13 +73,13 @@ public static class TraceExport
             writer.WriteBoolean("seeded", p.Seeded); writer.WriteNumber("threadsStarted", p.ThreadsStarted); writer.WriteNumber("threadsStopped", p.ThreadsStopped); writer.WriteEndObject();
         }
         writer.WriteEndArray(); writer.WritePropertyName("events"); writer.WriteStartArray();
-        foreach (int position in filter.Match(result.Events, result.Processes))
+        foreach (int position in matches)
         {
             var e = result.Events[position]; writer.WriteStartObject();
             writer.WriteNumber("sequence", e.Sequence); writer.WriteString("timeUtc", new DateTimeOffset(e.TimestampUtc, TimeSpan.Zero));
             writer.WriteNumber("relativeMs", (e.TimestampUtc - result.StartedUtc.UtcTicks) / (double)TimeSpan.TicksPerMillisecond);
             writer.WriteString("category", TraceEvent.Category(e.Operation).ToString()); writer.WriteString("operation", e.Operation.ToString());
-            writer.WriteNumber("pid", e.Pid); writer.WriteNumber("tid", e.Tid); writer.WriteNumber("processIndex", e.ProcessIndex);
+            writer.WriteNumber("pid", e.Pid); writer.WriteNumber("tid", e.Tid); writer.WriteNumber("processIndex", Remap(e.ProcessIndex));
             writer.WriteString("path", e.Path); writer.WriteNumber("bytes", e.Bytes); writer.WriteString("detail", e.Detail); writer.WriteEndObject();
         }
         writer.WriteEndArray(); writer.WriteEndObject(); writer.Flush();
