@@ -4,6 +4,22 @@ using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Byte and rate formatting preserve small nonzero values and exact zero", () =>
+    {
+        Check(MetricFormatting.Bytes(0) == "0 B" && MetricFormatting.Rate(0) == "0 B/s");
+        Check(MetricFormatting.Rate(-0d) == "0 B/s");
+        Check(MetricFormatting.Bytes(1) == "1 B" && MetricFormatting.Bytes(191) == "191 B");
+        Check(MetricFormatting.Bytes(1024) == "1.0 KiB" && MetricFormatting.Bytes(1536) == "1.5 KiB");
+        Check(DiagnosticData.Rate(191) == "191 B/s" && DiagnosticData.Rate(1024) == "1.0 KiB/s");
+        Check(DiagnosticData.Bytes(191) == MetricFormatting.Bytes(191));
+        foreach (var value in new[] { double.Epsilon, 0.000001, 0.005, 0.01, 0.5, 1, 191, 1023, 1024, 1024 * 1024d })
+        {
+            var formatted = MetricFormatting.Rate(value);
+            Check(!formatted.StartsWith("0 ") && !formatted.StartsWith("0.0 ") && DiagnosticData.Rate(value) == formatted);
+        }
+        Check(MetricFormatting.Bytes(null) == "—" && DiagnosticData.Rate(null) == "—");
+        Check(MetricFormatting.Rate(double.NaN) == "—" && MetricFormatting.Rate(double.PositiveInfinity) == "—" && MetricFormatting.Rate(-1) == "—");
+    }),
     ("Keyed live rows retain identities across colliding labels, refreshes and eviction", () =>
     {
         var first = (Key: 101L, Name: "12:00:00", Value: 1);

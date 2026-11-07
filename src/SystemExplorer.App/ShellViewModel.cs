@@ -172,7 +172,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
 
 public static class Display
 {
-    public static string Bytes(ulong? bytes) => bytes is { } value ? value >= 1024UL * 1024 * 1024 ? $"{value / (1024d * 1024 * 1024):F2} GiB" : $"{value / (1024d * 1024):F1} MiB" : "—";
+    public static string Bytes(ulong? bytes) => MetricFormatting.Bytes(bytes);
     public static string Percent(double? value) => value is { } number ? $"{number:F1}%" : "—";
-    public static string Rate(double value) => value >= 1024 * 1024 ? $"{value / (1024 * 1024):F1} MiB/s" : $"{value / 1024:F0} KiB/s";
+    public static string Rate(double value) => MetricFormatting.Rate(value);
 }
