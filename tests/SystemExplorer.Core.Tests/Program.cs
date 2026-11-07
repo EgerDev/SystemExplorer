@@ -4,6 +4,40 @@ using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Keyed live rows retain identities across colliding labels, refreshes and eviction", () =>
+    {
+        var first = (Key: 101L, Name: "12:00:00", Value: 1);
+        var second = (Key: 102L, Name: "12:00:00", Value: 2);
+        var live = new System.Collections.ObjectModel.ObservableCollection<(long Key, string Name, int Value)>();
+        KeyedRows.Reconcile(live, new[] { (first.Key, first.Name, first.Value), (second.Key, second.Name, second.Value) }, r => r.Key);
+        var changes = new List<System.Collections.Specialized.NotifyCollectionChangedAction>();
+        live.CollectionChanged += (_, e) => changes.Add(e.Action);
+        KeyedRows.Reconcile(live, new[] { (101L, "12:00:00", 1), (102L, "12:00:00", 2), (103L, "12:00:01", 3) }, r => r.Item1);
+        Check(live[1].Key == second.Key && changes.SequenceEqual(new[] { System.Collections.Specialized.NotifyCollectionChangedAction.Add }));
+        changes.Clear();
+        KeyedRows.Reconcile(live, new[] { (102L, "12:00:00", 2), (103L, "12:00:01", 3), (104L, "12:00:02", 4) }, r => r.Item1);
+        Check(live[0].Key == second.Key && !changes.Contains(System.Collections.Specialized.NotifyCollectionChangedAction.Reset));
+        KeyedRows.Reconcile(live, live.Reverse().ToArray(), r => r.Key);
+        Check(live.Select(r => r.Key).SequenceEqual(new long[] { 104, 103, 102 }));
+        KeyedRows.Reconcile(live, live.Where(r => r.Value == 2).ToArray(), r => r.Key);
+        Check(live.Single().Key == second.Key);
+    }),
+    ("Keyed live rows reuse equal objects, replace changes, clear and reject duplicate keys", () =>
+    {
+        var original = new KeyedTestRow(1, "sample");
+        var live = new System.Collections.ObjectModel.ObservableCollection<KeyedTestRow> { original };
+        KeyedRows.Reconcile(live, new[] { new KeyedTestRow(1, "sample") }, row => row.Key);
+        Check(ReferenceEquals(live[0], original));
+        var updated = new KeyedTestRow(1, "updated");
+        KeyedRows.Reconcile(live, new[] { updated }, row => row.Key);
+        Check(ReferenceEquals(live[0], updated));
+        bool rejected = false;
+        try { KeyedRows.Reconcile(live, new[] { updated, updated }, row => row.Key); }
+        catch (ArgumentException) { rejected = true; }
+        Check(rejected && live.Count == 1 && ReferenceEquals(live[0], updated));
+        KeyedRows.Reconcile(live, Array.Empty<KeyedTestRow>(), row => row.Key);
+        Check(live.Count == 0);
+    }),
     ("Inventory identifier keys sort numerically with nulls last in both directions", () =>
     {
         var rows = new (string Text, decimal? Key)[] { ("0xFFC", 0xFFC), ("Unavailable", null), ("0x1010", 0x1010) };
@@ -639,6 +673,8 @@ static MonitorSnapshot Snapshot(int seconds, params ProcessSnapshot[] processes)
     CapturedAt = DateTimeOffset.UnixEpoch.AddSeconds(seconds),
     Processes = processes
 };
+
+sealed record KeyedTestRow(int Key, string Text);
 
 sealed class ManualTimeProvider : TimeProvider
 {
