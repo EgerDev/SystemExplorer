@@ -66,18 +66,18 @@ public sealed class DiagnosticsHistory
         var largest = ProcessGrouping.Create(snapshot.Processes).Where(g => g.PrivateBytes.HasValue).OrderByDescending(g => g.PrivateBytes).FirstOrDefault();
         if (largest is not null)
             result.Add(new($"Largest measured private commit: {largest.Name}",
-                $"{MiB(largest.PrivateBytes!.Value)} MiB across {largest.Members.Count} process(es). Private commit is not physical RAM; groups with missing values are excluded."));
+                $"{MetricFormatting.Bytes(largest.PrivateBytes)} across {largest.Members.Count} process(es). Private commit is not physical RAM; groups with missing values are excluded."));
 
         var mem = snapshot.Memory;
         if (mem.PhysicalAvailableBytes is { } available && mem.PhysicalTotalBytes is > 0)
         {
             var availablePercent = available * 100d / mem.PhysicalTotalBytes.Value;
-            result.Add(new("Physical memory availability", $"{MiB(available)} MiB ({availablePercent:F1}%) available. Available memory includes reclaimable pages; cache and commit are not additional physical totals."));
+            result.Add(new("Physical memory availability", $"{MetricFormatting.Bytes(available)} ({availablePercent:F1}%) available. Available memory includes reclaimable pages; cache and commit are not additional physical totals."));
             if (availablePercent < 10)
                 result.Add(new("Low available-memory signal", "Available physical memory is below 10% in this sample. This alone does not prove sustained pressure; compare the history and workload before taking action.", "Heuristic"));
         }
         if (mem.CommitTotalBytes is { } commit && mem.CommitLimitBytes is > 0)
-            result.Add(new("Commit headroom", $"{MiB(commit)} / {MiB(mem.CommitLimitBytes.Value)} MiB committed. Commit is backed by RAM and paging capacity; it is not resident memory."));
+            result.Add(new("Commit headroom", $"{MetricFormatting.Bytes(commit)} / {MetricFormatting.Bytes(mem.CommitLimitBytes)} committed. Commit is backed by RAM and paging capacity; it is not resident memory."));
 
         foreach (var group in replacements.GroupBy(r => r.Key, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() >= 3))
             result.Add(new("Repeated process-lifetime replacements",
@@ -95,7 +95,7 @@ public sealed class DiagnosticsHistory
             var increases = points.Zip(points.Skip(1)).Count(pair => pair.Second.Bytes > pair.First.Bytes);
             if (growth >= 32UL * 1024 * 1024 && growth >= first.Bytes * 0.1 && increases >= (points.Length - 1) * 0.75)
                 result.Add(new($"Sustained private-commit growth: {process.Name} (PID {process.Identity.Pid})",
-                    $"+{MiB(growth)} MiB over {duration:F0} seconds; {increases}/{points.Length - 1} intervals increased for the same creation-time identity. This is a trend, not a memory-leak diagnosis.", "Heuristic", $"growth:{process.Identity}"));
+                    $"+{MetricFormatting.Bytes(growth)} over {duration:F0} seconds; {increases}/{points.Length - 1} intervals increased for the same creation-time identity. This is a trend, not a memory-leak diagnosis.", "Heuristic", $"growth:{process.Identity}"));
         }
 
         if (relationships is not null && Math.Abs((snapshot.CapturedAt - relationships.CapturedAt).TotalSeconds) <= 10)
@@ -107,5 +107,4 @@ public sealed class DiagnosticsHistory
         return result;
     }
 
-    private static string MiB(ulong bytes) => (bytes / (1024d * 1024)).ToString("F1", global::System.Globalization.CultureInfo.InvariantCulture);
 }

@@ -17,6 +17,7 @@
             <Button x:Name="ThirdHeader" Grid.Column="3" Tag="3" Click="SortClicked"/>
         </Grid>
         <ListView x:Name="Rows" Grid.Row="4" SelectionMode="Single" SelectionChanged="SelectionChanged" AutomationProperties.Name="Diagnostic observations">
+            <ListView.ItemsPanel><ItemsPanelTemplate><ItemsStackPanel ItemsUpdatingScrollMode="KeepScrollOffset"/></ItemsPanelTemplate></ListView.ItemsPanel>
             <ListView.ItemTemplate><DataTemplate>
                 <Grid Padding="8,5" ToolTipService.ToolTip="{Binding Description}">
                     <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="{Binding Columns.FirstWidth}"/><ColumnDefinition Width="{Binding Columns.SecondWidth}"/><ColumnDefinition Width="{Binding Columns.ThirdWidth}"/></Grid.ColumnDefinitions>

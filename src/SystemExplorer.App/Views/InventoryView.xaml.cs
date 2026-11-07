@@ -103,6 +103,7 @@ public sealed partial class InventoryView : UserControl
             var selectedKey = preserveState ? (Rows.SelectedItem as InventoryRow)?.Key : null;
             var scroll = preserveState ? FindScroll(Rows) : null;
             var offset = scroll?.VerticalOffset ?? 0;
+            var follow = InventoryViewport.FollowLatest(live, sort == 0, descending, offset, scroll?.ScrollableHeight ?? 0);
             var anchor = liveRows.Select(row => (Row: row, Container: Rows.ContainerFromItem(row) as FrameworkElement))
                 .Where(item => item.Container is not null)
                 .Select(item => (item.Row.Key, Y: item.Container!.TransformToVisual(Rows).TransformPoint(default).Y, Height: item.Container.ActualHeight))
@@ -116,7 +117,13 @@ public sealed partial class InventoryView : UserControl
                 var retained = liveRows.FirstOrDefault(row => row.Key == anchor.Key);
                 var container = retained is null ? null : Rows.ContainerFromItem(retained) as FrameworkElement;
                 var adjustment = container is null ? 0 : container.TransformToVisual(Rows).TransformPoint(default).Y - anchor.Y;
-                scroll.ChangeView(null, Math.Max(0, container is null ? offset : scroll.VerticalOffset + adjustment), null, true);
+                var target = follow switch
+                {
+                    InventoryEdge.Top => 0,
+                    InventoryEdge.Bottom => scroll.ScrollableHeight,
+                    _ => Math.Max(0, container is null ? offset : scroll.VerticalOffset + adjustment)
+                };
+                scroll.ChangeView(null, target, null, true);
             }
         }
         else

@@ -27,6 +27,7 @@ public sealed record OverviewReading(
 
 public sealed class OverviewData
 {
+    public const string SystemCacheDefinition = "System cache = standby + system working set (GetPerformanceInfo). This overlaps physical totals; it is not Memory\\Cache Bytes or Task Manager Cached. Commit is not a physical-usage total.";
     private const int Capacity = 180;
     private readonly Queue<Point> points = new();
     private MonitorSnapshot? latest;

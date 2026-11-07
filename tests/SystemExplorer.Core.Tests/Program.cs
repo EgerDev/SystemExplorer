@@ -783,6 +783,60 @@ var tests = new (string Name, Action Run)[]
         Check(data.Create(null, new())!.Consumers[0].Key.Pid == 10);
         data.Observe(Snapshot(2, a, b with { PrivateBytes = 230UL * 1024 * 1024 }));
         Check(data.Create(null, new())!.Consumers[0].Key.Pid == 20);
+    }),
+    ("Live history follows only the newest time edge and anchors other views", () =>
+    {
+        Check(InventoryViewport.FollowLatest(true, true, true, 0, 500) == InventoryEdge.Top);
+        Check(InventoryViewport.FollowLatest(true, true, true, 0.5, 500) == InventoryEdge.Top);
+        Check(InventoryViewport.FollowLatest(true, true, false, 500, 500) == InventoryEdge.Bottom);
+        Check(InventoryViewport.FollowLatest(true, true, false, 499.5, 500) == InventoryEdge.Bottom);
+        foreach (var descending in new[] { false, true })
+        {
+            Check(InventoryViewport.FollowLatest(true, true, descending, 250, 500) == InventoryEdge.Anchor);
+            Check(InventoryViewport.FollowLatest(false, true, descending, 0, 0) == InventoryEdge.Anchor);
+            Check(InventoryViewport.FollowLatest(true, false, descending, 0, 0) == InventoryEdge.Anchor);
+            Check(InventoryViewport.FollowLatest(true, true, descending, 0, 0) == (descending ? InventoryEdge.Top : InventoryEdge.Bottom));
+            Check(InventoryViewport.FollowLatest(true, true, descending, double.NaN, 500) == InventoryEdge.Anchor);
+            Check(InventoryViewport.FollowLatest(true, true, descending, 0, double.PositiveInfinity) == InventoryEdge.Anchor);
+            Check(InventoryViewport.FollowLatest(true, true, descending, -1, 500) == InventoryEdge.Anchor);
+        }
+        Check(InventoryViewport.FollowLatest(true, true, false, 0, 500) == InventoryEdge.Anchor);
+        Check(InventoryViewport.FollowLatest(true, true, true, 500, 500) == InventoryEdge.Anchor);
+    }),
+    ("Overview system cache keeps provider bytes and identifies its distinct definition", () =>
+    {
+        var data = new OverviewData();
+        Check(data.Create(null, new()) is null);
+        data.Observe(Snapshot(0) with { Memory = new() { SystemCacheBytes = 5UL * 1024 * 1024 * 1024 } });
+        Check(data.Create(null, new())!.SystemCacheBytes == 5UL * 1024 * 1024 * 1024);
+        data.Observe(Snapshot(1));
+        Check(data.Create(null, new())!.SystemCacheBytes is null);
+        Check(OverviewData.SystemCacheDefinition.Contains("standby + system working set") && OverviewData.SystemCacheDefinition.Contains("GetPerformanceInfo"));
+    }),
+    ("Insights use shared byte units for large, small, zero and unavailable readings", () =>
+    {
+        var history = new DiagnosticsHistory();
+        var sample = Snapshot(0, P(1, 1) with { PrivateBytes = 5UL * 1024 * 1024 * 1024 }) with
+        {
+            Memory = new() { PhysicalAvailableBytes = 191, PhysicalTotalBytes = 1024, CommitTotalBytes = 0, CommitLimitBytes = 32UL * 1024 * 1024 * 1024 }
+        };
+        var insights = history.Explain(sample);
+        Check(insights.Single(i => i.Title.StartsWith("Largest measured")).Evidence.Contains(MetricFormatting.Bytes(sample.Processes[0].PrivateBytes)));
+        Check(insights.Single(i => i.Title == "Physical memory availability").Evidence.StartsWith("191 B"));
+        Check(insights.Single(i => i.Title == "Commit headroom").Evidence.StartsWith($"0 B / {MetricFormatting.Bytes(sample.Memory.CommitLimitBytes)}"));
+        Check(history.Explain(Snapshot(1)).Count == 0);
+    }),
+    ("Diagnostics summary scrolling reserves table space in compact and expanded layouts", () =>
+    {
+        foreach (var height in new[] { 280d, 360, 520, 900 })
+        {
+            var summary = DiagnosticsLayout.MaximumSummaryHeight(height, 60, 8);
+            Check(summary >= 0 && height - 60 - 16 - summary >= DiagnosticsLayout.MinimumTableHeight);
+        }
+        Check(DiagnosticsLayout.MaximumSummaryHeight(0, 60, 8) == 0);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(double.NaN, 60, 8) == 0);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(500, double.PositiveInfinity, 8) == 0);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(500, 60, -1) == 0);
     })
 };
 var failures = 0;

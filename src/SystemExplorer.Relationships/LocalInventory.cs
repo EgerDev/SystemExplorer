@@ -11,12 +11,15 @@ internal static class LocalInventory
     internal static bool IncludeStartupEntry(string name, bool isFolderEntry) =>
         !isFolderEntry || !string.Equals(name, "desktop.ini", StringComparison.OrdinalIgnoreCase);
 
+    internal static IReadOnlyList<RegistryView> StartupViews(RegistryHive hive, bool is64Bit) =>
+        !is64Bit ? [RegistryView.Registry32] : hive == RegistryHive.CurrentUser
+            ? [RegistryView.Registry64] : [RegistryView.Registry64, RegistryView.Registry32];
+
     internal static IReadOnlyList<StartupItem> GetStartupItems(CancellationToken token)
     {
         var items = new List<StartupItem>();
-        var views = Environment.Is64BitOperatingSystem ? new[] { RegistryView.Registry64, RegistryView.Registry32 } : new[] { RegistryView.Registry32 };
         foreach (var hive in new[] { RegistryHive.CurrentUser, RegistryHive.LocalMachine })
-        foreach (var view in views)
+        foreach (var view in StartupViews(hive, Environment.Is64BitOperatingSystem))
         foreach (string keyName in new[] { "Run", "RunOnce" })
         {
             token.ThrowIfCancellationRequested();

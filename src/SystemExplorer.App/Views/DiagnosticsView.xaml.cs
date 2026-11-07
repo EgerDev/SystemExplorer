@@ -176,6 +176,9 @@ public sealed partial class DiagnosticsView : UserControl
     private void UpdateHistoryLayout()
     {
         Layout.RowSpacing = compact ? 6 : 8;
+        SummaryPanel.Spacing = Layout.RowSpacing;
+        var maximum = DiagnosticsLayout.MaximumSummaryHeight(ActualHeight, Footer.ActualHeight, Layout.RowSpacing);
+        if (Math.Abs(SummaryScroll.MaxHeight - maximum) > 1) SummaryScroll.MaxHeight = maximum;
         ChartCard.Padding = historyExpanded ? new Thickness(12) : new Thickness(8, 4, 8, 4);
         ChartLayout.RowSpacing = historyExpanded ? 4 : 0;
         PlotRow.Height = new GridLength(historyExpanded ? 72 : 0);

@@ -21,7 +21,6 @@ public sealed partial class MainWindow
         var toggle = new Button { Content = "Show table" };
         var chart = new ProcessHistoryChart();
         var table = new InventoryView { Visibility = Visibility.Collapsed };
-        if (table.FindName("Search") is TextBox search) search.PlaceholderText = "Filter live history samples…";
         var status = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
         var content = new Grid { RowSpacing = 5 };
         void ResizeContent()
@@ -68,7 +67,7 @@ public sealed partial class MainWindow
                         $"{p.At:O}\nPID {history.Identity.Pid} · creation {history.Identity.CreationTimeFileTime}\n{(p.Observed ? "Observed" : "Not observed; this does not establish exit")} · Gap before: {p.BreakBefore}\nPrivate commit: {DiagnosticData.Bytes(p.PrivateBytes)}\nWorking set: {DiagnosticData.Bytes(p.WorkingSetBytes)}\nPrivate working set: {DiagnosticData.Bytes(p.PrivateWorkingSetBytes)}\nCPU (machine normalized): {(p.CpuPercent is { } cpu ? $"{cpu:F2}%" : "Unavailable")}\nRead: {(p.ReadBytesPerSecond is { } read ? Display.Rate(read) : "Unavailable")}\nWrite: {(p.WriteBytesPerSecond is { } write ? Display.Rate(write) : "Unavailable")}\nPrivate commit is not physical RAM; shared resident pages are not additive.",
                         NameKey: p.At.UtcTicks, Key: $"{history.Identity}:{p.At.UtcTicks}")),
                     "Sample time", "Private commit", "Working set", "Private WS", reverse: true,
-                    preserveState: tableIdentity == history.Identity);
+                    preserveState: tableIdentity == history.Identity, live: true);
                 tableIdentity = history.Identity;
             }
             renderedAt = history?.Points.LastOrDefault()?.At;

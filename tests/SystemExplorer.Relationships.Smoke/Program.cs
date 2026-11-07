@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using Microsoft.Win32;
 using SystemExplorer.Core;
 using SystemExplorer.Relationships;
 
@@ -229,6 +230,11 @@ uint ParseStartTypeCode(string value)
 
 RunServiceConfigReaderChecks();
 
+Require(LocalInventory.StartupViews(RegistryHive.CurrentUser, true).SequenceEqual(new[] { RegistryView.Registry64 }), "Shared HKCU Run keys enumerated twice.");
+Require(LocalInventory.StartupViews(RegistryHive.LocalMachine, true).SequenceEqual(new[] { RegistryView.Registry64, RegistryView.Registry32 }), "Distinct machine startup views lost.");
+foreach (var hive in new[] { RegistryHive.CurrentUser, RegistryHive.LocalMachine })
+    Require(LocalInventory.StartupViews(hive, false).SequenceEqual(new[] { RegistryView.Registry32 }), "32-bit startup view incorrect.");
+
 Invalid(() => EndpointTable.Parse(new byte[3], true, false, default), "Short header accepted.");
 byte[] invalidCount = new byte[4];
 BinaryPrimitives.WriteUInt32LittleEndian(invalidCount, uint.MaxValue);
@@ -326,6 +332,7 @@ try
     await Cancelled(t => provider.GetPublisherAsync(Environment.ProcessPath!, t));
     var startup = await provider.GetStartupItemsAsync(default);
     Require(startup.All(s => !string.IsNullOrEmpty(s.Source) && !string.IsNullOrEmpty(s.Scope)), "Startup provenance missing.");
+    Require(startup.Where(s => s.Scope == "Current user" && s.Source.StartsWith("CurrentUser\\")).All(s => !Environment.Is64BitOperatingSystem || s.Source.EndsWith("(Registry64)")), "Shared HKCU startup keys have duplicate 32-bit provenance.");
     var unsigned = await provider.GetPublisherAsync(typeof(WindowsRelationshipProvider).Assembly.Location, default);
     Require(unsigned.Publisher is null && !unsigned.VerificationStatus.StartsWith("Verified", StringComparison.Ordinal), "Unsigned assembly claimed trusted.");
     var remote = await provider.GetPublisherAsync(@"\\invalid.example\share\file.exe", default);

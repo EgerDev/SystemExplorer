@@ -61,6 +61,8 @@ public sealed partial class OverviewView : UserControl
         MemoryEvidence.Text = $"{Display.Bytes(reading?.PhysicalUsedBytes)} used / {Display.Bytes(reading?.PhysicalTotalBytes)} total.";
         AvailableValue.Text = Display.Bytes(reading?.PhysicalAvailableBytes);
         CacheValue.Text = Display.Bytes(reading?.SystemCacheBytes);
+        CacheDefinition.Text = OverviewData.SystemCacheDefinition;
+        AutomationProperties.SetHelpText(CacheValue, OverviewData.SystemCacheDefinition);
         CommitValue.Text = $"{Display.Bytes(reading?.CommitTotalBytes)} / {Display.Bytes(reading?.CommitLimitBytes)}";
         AutomationProperties.SetName(AvailableValue, $"Available physical memory: {AvailableValue.Text}");
         AutomationProperties.SetName(CacheValue, $"System cache, overlaps physical memory: {CacheValue.Text}");
