@@ -826,17 +826,30 @@ var tests = new (string Name, Action Run)[]
         Check(insights.Single(i => i.Title == "Commit headroom").Evidence.StartsWith($"0 B / {MetricFormatting.Bytes(sample.Memory.CommitLimitBytes)}"));
         Check(history.Explain(Snapshot(1)).Count == 0);
     }),
-    ("Diagnostics summary scrolling reserves table space in compact and expanded layouts", () =>
+    ("Diagnostics budget reserves expanded plot and legend outside summary scrolling", () =>
     {
         foreach (var height in new[] { 280d, 360, 520, 900 })
         {
-            var summary = DiagnosticsLayout.MaximumSummaryHeight(height, 60, 8);
-            Check(summary >= 0 && height - 60 - 16 - summary >= DiagnosticsLayout.MinimumTableHeight);
+            foreach (var expanded in new[] { false, true })
+            {
+                var chart = expanded ? DiagnosticsLayout.ExpandedChartHeight : DiagnosticsLayout.CollapsedChartHeight;
+                var summary = DiagnosticsLayout.MaximumSummaryHeight(height, 48, 6, true, expanded);
+                Check(summary >= 0);
+                if (height >= 48 + 18 + chart + DiagnosticsLayout.MinimumTableHeight)
+                    Check(height - 48 - 18 - summary >= chart + DiagnosticsLayout.MinimumTableHeight);
+            }
         }
-        Check(DiagnosticsLayout.MaximumSummaryHeight(0, 60, 8) == 0);
-        Check(DiagnosticsLayout.MaximumSummaryHeight(double.NaN, 60, 8) == 0);
-        Check(DiagnosticsLayout.MaximumSummaryHeight(500, double.PositiveInfinity, 8) == 0);
-        Check(DiagnosticsLayout.MaximumSummaryHeight(500, 60, -1) == 0);
+        var compactSummary = DiagnosticsLayout.MaximumSummaryHeight(390, 48, 6, true, true);
+        Check(compactSummary == 24);
+        Check(390 - 48 - 18 - compactSummary - DiagnosticsLayout.MinimumTableHeight == DiagnosticsLayout.ExpandedChartHeight);
+        Check(DiagnosticsLayout.ExpandedChartHeight >= DiagnosticsLayout.PlotHeight + 32 + 32 + 16 + 8);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(390, 48, 6, true, true, 180) == 8);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(390, 48, 6, false, true) == 194);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(0, 60, 8, true, true) == 0);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(double.NaN, 60, 8, true, true) == 0);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(500, double.PositiveInfinity, 8, true, true) == 0);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(500, 60, -1, true, true) == 0);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(500, 60, 8, true, true, double.NaN) == 0);
     }),
     // Area A: shell and process table
     ("Minimal reconciliation preserves unchanged rows without notifications", () =>

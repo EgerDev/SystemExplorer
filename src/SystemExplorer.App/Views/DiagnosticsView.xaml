@@ -8,7 +8,7 @@
     SizeChanged="ViewSizeChanged">
     <Grid x:Name="Layout" RowSpacing="8">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <ScrollViewer x:Name="SummaryScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel x:Name="SummaryPanel" Spacing="8">
@@ -19,7 +19,10 @@
             <controls:SummaryCard x:Name="AvailableCard" Grid.Column="1" Label="Available physical memory" Glyph="&#xE9D9;"/>
             <controls:SummaryCard x:Name="CommitCard" Grid.Column="2" Label="System commit / limit" Glyph="&#xE8EF;"/>
         </Grid>
-        <Border x:Name="ChartCard" Style="{StaticResource Card}" Padding="12">
+        <TextBlock x:Name="ContextText" TextWrapping="Wrap" FontSize="12" Style="{StaticResource Muted}"/>
+        </StackPanel>
+        </ScrollViewer>
+        <Border x:Name="ChartCard" Grid.Row="1" Style="{StaticResource Card}" Padding="8" SizeChanged="ViewSizeChanged">
             <Grid x:Name="ChartLayout" RowSpacing="4">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition x:Name="PlotRow" Height="72"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Grid>
@@ -34,10 +37,7 @@
                 <TextBlock x:Name="ChartLegend" Grid.Row="2" FontSize="12" TextWrapping="Wrap" Style="{StaticResource Muted}"/>
             </Grid>
         </Border>
-        <TextBlock x:Name="ContextText" TextWrapping="Wrap" FontSize="12" Style="{StaticResource Muted}"/>
-        </StackPanel>
-        </ScrollViewer>
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="2">
             <Border x:Name="TablePanel" Style="{StaticResource Card}" Padding="0">
                 <Grid>
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -97,7 +97,7 @@
                 <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/></Style></ListView.ItemContainerStyle>
             </ListView>
         </Grid>
-        <Grid x:Name="Footer" Grid.Row="2" ColumnSpacing="8" SizeChanged="ViewSizeChanged">
+        <Grid x:Name="Footer" Grid.Row="3" ColumnSpacing="8" SizeChanged="ViewSizeChanged">
             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
         <Expander Header="Measurement definitions and collection limits" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
             <ScrollViewer MaxHeight="100"><TextBlock x:Name="LimitsText" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True"/></ScrollViewer>

@@ -177,11 +177,16 @@ public sealed partial class DiagnosticsView : UserControl
     {
         Layout.RowSpacing = compact ? 6 : 8;
         SummaryPanel.Spacing = Layout.RowSpacing;
-        var maximum = DiagnosticsLayout.MaximumSummaryHeight(ActualHeight, Footer.ActualHeight, Layout.RowSpacing);
+        var chartVisible = ChartCard.Visibility == Visibility.Visible;
+        var minimum = historyExpanded ? DiagnosticsLayout.ExpandedChartHeight : DiagnosticsLayout.CollapsedChartHeight;
+        ChartCard.MinHeight = chartVisible ? minimum : 0;
+        var maximum = DiagnosticsLayout.MaximumSummaryHeight(ActualHeight, Footer.ActualHeight, Layout.RowSpacing,
+            chartVisible, historyExpanded, ChartCard.ActualHeight);
         if (Math.Abs(SummaryScroll.MaxHeight - maximum) > 1) SummaryScroll.MaxHeight = maximum;
-        ChartCard.Padding = historyExpanded ? new Thickness(12) : new Thickness(8, 4, 8, 4);
+        ChartCard.Padding = historyExpanded ? new Thickness(compact ? 8 : 12) : new Thickness(8, 4, 8, 4);
         ChartLayout.RowSpacing = historyExpanded ? 4 : 0;
-        PlotRow.Height = new GridLength(historyExpanded ? 72 : 0);
+        PlotRow.Height = new GridLength(historyExpanded ? DiagnosticsLayout.PlotHeight : 0);
+        PlotRow.MinHeight = historyExpanded ? DiagnosticsLayout.PlotHeight : 0;
         Trend.Visibility = ChartLegend.Visibility = historyExpanded ? Visibility.Visible : Visibility.Collapsed;
         HistoryToggle.Content = historyExpanded ? "Hide chart" : "Show chart";
     }
