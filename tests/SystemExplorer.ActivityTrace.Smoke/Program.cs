@@ -11,6 +11,14 @@ using SystemExplorer.Windows;
 
 static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
 static bool Active(string? name) => name is not null && TraceEventSession.GetActiveSessionNames().Contains(name);
+if (args.Contains("--nonadmin"))
+{
+    await using var gated = await WindowsActivityTraceRecorder.StartAsync(new(), []);
+    var gatedResult = await gated.Completion;
+    Check(gatedResult.Status == TraceStatus.RequiresAdministrator && gated.SessionName is null, "Restricted token must return RequiresAdministrator with no session attempted.");
+    Console.WriteLine("PASS: restricted-token RequiresAdministrator; no session created.");
+    return;
+}
 using var own = Process.GetCurrentProcess();
 TraceProcessSeed[] seeds = [new(Environment.ProcessId, -1, own.StartTime.ToUniversalTime().ToFileTimeUtc(), own.ProcessName)];
 var before = TraceEventSession.GetActiveSessionNames().Where(n => n.StartsWith(WindowsActivityTraceRecorder.SessionPrefix, StringComparison.Ordinal)).ToHashSet();
@@ -101,6 +109,8 @@ await using (var trace = await WindowsActivityTraceRecorder.StartAsync(new(Durat
         Console.WriteLine($"Measurement (smoke + recorder + generated load): elapsed={watch.Elapsed.TotalSeconds:F2}s; CPU={(own.TotalProcessorTime - initialCpu).TotalMilliseconds:F1}ms; sampled capture peak WS={sampledPeak / 1048576d:F1}MiB; process lifetime peak WS={own.PeakWorkingSet64 / 1048576d:F1}MiB");
         Check(result.Status is TraceStatus.Completed or TraceStatus.Partial, "Live capture must finish, not fail.");
         Check(result.Malformed == 0, "Host-supported event decoding must not be malformed.");
+        if (result.EventsLost == 0 && result.BufferDropped == 0 && !result.CapsHit) Check(result.Status == TraceStatus.Completed, "Unresolved names alone must not make a capture Partial.");
+        if (result.UnresolvedNames > 0) Check(result.Detail.Contains("events with unresolved names"), "Unresolved count must remain an explicit limitation.");
         var childInfo = result.Processes.Single(p => p.Pid == childPid && !p.Seeded);
         Check(childInfo.ParentPid == Environment.ProcessId && childInfo.ParentIndex == 0 && childInfo.ExitCode == 7 && childInfo.ExitUtc is not null && childInfo.ImageName?.Equals("cmd.exe", StringComparison.OrdinalIgnoreCase) == true, "Child start, verified parent, name and exit code.");
         Check(result.Events.Any(e => e.Pid == childPid && e.Operation == TraceOperation.ProcessStart) && result.Events.Any(e => e.Pid == childPid && e.Operation == TraceOperation.ProcessStop), "Child lifecycle rows.");

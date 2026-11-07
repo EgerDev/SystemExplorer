@@ -8,7 +8,7 @@ namespace SystemExplorer.Windows;
 
 public sealed partial class WindowsActivityTraceRecorder
 {
-    private const string UnknownName = "(name unavailable: opened before trace)";
+    private const string UnknownName = "(unresolved)";
     private static object Required(EtwEvent data, string field) => data.PayloadByName(field) ?? throw new FormatException("Missing ETW field.");
     private static int Int(EtwEvent data, string field) => Convert.ToInt32(Required(data, field), CultureInfo.InvariantCulture);
     private static ulong Unsigned(EtwEvent data, string field) => Required(data, field) switch
@@ -26,7 +26,7 @@ public sealed partial class WindowsActivityTraceRecorder
     }
     private string Name(string? value)
     {
-        if (!string.IsNullOrEmpty(value)) return value;
+        if (!string.IsNullOrEmpty(value) && !value.StartsWith(UnknownName, StringComparison.Ordinal)) return value;
         state.ReportDiagnostics(unresolvedNames: 1); return UnknownName;
     }
 
@@ -146,8 +146,7 @@ public sealed partial class WindowsActivityTraceRecorder
             else if (baseObject == 0) path = relative;
             else
             {
-                path = UnknownName + (string.IsNullOrEmpty(relative) ? "" : "\\" + relative); detail = "relative to key opened before trace";
-                state.ReportDiagnostics(unresolvedNames: 1);
+                path = UnknownName; detail = "relative to key opened before trace";
             }
             if (status == 0) { registryKeys.Remove(obj); Map(registryKeys, obj, path); }
         }

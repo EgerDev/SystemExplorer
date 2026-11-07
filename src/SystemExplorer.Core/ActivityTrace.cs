@@ -270,7 +270,8 @@ public sealed class TraceRecorderState
             if (final is not null) return final;
             var events = ring.Snapshot();
             bool capped = externalCaps || strings.Capped || processes.Truncated || TraceProcessSummary.HasCappedSets(events);
-            if (status == TraceStatus.Completed && (eventsLost > 0 || ring.Dropped > 0 || capped || malformed > 0 || unresolved > 0)) status = TraceStatus.Partial;
+            if (status == TraceStatus.Completed && (eventsLost > 0 || ring.Dropped > 0 || capped || malformed > 0)) status = TraceStatus.Partial;
+            if (unresolved > 0) detail += $" {unresolved:N0} events with unresolved names — objects opened before recording.";
             return final = new(StartedUtc, stoppedUtc, Options, status, detail, eventsLost, ring.Dropped, malformed, unresolved, processes.Truncated, capped,
                 Array.AsReadOnly(events), Array.AsReadOnly(processes.Snapshot()), Counts(), seen, excluded, started);
         }

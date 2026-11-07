@@ -1360,6 +1360,9 @@ static class ActivityTraceTests
         Require(summary.RegistryKeys.DistinctRetained == 1 && summary.Endpoints.DistinctRetained == 1 && r.CapsHit && r.Status == TraceStatus.Partial);
         Require(TraceProcessSummary.Build(r, 999).Files.DistinctRetained == 0);
         Require(State().Complete(At, eventsLost: 1).Status == TraceStatus.Partial);
+        var unresolved = State(); unresolved.ReportDiagnostics(unresolvedNames: 5);
+        var unresolvedResult = unresolved.Complete(At);
+        Require(unresolvedResult.Status == TraceStatus.Completed && unresolvedResult.UnresolvedNames == 5 && unresolvedResult.Detail.Contains("5 events with unresolved names"));
         var strings = State(stringCap: 0); strings.Record(At, 1, 0, TraceOperation.FileRead, "x"); Require(strings.Complete(At).Status == TraceStatus.Partial);
         var overflow = State(); for (int i = 0; i < 200001; i++) overflow.Record(At, 1, 0, TraceOperation.FileRead);
         var o = overflow.Complete(At); Require(o.BufferDropped == 1 && o.Status == TraceStatus.Partial && o.Events[0].Sequence == 2);
