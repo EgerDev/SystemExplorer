@@ -19,6 +19,7 @@
             <controls:SummaryCard x:Name="AvailableCard" Grid.Column="1" Label="Available physical memory" Glyph="&#xE9D9;"/>
             <controls:SummaryCard x:Name="CommitCard" Grid.Column="2" Label="System commit / limit" Glyph="&#xE8EF;"/>
         </Grid>
+        <Button Content="Investigate RAM" Tag="RamAttribution" Click="InventoryClicked" HorizontalAlignment="Right" Visibility="{Binding Visibility, ElementName=MemorySummary}"/>
         <TextBlock x:Name="ContextText" TextWrapping="Wrap" FontSize="12" Style="{StaticResource Muted}"/>
         </StackPanel>
         </ScrollViewer>
