@@ -31,6 +31,10 @@ foreach (var source in new[] { ProcessSightingSource.Toolhelp, ProcessSightingSo
 }
 Require(first.Sources.Items.Count == 8, "All eight process sources must report status.");
 Require(first.Sightings.Items.Any(s => s.Identity == childIdentity && s.Exited), "Held exited child must be observed as exited.");
+var exitedChild = first.Sightings.Items.First(s => s.Identity == childIdentity && s.Exited);
+Require(exitedChild.ExitCode == 0, "Held child exit code must be zero.");
+Require(exitedChild.ImagePath is not null || exitedChild.ImageDetail?.StartsWith("Image unavailable:") == true, "Image query must supply a path or explicit failure reason.");
+Console.WriteLine($"Zombie metadata: {exitedChild.ImagePath ?? exitedChild.ImageDetail}; creation={childIdentity.CreationTimeFileTime}; exit={exitedChild.ExitCode}");
 var candidates = first.Sightings.Items.Select(s => s.Identity).DistinctBy(i => i.Pid).ToArray();
 await Task.Delay(300, token);
 var second = await provider.RecheckAsync(new(candidates, 8192), token);

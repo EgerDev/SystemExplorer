@@ -15,7 +15,8 @@ public sealed class BoundedItems<T>
 
 public enum ProcessSightingSource { Toolhelp, NtSystemInformation, NtGetNextProcess, PidProbe, EtwOwner, TcpOwner, UdpOwner, ServiceOwner }
 public sealed record ProcessSighting(ProcessIdentity Identity, ProcessSightingSource Source,
-    string? ImageName = null, string? ImagePath = null, bool Exited = false, InspectionStatus Status = InspectionStatus.Available);
+    string? ImageName = null, string? ImagePath = null, bool Exited = false, InspectionStatus Status = InspectionStatus.Available,
+    uint? ExitCode = null, string? ImageDetail = null);
 public sealed record ProcessSourceStatus(ProcessSightingSource Source, InspectionStatus Status, string Detail, double ElapsedMilliseconds = 0);
 public sealed record ProcessCrossViewSnapshot(DateTimeOffset CapturedAt, InspectionStatus Status, string Detail,
     bool IsElevated, BoundedItems<ProcessSourceStatus> Sources, BoundedItems<ProcessSighting> Sightings);

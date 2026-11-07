@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Win32.SafeHandles;
 using SystemExplorer.Core;
 using static SystemExplorer.Windows.HiddenNativeMethods;
@@ -141,8 +142,14 @@ public sealed class WindowsHiddenProcessProvider : IProcessCrossViewProvider
     {
         bool time = NativeMethods.GetProcessTimes(process, out var creation, out _, out _, out _);
         bool exit = GetExitCodeProcess(process, out uint code);
-        return new(new(pid, time && creation.Ticks > 0 ? (long)creation.Ticks : null), source, Exited: exit && code != 259,
-            Status: time && exit ? InspectionStatus.Available : InspectionStatus.Partial);
+        var image = new StringBuilder(32768);
+        uint length = (uint)image.Capacity;
+        bool hasImage = NativeMethods.QueryFullProcessImageNameW(process, 0, image, ref length);
+        string? path = hasImage ? image.ToString() : null;
+        string? imageDetail = hasImage ? null : $"Image unavailable: Win32 {Marshal.GetLastWin32Error()}";
+        return new(new(pid, time && creation.Ticks > 0 ? (long)creation.Ticks : null), source, ImageName: path is null ? null : Path.GetFileName(path),
+            ImagePath: path, Exited: exit && code != 259, Status: time && exit ? InspectionStatus.Available : InspectionStatus.Partial,
+            ExitCode: exit ? code : null, ImageDetail: imageDetail);
     }
     private static InspectionStatus Error(int error) => error == 5 ? InspectionStatus.AccessDenied : error is 50 or 120 ? InspectionStatus.Unsupported : InspectionStatus.Failed;
     private sealed class SourceFailure(InspectionStatus status, string detail) : Exception(detail) { internal InspectionStatus Status { get; } = status; }

@@ -1365,6 +1365,22 @@ static class HiddenItemsTests
         Require(SuspiciousLeadRules.Evaluate(persistence).Items.Count == 3);
         Require(SuspiciousLeadRules.Evaluate(input with { Persistence = B(missing with { Status = InspectionStatus.AccessDenied }, missing with { IsReference = true }, missing with { Exists = null }) }).Items.Count == 0);
         Require(SuspiciousLeadRules.Evaluate(persistence, cap: 1).Truncated);
+        var unsigned = SuspiciousLeadRules.SignatureLead(Image(@"C:\apps\chrome.exe", SignatureState.Unsigned), id)!;
+        Require(unsigned.Title == "Unsigned image");
+        Require(SuspiciousLeadRules.SignatureLead(Image(@"C:\x.exe", SignatureState.NotTrusted))!.Title == "Signature not trusted");
+        var otherIdentity = new ProcessIdentity(81, 200);
+        var grouped = SuspiciousLeadRules.Aggregate(B(unsigned, unsigned with { ProcessIdentity = otherIdentity, Path = @"c:\APPS\chrome.exe" }), new HashSet<ProcessIdentity> { otherIdentity }, 1);
+        Require(grouped.Items.Count == 1 && grouped.Items[0].ProcessIdentity == otherIdentity);
+        Require(grouped.Items[0].Evidence.Contains("2 running instances") && grouped.Items[0].Evidence.Contains("remaining PIDs omitted"));
+        Require(SuspiciousLeadRules.Aggregate(B(unsigned), new HashSet<ProcessIdentity>()).Items[0].ProcessIdentity is null);
+        Require(SuspiciousLeadRules.Aggregate(B<SuspiciousLead>(), new HashSet<ProcessIdentity>()).Items.Count == 0);
+        Require(SuspiciousLeadRules.Aggregate(new BoundedItems<SuspiciousLead>([unsigned], 1, true), new HashSet<ProcessIdentity>()).Truncated);
+        var coverage = new SuspiciousLead(LeadCategory.Persistence, LeadSeverity.Info, "Persistence target unavailable", "Cannot parse", "entry A", "Indirect launcher");
+        var coverageRows = SuspiciousLeadRules.Aggregate(B(coverage, coverage with { Evidence = "entry B" }), new HashSet<ProcessIdentity>());
+        Require(coverageRows.Items.Count == 1 && coverageRows.Items[0].Evidence.Contains("2 configuration observations"));
+        bool invalidDetailCap = false;
+        try { SuspiciousLeadRules.Aggregate(B(unsigned), new HashSet<ProcessIdentity>(), 0); } catch (ArgumentOutOfRangeException) { invalidDetailCap = true; }
+        Require(invalidDetailCap);
         Require(new BoundedItems<int>([1, 2], 1).Items.SequenceEqual([1]) && new BoundedItems<int>([], 0).Items.Count == 0);
         Require(new BoundedItems<int>([], 2, true).Truncated);
         Require(new AdsObservation("x", ":Zone.Identifier:$DATA", 10).Severity == LeadSeverity.Info);

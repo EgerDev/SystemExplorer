@@ -70,7 +70,7 @@ public static class SuspiciousLeadRules
     public static SuspiciousLead? SignatureLead(ImageProvenance provenance, ProcessIdentity? identity = null)
     {
         if (provenance.Status != InspectionStatus.Available || provenance.Signature is not (SignatureState.Unsigned or SignatureState.NotTrusted)) return null;
-        return new(LeadCategory.Signature, LeadSeverity.Medium, "Image signature needs review", "Local signature verification reports " + provenance.Signature,
+        return new(LeadCategory.Signature, LeadSeverity.Medium, provenance.Signature == SignatureState.Unsigned ? "Unsigned image" : "Signature not trusted", "Local signature verification reports " + provenance.Signature,
             provenance.Path, "Unsigned software may be legitimate; local trust failure does not establish compromise. No online revocation was checked.", identity, provenance.Path);
     }
 
@@ -125,10 +125,34 @@ public static class SuspiciousLeadRules
                 if (target.Status != InspectionStatus.Available) continue;
                 if (target.Exists == false) yield return new(LeadCategory.Persistence, LeadSeverity.Low, "Persistence target missing", "Target was reported missing.", target.Name, "Uninstalled software or an offline volume may leave stale entries.", Path: target.ParsedPath);
                 else if (target.Exists == true && target.Provenance is { } provenance && Same(provenance.Path, target.ParsedPath) && SignatureLead(provenance) is { } signature)
-                    yield return signature with { Category = LeadCategory.Persistence, Title = "Persistence target signature needs review", Evidence = target.Name };
+                    yield return signature with { Category = LeadCategory.Persistence, Title = "Persistence: " + signature.Title, Evidence = target.Name };
             }
         }
         return new(Rows().DistinctBy(l => (l.Category, l.Title, l.ProcessIdentity, l.Path, l.Evidence)), cap,
             input.Processes.Truncated || input.Endpoints.Truncated || input.Persistence.Truncated);
+    }
+
+    public static BoundedItems<SuspiciousLead> Aggregate(BoundedItems<SuspiciousLead> leads,
+        IReadOnlySet<ProcessIdentity> runningIdentities, int detailCap = 32)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(detailCap);
+        var rows = leads.Items.GroupBy(l => (l.Category, l.Title, l.Severity, Path: l.Path?.Replace('/', '\\').ToUpperInvariant(),
+            Unkeyed: l.Path is null && l.Category != LeadCategory.Persistence ? l.Evidence : "")).Select(group =>
+        {
+            var first = group.First();
+            var identities = group.Where(l => l.ProcessIdentity is not null).Select(l => l.ProcessIdentity!.Value).Distinct().ToArray();
+            var evidence = group.Select(l => l.Evidence).Distinct().ToArray();
+            string instances = identities.Length == 0 ? "" : $"{identities.Length} running instances observed at capture.\nPIDs: {string.Join(", ", identities.Take(detailCap).Select(i => i.Pid))}" +
+                (identities.Length > detailCap ? $" (first {detailCap}; remaining PIDs omitted)" : "") + "\n";
+            bool coverage = first.Category == LeadCategory.Persistence && first.Path is null && first.Severity == LeadSeverity.Info;
+            return first with
+            {
+                Title = coverage ? "Persistence targets not assessed" : first.Title,
+                Evidence = instances + (coverage ? $"{group.Count()} configuration observations; coverage limitation, not a suspicious finding.\n" : "") +
+                    string.Join("\n", evidence.Take(detailCap)) + (evidence.Length > detailCap ? $"\nFirst {detailCap} evidence entries shown." : ""),
+                ProcessIdentity = identities.Where(runningIdentities.Contains).Select(i => (ProcessIdentity?)i).FirstOrDefault()
+            };
+        });
+        return new(rows, leads.Items.Count, leads.Truncated);
     }
 }

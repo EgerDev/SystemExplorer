@@ -7,8 +7,8 @@
     <Grid x:Name="LayoutRoot" RowSpacing="10">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
         <Grid ColumnSpacing="10">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <ComboBox x:Name="Selector" SelectedIndex="0" SelectionChanged="ScanChanged" HorizontalAlignment="Stretch" MaxWidth="420" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Hidden items scan">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" MaxWidth="420"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <ComboBox x:Name="Selector" SelectedIndex="0" SelectionChanged="ScanChanged" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Hidden items scan">
                 <x:String>Processes cross-view</x:String><x:String>Services cross-view</x:String><x:String>Scheduled tasks cross-view</x:String><x:String>Suspicious leads</x:String><x:String>Alternate data streams</x:String>
             </ComboBox>
             <Button x:Name="RunButton" Grid.Column="1" Content="Run" Click="RunClicked" MinWidth="88" Style="{StaticResource AccentButtonStyle}"/>
@@ -21,7 +21,7 @@
             <controls:SummaryCard x:Name="Low" Grid.Column="2" Label="Low" Value="0" Glyph="&#xE946;"/>
             <controls:SummaryCard x:Name="Info" Grid.Column="3" Label="Info" Value="0" Glyph="&#xE946;"/>
         </Grid>
-        <ScrollViewer Grid.Row="3" MaxHeight="92" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Spacing="4">
                 <TextBlock x:Name="CaptureStatus" Text="Not run yet — click Run" TextWrapping="Wrap" FontSize="12"/>
                 <TextBlock x:Name="Sources" Text="Read-only, local observations. Leads are not proof of compromise." TextWrapping="Wrap" FontSize="12" Style="{StaticResource Muted}" IsTextSelectionEnabled="True"/>

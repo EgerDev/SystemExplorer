@@ -86,14 +86,18 @@ public sealed partial class MainWindow
         {
             var seen = result.Evidence.Items.Select(e => e.Source).Distinct().ToArray();
             var missing = first.Sources.Items.Select(s => s.Source).Except(seen);
-            var observed = result.Evidence.Items.FirstOrDefault(s => s.ImageName is not null);
+            var observed = result.Evidence.Items.FirstOrDefault(s => s.ImagePath is not null) ?? result.Evidence.Items.FirstOrDefault(s => s.ImageName is not null);
+            var exited = result.Evidence.Items.FirstOrDefault(s => s.Exited && s.ExitCode is not null);
             var lead = ProcessCrossView.ToLead(result) ?? new(LeadCategory.CrossView,
                 result.Classification is ProcessDiscrepancyKind.Zombie or ProcessDiscrepancyKind.StaleOwner ? LeadSeverity.Low : LeadSeverity.Info,
                 result.Classification.ToString(), result.Reason, "", "Scan races, exited objects with references still held, stale owners or PID reuse are commonly benign.", result.Identity);
-            return lead with { Title = $"{observed?.ImageName ?? "PID " + result.Identity.Pid} · {result.Classification}",
-                Evidence = $"Saw: {string.Join(", ", seen)}\nNot observed (not proof of absence): {string.Join(", ", missing)}\nRecheck: {string.Join(", ", second.Sources.Items.Select(s => s.Source + " " + HiddenStatus(s.Status)))}" };
+            return lead with { Title = $"{observed?.ImageName ?? "PID " + result.Identity.Pid} · {result.Classification}", Path = observed?.ImagePath,
+                Reason = observed?.ImagePath is null && result.Classification == ProcessDiscrepancyKind.Zombie
+                    ? (result.Evidence.Items.FirstOrDefault(s => s.ImageDetail is not null)?.ImageDetail ?? "Image unavailable: no limited-query image observation") + ". " + lead.Reason : lead.Reason,
+                BenignNote = result.Classification == ProcessDiscrepancyKind.Zombie ? "A handle held by another process keeps the exited process object alive, commonly a parent or monitoring tool. This is not evidence of compromise." : lead.BenignNote,
+                Evidence = $"{observed?.ImagePath ?? result.Evidence.Items.FirstOrDefault(s => s.ImageDetail is not null)?.ImageDetail ?? "Image unavailable: no limited-query image observation"}\nCreation time (FILETIME): {result.Identity.CreationTimeFileTime?.ToString() ?? "unavailable"}\nExit code: {exited?.ExitCode?.ToString() ?? "unavailable / not exited"}\nSaw: {string.Join(", ", seen)}\nNot observed (not proof of absence): {string.Join(", ", missing)}\nRecheck: {string.Join(", ", second.Sources.Items.Select(s => s.Source + " " + HiddenStatus(s.Status)))}" };
         }).ToArray();
-        var sources = string.Join("\n", first.Sources.Items.Select(s => $"{s.Source}: {first.Sightings.Items.Count(r => r.Source == s.Source)} · {HiddenStatus(s.Status)} · {s.ElapsedMilliseconds:F1} ms · {s.Detail}"));
+        var sources = string.Join("  |  ", first.Sources.Items.Select(s => $"{s.Source}: {first.Sightings.Items.Count(r => r.Source == s.Source)} · {HiddenStatus(s.Status)} · {s.ElapsedMilliseconds:F1} ms" + (s.Status == InspectionStatus.Available ? "" : $" · {s.Detail}")));
         return new(first.CapturedAt, $"{comparison.Items.Count(r => r.Classification == ProcessDiscrepancyKind.Consistent)} processes consistent across 2 baseline lists; {first.Sources.Items.Count} sources checked. {leads.Length} other observations.",
             sources + "\n" + first.Detail, leads, comparison.Truncated);
     }
@@ -201,6 +205,7 @@ public sealed partial class MainWindow
         }).ToArray(), token);
         var input = new LeadSweepInput(new(processInputs, processCap, processes.Truncated), endpoints, new(persistenceTargets, targetCap, targets.Truncated), Model.Snapshot is not null && !processes.Truncated);
         var leads = await Task.Run(() => SuspiciousLeadRules.Evaluate(input, Environment.GetFolderPath(Environment.SpecialFolder.Windows), Path.GetTempPath(), cancellationToken: token), token);
+        leads = SuspiciousLeadRules.Aggregate(leads, (Model.Snapshot?.Processes ?? []).Select(p => p.Identity).Where(i => i.IsStable).ToHashSet());
         int unverified = provenance.Values.Count(p => p.Status != InspectionStatus.Available || p.Signature is SignatureState.NotChecked or SignatureState.Unreadable);
         return new(at, $"{leads.Items.Count} local leads · {processes.Items.Count} process observations · {targets.Items.Count} persistence targets",
             $"Visible-window coverage: {HiddenStatus(windows.Status)} · {windows.Detail}\nPersistence: {HiddenStatus(configured.Status)}; {startupError ?? "startup inventory from existing snapshot"}.\nSignatures: {provenance.Count}/{Math.Min(paths.Length, signatureCap)} checked, {unverified} unavailable; unique-image cap {signatureCap}; no online revocation. Endpoints: {endpoints.Items.Count}, {(Model.Relationships is null ? "Unavailable" : "existing observation")}. Total {watch.Elapsed.TotalMilliseconds:F1} ms. Unknown paths/signatures are not treated as missing/unsigned. Raw values and arguments are not displayed.",
