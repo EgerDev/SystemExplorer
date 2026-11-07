@@ -35,7 +35,7 @@ public sealed partial class MainWindow : Window
     private bool restoringSelection;
     private ScrollViewer? processScrollViewer;
     private global::Windows.Foundation.Point? processPointer;
-    private (string Key, double Y)? processAnchor;
+    private RowViewportAnchor? processAnchor;
     private bool processAnchorScheduled;
     private int processAnchorAttempts;
     private bool restoreProcessKeyboardFocus;
@@ -53,6 +53,7 @@ public sealed partial class MainWindow : Window
         SetTitleBar(WindowTitleBar);
         Root.ActualThemeChanged += (_, _) => UpdateCaptionColors();
         ProcessList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(ProcessKeyDown), true);
+        ProcessList.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(ProcessPointerMoved), true);
         ProcessList.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(ProcessPointerMoved), true);
         ProcessList.AddHandler(UIElement.PointerExitedEvent, new PointerEventHandler(ProcessPointerExited), true);
         ProcessList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, _) => CancelProcessAnchor()), true);
@@ -488,23 +489,31 @@ public sealed partial class MainWindow : Window
         anchor ??= visible.Select(entry => entry.Item).FirstOrDefault(item => ReferenceEquals(item.Content, ProcessList.SelectedItem));
         if (anchor is null && viewer.VerticalOffset == 0) return;
         anchor ??= visible[0].Item;
-        processAnchor = (((ProcessRow)anchor.Content).RowKey, anchor.TransformToVisual(viewer).TransformPoint(new()).Y);
+        processAnchor = RowViewportAnchoring.Capture(Model.Rows, row => row.RowKey, row => row.RowHeight,
+            ((ProcessRow)anchor.Content).RowKey, viewer.VerticalOffset, anchor.TransformToVisual(viewer).TransformPoint(new()).Y);
     }
 
     private void RestoreProcessViewport()
     {
-        if (restoreProcessKeyboardFocus) ProcessList.UpdateLayout();
+        if (restoreProcessKeyboardFocus || processAnchor is not null) ProcessList.UpdateLayout();
         if (restoreProcessKeyboardFocus && windowActive && !HasProcessKeyboardFocus() &&
             ProcessList.SelectedItem is ProcessRow selected && ProcessList.ContainerFromItem(selected) is ListViewItem selectedContainer)
             selectedContainer.Focus(FocusState.Keyboard);
         restoreProcessKeyboardFocus = false;
         processAnchorAttempts = 0;
+        if (processAnchor is { } saved && processScrollViewer is { } viewer)
+        {
+            var offset = RowViewportAnchoring.RestoreOffset(saved, Model.Rows, row => row.RowKey, row => row.RowHeight, viewer.ScrollableHeight);
+            if (offset is { } target) viewer.ChangeView(null, target, null, disableAnimation: true);
+            else CancelProcessAnchor();
+        }
         ScheduleProcessAnchorRestore();
     }
 
     private void ScheduleProcessAnchorRestore()
     {
-        if (processAnchor is null || processAnchorScheduled || processAnchorAttempts >= 8) return;
+        if (processAnchor is null || processAnchorScheduled) return;
+        if (processAnchorAttempts >= 8) { CancelProcessAnchor(); return; }
         processAnchorScheduled = true;
         CompositionTarget.Rendering += RestoreProcessAnchorAfterLayout;
     }
@@ -522,18 +531,24 @@ public sealed partial class MainWindow : Window
         CompositionTarget.Rendering -= RestoreProcessAnchorAfterLayout;
         processAnchorScheduled = false;
         if (processAnchor is not { } saved || processScrollViewer is not { } viewer ||
-            Model.Rows.FirstOrDefault(row => row.RowKey == saved.Key) is not { } row ||
-            ProcessList.ContainerFromItem(row) is not ListViewItem container)
+            Model.Rows.FirstOrDefault(row => row.RowKey == saved.Key) is not { } row)
         {
             CancelProcessAnchor();
+            return;
+        }
+        processAnchorAttempts++;
+        ProcessList.UpdateLayout();
+        if (ProcessList.ContainerFromItem(row) is not ListViewItem container)
+        {
+            ScheduleProcessAnchorRestore();
             return;
         }
         var delta = container.TransformToVisual(viewer).TransformPoint(new()).Y - saved.Y;
         if (Math.Abs(delta) < 0.5)
         {
+            CancelProcessAnchor();
             return;
         }
-        processAnchorAttempts++;
         var target = Math.Clamp(viewer.VerticalOffset + delta, 0, viewer.ScrollableHeight);
         if (Math.Abs(target - viewer.VerticalOffset) < 0.5) CancelProcessAnchor();
         else

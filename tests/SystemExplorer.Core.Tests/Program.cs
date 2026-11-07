@@ -891,6 +891,40 @@ var tests = new (string Name, Action Run)[]
         Check(DiagnosticsLayout.MaximumSummaryHeight(500, 60, 8, true, true, double.NaN) == 0);
     }),
     // Area A: shell and process table
+    ("Process viewport anchor compensates insertions, removals and distant sort moves without containers", () =>
+    {
+        var rows = new System.Collections.ObjectModel.ObservableCollection<int>(Enumerable.Range(0, 100));
+        var anchor = RowViewportAnchoring.Capture(rows, id => id.ToString(), _ => 44, "20", 890, -10)!.Value;
+        var desired = Enumerable.Range(0, 100).Where(id => id != 2).Prepend(101).Prepend(100).ToArray();
+        MinimalKeyedRows.Reconcile(rows, desired, id => id, id => id, id => id, (_, _) => { });
+        var offset = RowViewportAnchoring.RestoreOffset(anchor, rows, id => id.ToString(), _ => 44, 5000);
+        Check(rows.SequenceEqual(desired) && offset == 934);
+        Check(rows.IndexOf(20) * 44 - offset == -10);
+        desired = rows.Where(id => id != 20).Append(20).ToArray();
+        MinimalKeyedRows.Reconcile(rows, desired, id => id, id => id, id => id, (_, _) => { });
+        offset = RowViewportAnchoring.RestoreOffset(anchor, rows, id => id.ToString(), _ => 44, 5000);
+        Check(rows.SequenceEqual(desired) && offset == rows.IndexOf(20) * 44 + 10);
+        Check(rows.IndexOf(20) * 44 - offset == anchor.Y);
+        var selected = RowViewportAnchoring.Capture(rows, id => id.ToString(), _ => 44, "30", 800, 44)!.Value;
+        var selectedIndex = rows.IndexOf(30);
+        rows.Insert(0, 200);
+        Check(RowViewportAnchoring.RestoreOffset(selected, rows, id => id.ToString(), _ => 44, 5000) == 844);
+        Check(rows.IndexOf(30) == selectedIndex + 1);
+    }),
+    ("Process viewport anchors handle mixed row heights, bounds, expired keys and invalid geometry", () =>
+    {
+        var rows = new[] { (Key: "group", Height: 44d), (Key: "child", Height: 32d), (Key: "process", Height: 44d) };
+        var anchor = RowViewportAnchoring.Capture(rows, r => r.Key, r => r.Height, "process", 80, -4)!.Value;
+        Check(anchor.ContentTop == 76);
+        Check(RowViewportAnchoring.RestoreOffset(anchor, rows.Skip(1), r => r.Key, r => r.Height, 100) == 36);
+        Check(RowViewportAnchoring.RestoreOffset(anchor, rows, r => r.Key, r => r.Height, 50) == 50);
+        Check(RowViewportAnchoring.RestoreOffset(anchor, rows.Reverse(), r => r.Key, r => r.Height, 100) == 4);
+        Check(RowViewportAnchoring.RestoreOffset(anchor, rows.Take(2), r => r.Key, r => r.Height, 100) is null);
+        Check(RowViewportAnchoring.Capture(Array.Empty<int>(), i => i.ToString(), _ => 44, "1", 0, 0) is null);
+        Check(RowViewportAnchoring.Capture(rows, r => r.Key, r => r.Height, "process", double.NaN, 0) is null);
+        Check(RowViewportAnchoring.Capture(rows, r => r.Key, r => double.NaN, "process", 0, 0) is null);
+        Check(RowViewportAnchoring.RestoreOffset(anchor, rows, r => r.Key, r => r.Height, -1) is null);
+    }),
     ("Minimal reconciliation preserves unchanged rows without notifications", () =>
     {
         var rows = new System.Collections.ObjectModel.ObservableCollection<int>(Enumerable.Range(0, 20));
