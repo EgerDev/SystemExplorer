@@ -7,9 +7,13 @@ public sealed record BloatItem(string Category, string Tool, string Path, long A
     DateTime? LatestWrite, BloatConfidence Confidence, string Reason, string? CleanupCommand, string? CleanupWarning, string Kind, bool IsLead = false);
 public sealed record DeveloperProject(string Path, StorageMarkers Kinds, long AllocatedBytes, long RegenerableBytes,
     IReadOnlyList<BloatItem> Artifacts, DateTime? LastActivity, bool IsStale, bool HasAIMarkers);
-public sealed record BloatCategoryTotal(string Category, long AllocatedBytes, long? ReclaimableBytes);
+public sealed record BloatCategoryTotal(string Category, long AllocatedBytes, long? ReclaimableBytes, int UnknownItems = 0);
 public sealed record DeveloperBloatReport(IReadOnlyList<BloatItem> Items, IReadOnlyList<DeveloperProject> Projects,
-    IReadOnlyList<BloatCategoryTotal> CategoryTotals, IReadOnlyList<StorageProblem> NotScanned, int AbsentCatalogEntries);
+    IReadOnlyList<BloatCategoryTotal> CategoryTotals, IReadOnlyList<StorageProblem> NotScanned, int AbsentCatalogEntries)
+{
+    public long KnownReclaimableBytes => CategoryTotals.Sum(x => x.ReclaimableBytes ?? 0);
+    public int UnknownItems => CategoryTotals.Sum(x => x.UnknownItems);
+}
 
 public static class DeveloperBloatAnalyzer
 {
@@ -151,15 +155,27 @@ public static class DeveloperBloatAnalyzer
         }
         foreach (var f in scan.LargestFiles.Where(f => f.LogicalBytes >= 100L * 1024 * 1024 && new[] { ".safetensors", ".gguf", ".ckpt", ".pt", ".pth", ".onnx" }.Any(e => f.Path.EndsWith(e, StringComparison.OrdinalIgnoreCase))))
             items.Add(new("AI tools and models", "Model file candidate", f.Path, f.AllocatedBytes, f.AllocatedBytes, f.LastWriteUtc, BloatConfidence.Low, "Model-like extension; re-download required if removed; contents not inspected", null, "Not executed", "Model file"));
-        var totals = items.Where(x => !x.IsLead).GroupBy(x => x.Category).Select(g =>
-        {
-            var kept = new List<BloatItem>();
-            foreach (var x in g.OrderBy(x => StoragePaths.Normalize(x.Path).Length))
-                if (!kept.Any(p => StoragePaths.Contains(p.Path, x.Path))) kept.Add(x);
-            return new BloatCategoryTotal(g.Key, kept.Sum(x => x.AllocatedBytes), kept.Any(x => x.ReclaimableBytes is null) ? null : kept.Sum(x => x.ReclaimableBytes));
-        }).ToArray();
+        var totals = Summarize(items);
         return new(Array.AsReadOnly(items.OrderByDescending(x => x.ReclaimableBytes ?? -1).ThenByDescending(x => x.AllocatedBytes).ToArray()),
-            Array.AsReadOnly(projectRows), Array.AsReadOnly(totals), outside.AsReadOnly(), absent);
+            Array.AsReadOnly(projectRows), totals, outside.AsReadOnly(), absent);
+    }
+    public static IReadOnlyList<BloatCategoryTotal> Summarize(IEnumerable<BloatItem> source)
+    {
+        var items = source.Where(x => !x.IsLead).OrderByDescending(x => x.ReclaimableBytes ?? -1).ThenByDescending(x => x.AllocatedBytes)
+            .GroupBy(x => StoragePaths.Normalize(x.Path), StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToArray();
+        var paths = items.Select(x => StoragePaths.Normalize(x.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var kept = items.Where(x =>
+        {
+            var path = StoragePaths.Normalize(x.Path);
+            for (var slash = path.LastIndexOf('/'); slash >= 0; slash = path.LastIndexOf('/', slash - 1))
+            {
+                if (paths.Contains(path[..slash])) return false;
+                if (slash == 0) break;
+            }
+            return true;
+        });
+        return Array.AsReadOnly(kept.GroupBy(x => x.Category).Select(g => new BloatCategoryTotal(g.Key, g.Sum(x => x.AllocatedBytes),
+            g.Any(x => x.ReclaimableBytes.HasValue) ? g.Sum(x => x.ReclaimableBytes ?? 0) : null, g.Count(x => !x.ReclaimableBytes.HasValue))).ToArray());
     }
     private static bool Match(string name, string pattern)
     {

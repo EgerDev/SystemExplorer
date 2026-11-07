@@ -1190,6 +1190,43 @@ var tests = new (string Name, Action Run)[]
         Check(report.Items.Where(i => i.Kind == "AI tool data").All(i => i.ReclaimableBytes == 0));
         Check(DeveloperBloatAnalyzer.Analyze(new StorageScanAggregator("Z:/", new(), false).Complete(StorageScanState.Failed, TimeSpan.Zero, "failed", []), ctx, now, TimeSpan.Zero).Projects.Count == 0);
     }),
+    ("Storage category known sums and unknown counts share global path de-duplication", () =>
+    {
+        BloatItem Item(string category, string path, long allocated, long? reclaim, bool lead = false) =>
+            new(category, "fixture", path, allocated, reclaim, null, BloatConfidence.High, "metadata", null, null, "Cache", lead);
+        BloatItem[] items = [
+            Item("Global caches", @"C:\cache", 100, 100),
+            Item("Global caches", @"C:\global-unknown", 40, null),
+            Item("Global caches", @"C:\cache\unknown", 10, null),
+            Item("Artifacts", "c:/CACHE", 100, 100),
+            Item("Artifacts", @"C:\cache\nested", 25, 25),
+            Item("Artifacts", @"C:\project\bin", 60, 60),
+            Item("Artifacts", @"C:\artifact-unknown", 20, null),
+            Item("AI", @"C:\disk", 500, null),
+            Item("AI", @"C:\disk\model", 80, 80),
+            Item("Settings", @"C:\settings", 10, 0),
+            Item("Leads", @"C:\lead", 200, null, true)
+        ];
+        var totals = DeveloperBloatAnalyzer.Summarize(items);
+        var global = totals.Single(x => x.Category == "Global caches");
+        var artifacts = totals.Single(x => x.Category == "Artifacts");
+        var ai = totals.Single(x => x.Category == "AI");
+        var settings = totals.Single(x => x.Category == "Settings");
+        Check(global is { AllocatedBytes: 140, ReclaimableBytes: 100, UnknownItems: 1 });
+        Check(artifacts is { AllocatedBytes: 80, ReclaimableBytes: 60, UnknownItems: 1 });
+        Check(ai is { AllocatedBytes: 500, ReclaimableBytes: null, UnknownItems: 1 });
+        Check(settings is { ReclaimableBytes: 0, UnknownItems: 0 } && totals.Count == 4);
+        var report = new DeveloperBloatReport(items, [], totals, [], 0);
+        Check(report.KnownReclaimableBytes == 160 && report.KnownReclaimableBytes == totals.Sum(x => x.ReclaimableBytes ?? 0) && report.UnknownItems == 3);
+        var empty = new DeveloperBloatReport([], [], DeveloperBloatAnalyzer.Summarize([]), [], 0);
+        Check(empty.CategoryTotals.Count == 0 && empty.KnownReclaimableBytes == 0 && empty.UnknownItems == 0);
+        var scan = new StorageScanAggregator(@"C:\", new(), false).Complete(StorageScanState.Completed, TimeSpan.Zero, "metadata", []);
+        using var json = System.Text.Json.JsonDocument.Parse(StorageExport.ToJson(scan, report));
+        var exported = json.RootElement.GetProperty("Bloat");
+        Check(exported.GetProperty("KnownReclaimableBytes").GetInt64() == 160 && exported.GetProperty("UnknownItems").GetInt32() == 3);
+        var exportedGlobal = exported.GetProperty("CategoryTotals").EnumerateArray().Single(x => x.GetProperty("Category").GetString() == "Global caches");
+        Check(exportedGlobal.GetProperty("ReclaimableBytes").GetInt64() == 100 && exportedGlobal.GetProperty("UnknownItems").GetInt32() == 1);
+    }),
     ("Storage exports escape CSV cells and JSON metadata", () =>
     {
         var a = new StorageScanAggregator("=root,\"quoted\"\nline", new(), false);

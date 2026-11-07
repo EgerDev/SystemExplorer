@@ -238,33 +238,20 @@ public sealed partial class StorageView : UserControl, IDisposable
         catch (Exception ex) { if (!disposed) Notify("Developer analysis unavailable: " + ex.Message); }
         finally { if (entered) analysisGate.Release(); }
     }
-    private static long UnionBytes(IEnumerable<BloatItem> source, bool reclaim)
-    {
-        var items = source.Where(x => !x.IsLead).GroupBy(x => StoragePaths.Normalize(x.Path), StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToArray();
-        var paths = items.Select(x => StoragePaths.Normalize(x.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        long total = 0;
-        foreach (var x in items)
-        {
-            var p = StoragePaths.Normalize(x.Path); var nested = false;
-            for (var slash = p.LastIndexOf('/'); slash >= 0; slash = p.LastIndexOf('/', slash - 1))
-            {
-                if (paths.Contains(p[..slash])) { nested = true; break; }
-                if (slash == 0) break;
-            }
-            if (!nested) total += reclaim ? x.ReclaimableBytes ?? 0 : x.AllocatedBytes;
-        }
-        return total;
-    }
+    private static long UnionBytes(IEnumerable<BloatItem> source) => DeveloperBloatAnalyzer.Summarize(source).Sum(x => x.AllocatedBytes);
     private void RenderDeveloper()
     {
         if (report is not { } r || result is not { } scan) return;
-        var footprint = UnionBytes(r.Items.Concat(r.Projects.Select(p => new BloatItem("Projects", "Project", p.Path, p.AllocatedBytes, 0, p.LastActivity, BloatConfidence.High, "", null, null, "Project"))), false);
-        FootprintCard.Value = Bytes(footprint); ReclaimValue.Text = Bytes(UnionBytes(r.Items, true));
-        UnknownItems.Visibility = r.Items.Any(i => i.ReclaimableBytes == null) ? Visibility.Visible : Visibility.Collapsed;
+        var footprint = UnionBytes(r.Items.Concat(r.Projects.Select(p => new BloatItem("Projects", "Project", p.Path, p.AllocatedBytes, 0, p.LastActivity, BloatConfidence.High, "", null, null, "Project"))));
+        FootprintCard.Value = Bytes(footprint); ReclaimValue.Text = Bytes(r.KnownReclaimableBytes);
+        UnknownItems.Text = $"+ {Count(r.UnknownItems, "item")} unknown";
+        UnknownItems.Visibility = r.UnknownItems > 0 ? Visibility.Visible : Visibility.Collapsed;
         ProjectsCard.Value = $"{r.Projects.Count:N0} · {r.Projects.Count(p => p.IsStale):N0} stale";
-        AICard.Value = Bytes(UnionBytes(r.Items.Where(i => i.Category == "AI tools and models"), false));
+        AICard.Value = Bytes(UnionBytes(r.Items.Where(i => i.Category == "AI tools and models")));
         DeveloperStatus.Text = $"{scan.Root} · {(scan.IsPartial ? "Partial scan" : "Scan finished")} · {Count(r.Items.Count, "item")} · {Count(r.AbsentCatalogEntries, "catalog location")} absent. Lists show at most 500 rows.";
-        CategoriesList.ItemsSource = r.CategoryTotals.Select(x => new StorageRow(x.Category, x.ReclaimableBytes is { } reclaim ? $"{Bytes(reclaim)} estimated reclaimable" : "Reclaimable: Unknown", Bytes(x.AllocatedBytes), Percent(x.AllocatedBytes, footprint))).ToArray();
+        CategoriesList.ItemsSource = r.CategoryTotals.Select(x => new StorageRow(x.Category,
+            (x.ReclaimableBytes is { } reclaim ? $"{Bytes(reclaim)} estimated reclaimable" : "Reclaimable: Unknown") + (x.UnknownItems > 0 ? $" + {Count(x.UnknownItems, "item")} unknown" : ""),
+            Bytes(x.AllocatedBytes), Percent(x.AllocatedBytes, footprint))).ToArray();
         StorageRow Item(BloatItem x) => new((x.IsLead ? "Lead · " : "") + x.Tool, $"{x.Category} · reclaimable { (x.ReclaimableBytes is { } reclaim ? Bytes(reclaim) : "Unknown")} · {Relative(x.LatestWrite)} · {x.Confidence} confidence" + (x.IsLead ? " · " + x.Reason : ""), Bytes(x.AllocatedBytes), Percent(x.AllocatedBytes, footprint), x.Path, IsFile: x.Kind == "Model file", Item: x);
         BloatList.ItemsSource = r.Items.Take(500).Select(Item).ToArray();
         AIList.ItemsSource = r.Items.Where(i => i.Category == "AI tools and models").Take(500).Select(Item).ToArray();
