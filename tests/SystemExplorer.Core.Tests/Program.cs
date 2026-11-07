@@ -75,6 +75,45 @@ var tests = new (string Name, Action Run)[]
         KeyedRows.Reconcile(live, Array.Empty<KeyedTestRow>(), row => row.Key);
         Check(live.Count == 0);
     }),
+    ("Inventory loading keeps only progress and applies the pending filter on completion", () =>
+    {
+        var state = new InventoryPresentationState();
+        Check(state.Phase == InventoryPhase.Loading);
+        state.Filter = "physical";
+        state.Filter = "  DiSk 1  ";
+        Check(state.StatusText("Collecting…", 0, 0, "Disk", false, false) == "Collecting…");
+        Check(state.StatusText("Resampling…", 0, 0, "Disk", false, false) == "Resampling…");
+        state.ShowRows(false);
+        Check(state.Phase == InventoryPhase.Rows && state.Filter == "  DiSk 1  ");
+        var rows = new[] { "All physical disks", "Disk 0", "Disk 1" };
+        Check(rows.Where(state.Matches).SequenceEqual(new[] { "Disk 1" }));
+        Check(state.StatusText("Captured", 1, 3, "Disk", true, false).Contains("1 of 3 observations"));
+        Check(state.StatusText("Captured", 1, 3, "Disk", true, false).Contains("Frozen at capture"));
+        state.ShowRows(true);
+        Check(state.Filter == "  DiSk 1  ");
+        state.ShowRows(false);
+        Check(state.Filter == "" && rows.All(state.Matches));
+    }),
+    ("Inventory loading distinguishes empty, unmatched and failed captures", () =>
+    {
+        var state = new InventoryPresentationState();
+        state.Filter = "missing";
+        state.ShowRows(false);
+        Check(!state.Matches("Disk 0"));
+        Check(state.StatusText("Captured", 0, 3, "Disk", false, false).Contains("No matching observations"));
+        Check(state.StatusText("Captured", 0, 0, "Disk", false, false).Contains("No observations returned"));
+        Check(state.StatusText("Updated", 1, 1, "Time", true, true).Contains("Live; updates in place"));
+        state.BeginLoading();
+        Check(state.Filter == "" && state.Phase == InventoryPhase.Loading);
+        state.Filter = "new capture";
+        Check(state.StatusText("Collecting…", 0, 0, "Disk", false, false) == "Collecting…");
+        state.ShowMessage();
+        Check(state.Filter == "" && state.Phase == InventoryPhase.Message);
+        foreach (var message in new[] { "Cancelled", "Unavailable: access denied" })
+            Check(state.StatusText(message, 0, 0, "Disk", false, false) == message);
+        state.ShowRows(false);
+        Check(state.Filter == "" && state.Phase == InventoryPhase.Rows);
+    }),
     ("Inventory identifier keys sort numerically with nulls last in both directions", () =>
     {
         var rows = new (string Text, decimal? Key)[] { ("0xFFC", 0xFFC), ("Unavailable", null), ("0x1010", 0x1010) };

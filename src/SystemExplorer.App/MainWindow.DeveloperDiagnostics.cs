@@ -95,7 +95,7 @@ public sealed partial class MainWindow
             {
                 if (busy || row.Value is not ThreadIdentity thread) return;
                 busy = true;
-                view.ShowMessage("Inspecting only this selected thread. Close cancels; safe native cleanup can take longer than the cooperative budget.");
+                view.ShowLoading("Inspecting only this selected thread. Close cancels; safe native cleanup can take longer than the cooperative budget.");
                 try
                 {
                     var chain = await threadDiagnostics.CaptureWaitChainAsync(thread, token);
