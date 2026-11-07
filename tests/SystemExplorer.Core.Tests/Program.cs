@@ -681,6 +681,34 @@ var tests = new (string Name, Action Run)[]
         Check(seen.Count == 4);
         Check(!ModuleMappingComparer.Instance.Equals(module, null));
         Check(ModuleMappingComparer.Instance.Equals(null, null));
+    }),
+    // Area D: on-demand inventories and inspection dialogs.
+    ("Inventory metric columns adapt to width and always leave the name column readable", () =>
+    {
+        Check(InventoryLayout.MetricWidth(0, 3) == 0 && InventoryLayout.MetricWidth(500, 0) == 0 && InventoryLayout.MetricWidth(double.NaN, 3) == 0);
+        Check(InventoryLayout.MetricWidth(4000, 3) == InventoryLayout.MaximumMetricWidth);
+        Check(InventoryLayout.MetricWidth(700, 3) == 119);
+        foreach (var available in new[] { 120d, 280, 304, 420, 640, 780, 1200 })
+            for (var visible = 1; visible <= 3; visible++)
+            {
+                var width = InventoryLayout.MetricWidth(available, visible);
+                Check(width > 0 && width <= InventoryLayout.MaximumMetricWidth && available - width * visible >= available * 0.4 - 0.001);
+            }
+        Check(InventoryLayout.MetricWidth(300, 3) < InventoryLayout.MetricWidth(800, 3));
+    }),
+    ("Inventory rows reconcile only with complete unique keys, such as adapter plus PID", () =>
+    {
+        Check(KeyedRows.HasUniqueKeys(new[] { "process:1A:42", "process:2B:42", "adapter:1A" }, key => key));
+        Check(!KeyedRows.HasUniqueKeys(new[] { "process:1A:42", "process:1A:42" }, key => key));
+        Check(!KeyedRows.HasUniqueKeys(new[] { "a", null }, key => key));
+        Check(KeyedRows.HasUniqueKeys(Array.Empty<string>(), key => key));
+    }),
+    ("On-demand counter inventories resample warmup or stale long-average intervals", () =>
+    {
+        Check(CounterSampling.NeedsFreshInterval(true, TimeSpan.FromSeconds(1)));
+        Check(CounterSampling.NeedsFreshInterval(false, null) && CounterSampling.NeedsFreshInterval(false, TimeSpan.Zero));
+        Check(CounterSampling.NeedsFreshInterval(false, TimeSpan.FromSeconds(75.1)));
+        Check(!CounterSampling.NeedsFreshInterval(false, TimeSpan.FromSeconds(1)) && !CounterSampling.NeedsFreshInterval(false, CounterSampling.MaximumRateInterval));
     })
 };
 var failures = 0;
