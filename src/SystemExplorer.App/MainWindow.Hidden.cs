@@ -72,6 +72,19 @@ public sealed partial class MainWindow
         _ => $"Unavailable / {status}"
     };
 
+    private static string ConfigurationEvidence(ConfigurationDiscrepancyKind kind) => kind switch
+    {
+        ConfigurationDiscrepancyKind.RegistryOnly => "In registry only; not listed by Service Control Manager",
+        ConfigurationDiscrepancyKind.ScmOnly => "Listed by Service Control Manager; no registry entry",
+        ConfigurationDiscrepancyKind.MissingSecurityDescriptor => "TaskCache Tree security descriptor is missing",
+        ConfigurationDiscrepancyKind.TreeIdNotInTasks => "No TaskCache Tasks entry for the Tree ID",
+        ConfigurationDiscrepancyKind.RegistryNotCom => "Not visible to Task Scheduler (including hidden tasks)",
+        ConfigurationDiscrepancyKind.ComNotRegistry => "Visible to Task Scheduler; no task registry entry",
+        ConfigurationDiscrepancyKind.FileNotRegistry => "Task file exists; no task registry entry",
+        ConfigurationDiscrepancyKind.RegistryNotFile => "No task file",
+        _ => "Configuration difference"
+    };
+
     private async Task<HiddenScanResult> ScanHiddenProcesses(CancellationToken token)
     {
         var first = await hiddenProcesses.CaptureAsync(token);
@@ -97,7 +110,13 @@ public sealed partial class MainWindow
                 BenignNote = result.Classification == ProcessDiscrepancyKind.Zombie ? "A handle held by another process keeps the exited process object alive, commonly a parent or monitoring tool. This is not evidence of compromise." : lead.BenignNote,
                 Evidence = $"{observed?.ImagePath ?? result.Evidence.Items.FirstOrDefault(s => s.ImageDetail is not null)?.ImageDetail ?? "Image unavailable: no limited-query image observation"}\nCreation time (FILETIME): {result.Identity.CreationTimeFileTime?.ToString() ?? "unavailable"}\nExit code: {exited?.ExitCode?.ToString() ?? "unavailable / not exited"}\nSaw: {string.Join(", ", seen)}\nNot observed (not proof of absence): {string.Join(", ", missing)}\nRecheck: {string.Join(", ", second.Sources.Items.Select(s => s.Source + " " + HiddenStatus(s.Status)))}" };
         }).ToArray();
-        var sources = string.Join("  |  ", first.Sources.Items.Select(s => $"{s.Source}: {first.Sightings.Items.Count(r => r.Source == s.Source)} · {HiddenStatus(s.Status)} · {s.ElapsedMilliseconds:F1} ms" + (s.Status == InspectionStatus.Available ? "" : $" · {s.Detail}")));
+        var sources = string.Join("  |  ", first.Sources.Items.Select(s =>
+        {
+            int denied = first.Sightings.Items.Count(r => r.Source == s.Source && r.Status == InspectionStatus.AccessDenied);
+            return $"{s.Source}: {first.Sightings.Items.Count(r => r.Source == s.Source)} · {HiddenStatus(s.Status)} · {s.ElapsedMilliseconds:F1} ms"
+                + (s.Status == InspectionStatus.Available ? "" : $" · {s.Detail}")
+                + (denied == 0 ? "" : $" · Denied: {denied} process queries (Windows error 5); creation time/image unavailable for these PIDs");
+        }));
         return new(first.CapturedAt, $"{comparison.Items.Count(r => r.Classification == ProcessDiscrepancyKind.Consistent)} processes consistent across 2 baseline lists; {first.Sources.Items.Count} sources checked. {leads.Length} other observations.",
             sources + "\n" + first.Detail, leads, comparison.Truncated);
     }
@@ -107,7 +126,7 @@ public sealed partial class MainWindow
         var snapshot = await hiddenConfiguration.CaptureServicesAsync(token);
         var diff = ConfigurationCrossView.CompareServices(snapshot);
         var leads = diff.Items.GroupBy(d => d.Name, StringComparer.OrdinalIgnoreCase).Select(group => new SuspiciousLead(LeadCategory.CrossView, LeadSeverity.Low,
-            group.Key, string.Join(" ", group.Select(d => d.Reason)), string.Join(", ", group.Select(d => d.Kind)),
+            group.Key, string.Join(" ", group.Select(d => d.Reason)), string.Join(" · ", group.Select(d => ConfigurationEvidence(d.Kind))),
             "Pending deletion, per-user templates/instances, reboot requirements or stale installation state may explain this; not proof of hiding.")).ToArray();
         return new(snapshot.CapturedAt, $"{leads.Length} service names differ; {snapshot.IgnoredWithoutType} registry keys without Type ignored.", snapshot.Detail, leads, diff.Truncated);
     }
@@ -123,7 +142,7 @@ public sealed partial class MainWindow
                 && kinds.Contains(ConfigurationDiscrepancyKind.RegistryNotFile) && snapshot.Tree.Items.Any(t => t.HasSecurityDescriptor && t.Path.Equals(group.Key, StringComparison.OrdinalIgnoreCase));
             var severity = kinds.Contains(ConfigurationDiscrepancyKind.MissingSecurityDescriptor) ? LeadSeverity.High : orphan ? LeadSeverity.Low : LeadSeverity.Medium;
             return new SuspiciousLead(LeadCategory.CrossView, severity, group.Key, string.Join(" ", group.Select(d => d.Reason)),
-                string.Join(", ", kinds), orphan ? "Stale leftover registration from OS image/servicing is possible: this Tree entry retains SD but has no Tasks, COM or file entry."
+                (orphan ? "In TaskCache Tree only · " : "") + string.Join(" · ", kinds.Select(ConfigurationEvidence)), orphan ? "Stale leftover registration from OS image/servicing is possible: this Tree entry retains SD but has no Tasks, COM or file entry."
                 : "Servicing, concurrent task changes, configuration damage or access restrictions can explain cross-view differences; no proof of compromise.", Path: group.Key);
         }).ToArray();
         return new(snapshot.CapturedAt, $"{leads.Length} task paths differ (one row per task). Missing security descriptors have highest severity.", snapshot.Detail, leads, diff.Truncated);
@@ -139,8 +158,8 @@ public sealed partial class MainWindow
         if (folder is null) return null;
         var watch = Stopwatch.StartNew();
         var snapshot = await hiddenAds.ScanAsync(new(folder.Path), token);
-        var leads = snapshot.Streams.Items.Select(stream => new SuspiciousLead(LeadCategory.UnusualLocation, stream.Severity,
-            stream.StreamName, $"Named stream; {MetricFormatting.Bytes(stream.SizeBytes >= 0 ? (ulong)stream.SizeBytes : null)}. Contents were not read.",
+        var leads = snapshot.Streams.Items.Select(stream => new SuspiciousLead(LeadCategory.AlternateDataStream, stream.Severity,
+            Path.GetFileName(stream.Path) + stream.StreamName.Replace(":$DATA", "", StringComparison.OrdinalIgnoreCase), $"{MetricFormatting.Bytes(stream.SizeBytes >= 0 ? (ulong)stream.SizeBytes : null)} · contents not read",
             $"{stream.Path} · {stream.StreamName} · {stream.SizeBytes} bytes", stream.IsDownloadMarker ? "Zone.Identifier is a normally benign download-origin marker."
             : "Applications legitimately store metadata in named streams; presence alone is not suspicious.", Path: stream.Path)).ToArray();
         return new(snapshot.CapturedAt, $"{snapshot.FilesVisited} objects scanned · {snapshot.DeniedCount} denied · {snapshot.ReparsePointsSkipped} reparse points skipped",

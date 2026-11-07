@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Security.Principal;
 using SystemExplorer.Core;
 using SystemExplorer.Relationships;
 using SystemExplorer.Windows;
@@ -13,7 +14,16 @@ using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 var token = timeout.Token;
 var provider = new WindowsHiddenProcessProvider();
 var elevation = WindowsHiddenEnvironment.GetElevation();
+using var currentIdentity = WindowsIdentity.GetCurrent();
+Require(elevation.IsElevated != true || new WindowsPrincipal(currentIdentity).IsInRole(WindowsBuiltInRole.Administrator), "Full administrator coverage requires an enabled administrator role, including for restricted tokens.");
 Console.WriteLine($"Elevation: {elevation.Status}; elevated={elevation.IsElevated}; {elevation.Detail}");
+if (args.Contains("--expect-filtered-token"))
+{
+    Require(!new WindowsPrincipal(currentIdentity).IsInRole(WindowsBuiltInRole.Administrator), "Test must run with the administrator role disabled.");
+    Require(elevation.IsElevated == false, "Filtered token must not claim administrator coverage.");
+    Console.WriteLine("PASS filtered token reports reduced administrator coverage");
+    return;
+}
 using var self = Process.GetCurrentProcess();
 var identity = new ProcessIdentity(self.Id, self.StartTime.ToUniversalTime().ToFileTimeUtc());
 using var child = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), "/c exit 0") { UseShellExecute = false, CreateNoWindow = true })!;

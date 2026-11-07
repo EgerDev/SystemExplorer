@@ -14,7 +14,12 @@ public static class WindowsHiddenEnvironment
     {
         using var identity = WindowsIdentity.GetCurrent();
         if (HiddenNativeMethods.GetTokenInformation(identity.AccessToken, 20, out int elevated, 4, out _))
-            return new(InspectionStatus.Available, elevated != 0, elevated != 0 ? "Token is elevated." : "Full coverage requires administrator; no elevation attempted.");
+        {
+            bool administrator = new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+            bool fullToken = elevated != 0 && administrator;
+            return new(InspectionStatus.Available, fullToken, fullToken ? "Token is elevated with administrator role enabled."
+                : "Full coverage requires administrator; the current token is filtered or not elevated. No elevation attempted.");
+        }
         int error = Marshal.GetLastWin32Error();
         return new(error == 5 ? InspectionStatus.AccessDenied : InspectionStatus.Failed, null, $"Token elevation unavailable (Windows error {error}); administrator coverage cannot be established.");
     }

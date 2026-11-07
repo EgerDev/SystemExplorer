@@ -1,7 +1,7 @@
 namespace SystemExplorer.Core;
 
 public enum LeadSeverity { Info, Low, Medium, High }
-public enum LeadCategory { CrossView, Signature, UnusualLocation, Masquerading, ParentMismatch, EndpointOwner, Persistence, NoVisibleWindow }
+public enum LeadCategory { CrossView, Signature, UnusualLocation, Masquerading, ParentMismatch, EndpointOwner, Persistence, NoVisibleWindow, AlternateDataStream }
 public sealed record SuspiciousLead(LeadCategory Category, LeadSeverity Severity, string Title, string Reason,
     string Evidence, string BenignNote, ProcessIdentity? ProcessIdentity = null, string? Path = null);
 public enum UnusualLocation { None, Temp, AppData, Downloads, ProgramDataRoot, RecycleBin, AlternateDataStream, Public }
