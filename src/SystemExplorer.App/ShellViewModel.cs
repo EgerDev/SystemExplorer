@@ -45,19 +45,38 @@ public sealed class ProcessRow : INotifyPropertyChanged
     public Microsoft.UI.Xaml.GridLength Indent => new(IsChild ? 25 : 0);
     public string GroupingReason => group is null ? "Individual observed process" : "Inferred group: same executable, owner and observed parent chain. Private commit is not physical RAM.";
 
-    public void Update(ProcessRow other)
+    private static readonly string[] DisplayProperties =
+    [
+        nameof(Chevron), nameof(Name), nameof(Count), nameof(DescriptionVisibility), nameof(IdentityHelp),
+        nameof(Pid), nameof(Memory), nameof(Cpu), nameof(Threads), nameof(Io), nameof(User), nameof(Status),
+        nameof(RowWeight), nameof(GroupVisibility), nameof(ChevronVisibility), nameof(AutomationName), nameof(GroupingReason)
+    ];
+    private object[] DisplayValues() =>
+    [
+        Chevron, Name, Count, DescriptionVisibility, IdentityHelp, Pid, Memory, Cpu, Threads, Io, User, Status,
+        RowWeight, GroupVisibility, ChevronVisibility, AutomationName, GroupingReason
+    ];
+    private void NotifyChanges(object[] before)
     {
-        if (process.Identity != other.process.Identity || !string.Equals(process.ExecutablePath, other.process.ExecutablePath, StringComparison.OrdinalIgnoreCase)) description = null;
-        process = other.process;
-        group = other.group;
-        IsExpanded = other.IsExpanded;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
+        var after = DisplayValues();
+        for (var i = 0; i < after.Length; i++)
+            if (!Equals(before[i], after[i])) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(DisplayProperties[i]));
+    }
+    public void Update(ProcessSnapshot nextProcess, ProcessGroup? nextGroup, bool expanded, string? nextDescription)
+    {
+        var before = DisplayValues();
+        process = nextProcess;
+        group = nextGroup;
+        IsExpanded = expanded;
+        description = nextDescription;
+        NotifyChanges(before);
     }
     public void SetDescription(string? value)
     {
         if (description == value) return;
+        var before = DisplayValues();
         description = value;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
+        NotifyChanges(before);
     }
     public void SetSelected(bool value)
     {
@@ -72,10 +91,29 @@ public sealed class ShellViewModel : INotifyPropertyChanged
 {
     private readonly HashSet<ProcessIdentity> expanded = new();
     private MonitorSnapshot? snapshot;
+    private IReadOnlyList<ProcessGroup> groups = [];
+    private readonly record struct DesiredRow(ProcessSnapshot Process, ProcessGroup? Group, bool Child, bool Expanded)
+    {
+        public string Key => $"{(Child ? "child" : Group is null ? "process" : "group")}:{Process.Identity}";
+    }
+    private static readonly string[] SummaryProperties =
+        [nameof(ProcessCount), nameof(GroupCount), nameof(MemoryUsed), nameof(CpuUsed), nameof(EmptyVisibility), nameof(EmptyMessage)];
+    private object[] summary;
+    public ShellViewModel() => summary = SummaryValues();
+    private object[] SummaryValues() => [ProcessCount, GroupCount, MemoryUsed, CpuUsed, EmptyVisibility, EmptyMessage];
+    private void NotifySummary()
+    {
+        var next = SummaryValues();
+        for (var i = 0; i < next.Length; i++)
+            if (!Equals(summary[i], next[i])) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(SummaryProperties[i]));
+        summary = next;
+    }
     public ObservableCollection<ProcessRow> Rows { get; } = new();
     public DiagnosticsHistory History { get; } = new();
     public ProcessDescriptionIndex Descriptions { get; } = new();
     public bool IsRebuilding { get; private set; }
+    public bool IsLiveRebuild { get; private set; }
+    public event EventHandler? RowsRebuilding;
     public event EventHandler? RowsRebuilt;
     public MonitorSnapshot? Snapshot => snapshot;
     public RelationshipSnapshot? Relationships { get; set; }
@@ -84,7 +122,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     public bool Grouped { get; set; } = true;
     public bool Descending { get; set; } = true;
     public string ProcessCount => snapshot?.Processes.Count.ToString() ?? "—";
-    public string GroupCount => snapshot is null ? "—" : ProcessGrouping.Create(snapshot.Processes).Count.ToString();
+    public string GroupCount => snapshot is null ? "—" : groups.Count.ToString();
     public string MemoryUsed => Display.Bytes(snapshot?.Memory.PhysicalUsedBytes);
     public string CpuUsed => Display.Percent(snapshot?.TotalCpuPercent);
     public Microsoft.UI.Xaml.Visibility EmptyVisibility => Rows.Count == 0 ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
@@ -93,12 +131,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     public void Apply(MonitorSnapshot next)
     {
         snapshot = next;
+        groups = ProcessGrouping.Create(next.Processes);
         History.Add(next);
         Descriptions.UpdateProcesses(next.Processes);
         var live = next.Processes.Select(p => p.Identity).ToHashSet();
         expanded.RemoveWhere(id => !live.Contains(id));
-        Rebuild();
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
+        Rebuild(live: true);
     }
 
     public void Toggle(ProcessRow row)
@@ -108,65 +146,52 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         Rebuild();
     }
 
-    public void Rebuild()
+    public void Rebuild(bool live = false)
     {
         if (snapshot is null) return;
         bool Matches(ProcessSnapshot p) => string.IsNullOrWhiteSpace(Search) ||
             $"{p.Name} {p.Identity.Pid} {p.ExecutablePath} {p.UserName} {Descriptions.GetCached(p)}".Contains(Search.Trim(), StringComparison.OrdinalIgnoreCase);
-        var desired = new List<ProcessRow>();
+        var desired = new List<DesiredRow>();
+        var positions = Rows.Select((row, index) => (row.RowKey, index)).ToDictionary(pair => pair.RowKey, pair => pair.index);
+        int Position(string key) => positions.GetValueOrDefault(key, int.MaxValue);
+        IEnumerable<T> Order<T>(IEnumerable<T> items, Func<T, ProcessSortKey> key) =>
+            items.OrderBy(key, Comparer<ProcessSortKey>.Create((left, right) => StickyProcessSort.Compare(left, right, Sort, Descending)));
+        IEnumerable<ProcessSnapshot> SortProcesses(IEnumerable<ProcessSnapshot> processes, bool child) =>
+            Order(processes, p => new(p.Name, p.CpuPercent, p.PrivateBytes, p.Identity.Pid, Position($"{(child ? "child" : "process")}:{p.Identity}")));
         if (Grouped)
         {
-            IEnumerable<ProcessGroup> groups = ProcessGrouping.Create(snapshot.Processes).Where(g => g.Members.Any(Matches));
-            groups = Sort switch
-            {
-                "Name" => Descending ? groups.OrderByDescending(g => g.Name, StringComparer.OrdinalIgnoreCase) : groups.OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase),
-                "CPU" => Descending ? groups.OrderByDescending(g => g.CpuPercent ?? -1) : groups.OrderBy(g => g.CpuPercent ?? double.MaxValue),
-                "PID" => Descending ? groups.OrderByDescending(g => g.Key.Pid) : groups.OrderBy(g => g.Key.Pid),
-                _ => Descending ? groups.OrderByDescending(g => g.PrivateBytes ?? 0) : groups.OrderBy(g => g.PrivateBytes ?? ulong.MaxValue)
-            };
+            IEnumerable<ProcessGroup> groups = this.groups.Where(g => g.Members.Any(Matches));
+            groups = Order(groups, g => new(g.Name, g.CpuPercent, g.PrivateBytes, g.Key.Pid, Position($"group:{g.Key}")));
             foreach (var group in groups)
             {
                 var representative = group.Members.First(p => p.Identity == group.Key);
                 desired.Add(new(representative, group, false, expanded.Contains(group.Key)));
                 if (group.Members.Count > 1 && expanded.Contains(group.Key))
-                    desired.AddRange(SortProcesses(group.Members).Select(p => new ProcessRow(p, null, true, false)));
+                    desired.AddRange(SortProcesses(group.Members, true).Select(p => new DesiredRow(p, null, true, false)));
             }
         }
-        else desired.AddRange(SortProcesses(snapshot.Processes.Where(Matches)).Select(p => new ProcessRow(p, null, false, false)));
+        else desired.AddRange(SortProcesses(snapshot.Processes.Where(Matches), false).Select(p => new DesiredRow(p, null, false, false)));
 
+        IsLiveRebuild = live;
+        RowsRebuilding?.Invoke(this, EventArgs.Empty);
         IsRebuilding = true;
         try
         {
-            var wanted = desired.Select(r => r.RowKey).ToHashSet();
-            for (var i = Rows.Count - 1; i >= 0; i--) if (!wanted.Contains(Rows[i].RowKey)) Rows.RemoveAt(i);
-            var existing = Rows.ToDictionary(r => r.RowKey);
-            for (var i = 0; i < desired.Count; i++)
-            {
-                var row = desired[i];
-                row.SetDescription(Descriptions.GetCached(row.Process));
-                if (existing.TryGetValue(row.RowKey, out var current))
+            MinimalKeyedRows.Reconcile(Rows, desired, row => row.RowKey, row => row.Key,
+                row =>
                 {
-                    current.Update(row);
-                    current.SetDescription(Descriptions.GetCached(current.Process));
-                    var old = Rows.IndexOf(current);
-                    if (old != i) Rows.Move(old, i);
-                }
-                else Rows.Insert(i, row);
-            }
+                    var created = new ProcessRow(row.Process, row.Group, row.Child, row.Expanded);
+                    created.SetDescription(Descriptions.GetCached(row.Process));
+                    return created;
+                },
+                (current, row) => current.Update(row.Process, row.Group, row.Expanded, Descriptions.GetCached(row.Process)));
         }
         finally { IsRebuilding = false; }
         RowsRebuilt?.Invoke(this, EventArgs.Empty);
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EmptyVisibility)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EmptyMessage)));
+        IsLiveRebuild = false;
+        NotifySummary();
     }
 
-    private IEnumerable<ProcessSnapshot> SortProcesses(IEnumerable<ProcessSnapshot> processes) => Sort switch
-    {
-        "Name" => Descending ? processes.OrderByDescending(p => p.Name, StringComparer.OrdinalIgnoreCase) : processes.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
-        "CPU" => Descending ? processes.OrderByDescending(p => p.CpuPercent ?? -1) : processes.OrderBy(p => p.CpuPercent ?? double.MaxValue),
-        "PID" => Descending ? processes.OrderByDescending(p => p.Identity.Pid) : processes.OrderBy(p => p.Identity.Pid),
-        _ => Descending ? processes.OrderByDescending(p => p.PrivateBytes ?? 0) : processes.OrderBy(p => p.PrivateBytes ?? ulong.MaxValue)
-    };
     public event PropertyChangedEventHandler? PropertyChanged;
 }
 

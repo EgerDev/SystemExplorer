@@ -170,6 +170,14 @@
                                             </Grid>
                                         </Border>
                                         <ListView x:Name="ProcessList" Grid.Row="1" ItemsSource="{x:Bind Model.Rows}" SelectionMode="Single" SelectionChanged="ProcessSelectionChanged" DoubleTapped="ProcessDoubleTapped" ContainerContentChanging="ProcessContainerChanged" AutomationProperties.Name="Live process table" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                            <ListView.ItemContainerTransitions>
+                                                <TransitionCollection/>
+                                            </ListView.ItemContainerTransitions>
+                                            <ListView.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <ItemsStackPanel ItemsUpdatingScrollMode="KeepScrollOffset"/>
+                                                </ItemsPanelTemplate>
+                                            </ListView.ItemsPanel>
                                             <ListView.ItemContainerStyle>
                                                 <Style TargetType="ListViewItem">
                                                     <Setter Property="HorizontalContentAlignment" Value="Stretch"/>

@@ -681,6 +681,193 @@ var tests = new (string Name, Action Run)[]
         Check(seen.Count == 4);
         Check(!ModuleMappingComparer.Instance.Equals(module, null));
         Check(ModuleMappingComparer.Instance.Equals(null, null));
+    }),
+    // Area A: shell and process table
+    ("Minimal reconciliation preserves unchanged rows without notifications", () =>
+    {
+        var rows = new System.Collections.ObjectModel.ObservableCollection<int>(Enumerable.Range(0, 20));
+        var notifications = 0;
+        var updates = new List<int>();
+        rows.CollectionChanged += (_, _) => notifications++;
+        var result = MinimalKeyedRows.Reconcile(rows, rows.ToArray(), x => x, x => x, x => x, (row, _) => updates.Add(row));
+        Check(result == new ReconciliationCounts(0, 0, 0) && notifications == 0);
+        Check(updates.Order().SequenceEqual(rows));
+    }),
+    ("Minimal reconciliation moves top to bottom exactly once", () =>
+    {
+        var rows = new System.Collections.ObjectModel.ObservableCollection<int>(Enumerable.Range(0, 20));
+        var desired = Enumerable.Range(1, 19).Append(0).ToArray();
+        var events = new List<System.Collections.Specialized.NotifyCollectionChangedAction>();
+        rows.CollectionChanged += (_, e) => events.Add(e.Action);
+        var result = MinimalKeyedRows.Reconcile(rows, desired, x => x, x => x, x => x, (_, _) => { });
+        Check(rows.SequenceEqual(desired) && result == new ReconciliationCounts(0, 1, 0));
+        Check(events.SequenceEqual([System.Collections.Specialized.NotifyCollectionChangedAction.Move]));
+    }),
+    ("Minimal reconciliation randomized orders use retained count minus LIS moves", () =>
+    {
+        var random = new Random(1729);
+        var rows = new System.Collections.ObjectModel.ObservableCollection<int>();
+        for (var iteration = 0; iteration < 1000; iteration++)
+        {
+            var before = rows.ToArray();
+            var desired = Enumerable.Range(0, 50).Where(_ => random.Next(3) != 0).OrderBy(_ => random.Next()).ToArray();
+            if (iteration % 20 == 0) desired = [];
+            var retained = desired.Where(before.Contains).ToArray();
+            var lengths = new int[retained.Length];
+            for (var i = 0; i < retained.Length; i++)
+            {
+                lengths[i] = 1;
+                for (var j = 0; j < i; j++)
+                    if (Array.IndexOf(before, retained[j]) < Array.IndexOf(before, retained[i]))
+                        lengths[i] = Math.Max(lengths[i], lengths[j] + 1);
+            }
+            var updates = new List<int>();
+            var moves = 0;
+            System.Collections.Specialized.NotifyCollectionChangedEventHandler handler = (_, e) =>
+            {
+                if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Move) moves++;
+            };
+            rows.CollectionChanged += handler;
+            var result = MinimalKeyedRows.Reconcile(rows, desired, x => x, x => x, x => x, (row, item) =>
+            {
+                Check(row == item);
+                updates.Add(row);
+            });
+            rows.CollectionChanged -= handler;
+            Check(rows.SequenceEqual(desired));
+            Check(result.Moved == retained.Length - lengths.DefaultIfEmpty(0).Max() && moves == result.Moved);
+            Check(result.Removed == before.Length - retained.Length && result.Inserted == desired.Length - retained.Length);
+            Check(updates.Order().SequenceEqual(retained.Order()));
+        }
+    }),
+    ("Minimal reconciliation rejects duplicate desired keys before mutation", () =>
+    {
+        var rows = new System.Collections.ObjectModel.ObservableCollection<int>([1, 2]);
+        var threw = false;
+        try { MinimalKeyedRows.Reconcile(rows, new[] { 1, 1 }, x => x, x => x, x => x, (_, _) => { }); }
+        catch (ArgumentException) { threw = true; }
+        Check(threw && rows.SequenceEqual([1, 2]));
+    }),
+    ("Process columns match legacy viewport sweep and fit when minimums permit", () =>
+    {
+        var actual = new ProcessColumnWidths();
+        var oracle = new LegacyProcessColumns();
+        for (var width = 100; width <= 2000; width += 7)
+        {
+            actual.FitViewport(width);
+            oracle.FitViewport(width);
+            Check(Enumerable.Range(0, 8).All(i => actual.GetWidth(i) == oracle.Widths[i]));
+            var minimum = 180 + 126 + 68 + 64 + (width >= 740 ? 88 : 0) + (width >= 840 ? 72 : 0);
+            Check(width - 32 < minimum || Math.Abs(actual.ContentWidth - (width - 32)) < 0.0001);
+            Equal(actual.ContentWidth + 32, actual.TableWidth);
+        }
+    }),
+    ("Process columns match legacy resize sequences including name redistribution", () =>
+    {
+        var actual = new ProcessColumnWidths();
+        var oracle = new LegacyProcessColumns();
+        foreach (var viewport in new[] { 572, 900, 1200, 700, 839, 840, 2000, 400 })
+        {
+            actual.FitViewport(viewport);
+            oracle.FitViewport(viewport);
+            foreach (var (index, width) in new (int, double)[]
+                { (0, 350), (1, 200), (0, 180), (3, 150), (4, 90), (2, 130), (7, 140),
+                  (0, 600), (0, 190), (5, 150), (6, 100), (1, -20), (2, 1000), (-1, 100), (8, 100), (0, double.NaN) })
+            {
+                actual.Resize(index, width);
+                oracle.Resize(index, width);
+                Check(Enumerable.Range(0, 8).All(i => actual.GetWidth(i) == oracle.Widths[i]));
+            }
+        }
+    }),
+    ("Process columns hide at exact thresholds and ignore unchanged or invalid viewports", () =>
+    {
+        var columns = new ProcessColumnWidths();
+        Check(!columns.FitViewport(572));
+        columns.FitViewport(739);
+        Check(!columns.IoVisible && !columns.ThreadsVisible);
+        columns.FitViewport(740);
+        Check(columns.IoVisible && !columns.ThreadsVisible);
+        columns.FitViewport(839);
+        Check(columns.IoVisible && !columns.ThreadsVisible);
+        columns.FitViewport(840);
+        Check(columns.IoVisible && columns.ThreadsVisible);
+        var before = Enumerable.Range(0, 8).Select(columns.GetWidth).ToArray();
+        foreach (var width in new[] { 840, 840.49, 839.51, double.NaN, double.PositiveInfinity, double.NegativeInfinity, 32, 0, -1 })
+            Check(!columns.FitViewport(width));
+        Check(Enumerable.Range(0, 8).Select(columns.GetWidth).SequenceEqual(before));
+        Check(columns.FitViewport(840.5));
+        Check(!columns.Resize(0, columns.GetWidth(0)));
+        Check(!columns.Resize(0, double.PositiveInfinity));
+        Check(!columns.Resize(8, 100));
+        columns.FitViewport(100);
+        Check(!columns.FitViewport(101));
+    }),
+    ("Sticky CPU sorting preserves equal displayed values and moves real changes", () =>
+    {
+        var first = new ProcessSortKey("same", 0.021, 100, 30, 0);
+        var second = new ProcessSortKey("same", 0.049, 100, 10, 1);
+        Check(StickyProcessSort.Compare(first, second, "CPU", true) < 0);
+        Check(StickyProcessSort.Compare(first, second, "CPU", false) < 0);
+        Check(StickyProcessSort.Compare(first, second with { Cpu = 0.11 }, "CPU", true) > 0);
+        Check(StickyProcessSort.Compare(first, second with { Cpu = 0.11 }, "CPU", false) < 0);
+        foreach (var value in new[] { 0d, 0.049, 0.05, 0.15, 1.25, 1.35, 99.999 })
+            Check(StickyProcessSort.DisplayedCpu(value).ToString("F1") == value.ToString("F1"));
+    }),
+    ("Sticky process sorting uses current order then existing before new then PID", () =>
+    {
+        foreach (var sort in new[] { "Name", "CPU", "Private memory" })
+        foreach (var descending in new[] { true, false })
+        {
+            var earlier = new ProcessSortKey("Example", 1, 100, 40, 0);
+            var later = new ProcessSortKey("example", 1, 100, 10, 1);
+            var added = new ProcessSortKey("EXAMPLE", 1, 100, 1, int.MaxValue);
+            Check(StickyProcessSort.Compare(earlier, later, sort, descending) < 0);
+            Check(StickyProcessSort.Compare(later, added, sort, descending) < 0);
+            Check(StickyProcessSort.Compare(added, added with { Pid = 2 }, sort, descending) < 0);
+        }
+        var key = new ProcessSortKey("a", 0, 0, 10, 0);
+        Check(StickyProcessSort.Compare(key, key with { Pid = 20 }, "PID", true) > 0);
+        Check(StickyProcessSort.Compare(key, key with { Pid = 20 }, "PID", false) < 0);
+        Check(StickyProcessSort.Compare(key, key, "CPU", true) == 0);
+        Check(!Array.Empty<ProcessSortKey>().Order(Comparer<ProcessSortKey>.Create((a, b) => StickyProcessSort.Compare(a, b, "CPU", true))).Any());
+    }),
+    ("Sticky process sorting preserves unavailable placement in both directions", () =>
+    {
+        var known = new ProcessSortKey("same", 0, 100, 10, 1);
+        var missing = new ProcessSortKey("same", null, null, 20, 0);
+        foreach (var descending in new[] { true, false })
+        {
+            Check(StickyProcessSort.Compare(known, missing, "CPU", descending) < 0);
+            Check(StickyProcessSort.Compare(known, missing, "Private memory", descending) < 0);
+        }
+        Check(StickyProcessSort.Compare(known with { Memory = 0 }, missing, "Private memory", true) > 0);
+        Check(StickyProcessSort.Compare(known with { Memory = ulong.MaxValue }, missing, "Private memory", false) > 0);
+    }),
+    ("Sticky sort keys cache CPU display precision with F1 parity", () =>
+    {
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        var values = Enumerable.Range(0, 200001).Select(i => i * 0.0005).Concat(
+            new[] { -0d, -0.05, 0.05, 0.15, 0.25, 1.25, 1.35, 99.95, 100d,
+                double.Epsilon, double.MaxValue, double.MinValue, double.NaN, double.PositiveInfinity, double.NegativeInfinity });
+        foreach (var value in values)
+        {
+            var expected = double.Parse(value.ToString("F1", culture), culture);
+            var key = new ProcessSortKey("test", value, 0, 1, 0);
+            Check(key.Cpu!.Value.Equals(expected));
+            Check((key with { Cpu = value }).Cpu!.Value.Equals(expected));
+        }
+        var unknown = new ProcessSortKey("test", null, 0, 1, 0);
+        Check(unknown.Cpu is null);
+        Check((unknown with { Cpu = 1.25 }).Cpu == 1.2);
+        Check((unknown with { Cpu = null }).Cpu is null);
+        var left = new ProcessSortKey("same", 0.021, 0, 1, 0);
+        var right = new ProcessSortKey("same", 0.049, 0, 2, 1);
+        var comparer = Comparer<ProcessSortKey>.Create((a, b) => StickyProcessSort.Compare(a, b, "CPU", true));
+        comparer.Compare(left, right);
+        var allocated = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 10000; i++) comparer.Compare(left, right);
+        Check(GC.GetAllocatedBytesForCurrentThread() == allocated);
     })
 };
 var failures = 0;
