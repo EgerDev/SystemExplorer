@@ -95,7 +95,7 @@ public sealed partial class MainWindow
             {
                 if (busy || row.Value is not ThreadIdentity thread) return;
                 busy = true;
-                view.ShowMessage("Inspecting only this selected thread. Close cancels; safe native cleanup can take longer than the cooperative budget.");
+                view.ShowLoading("Inspecting only this selected thread. Close cancels; safe native cleanup can take longer than the cooperative budget.");
                 try
                 {
                     var chain = await threadDiagnostics.CaptureWaitChainAsync(thread, token);
@@ -182,11 +182,12 @@ public sealed partial class MainWindow
                     Field("Reverse dependents / entries", "None reported");
             }
             else Field("Reverse dependents / status", "Unavailable", "No dependent-service observation returned.");
-            view.ShowRows($"{result.Status} · {result.CapturedAt.LocalDateTime:T} · {result.Detail} Graph inventory is being collected read-only.", rows,
+            var header = $"{result.Status} · {result.CapturedAt.LocalDateTime:T} · {result.Detail}";
+            view.ShowRows($"{header}\nService graph: collecting dependency configurations read-only… Close to cancel.", rows.ToArray(),
                 "Configuration / dependency", "", "", "");
-            await AddServiceGraphRowsAsync(result, rows, token);
-            view.ShowRows($"{result.Status} · {result.CapturedAt.LocalDateTime:T} · {result.Detail}", rows,
-                "Configuration / dependency", "", "", "");
+            await AddServiceGraphRowsAsync(result, rows, token, (read, total) =>
+                view.UpdateStatus($"{header}\nService graph: {read} of {total} configurations read (bounded to 512 / 10 s)… Close to cancel."));
+            view.ShowRows(header, rows, "Configuration / dependency", "", "", "", preserveState: true);
         });
     }
 
@@ -196,7 +197,7 @@ public sealed partial class MainWindow
         5 => "Continue pending", 6 => "Pause pending", 7 => "Paused", _ => $"Unknown ({state})"
     };
 
-    private async Task AddServiceGraphRowsAsync(ServiceInspection root, List<InventoryRow> rows, CancellationToken token)
+    private async Task AddServiceGraphRowsAsync(ServiceInspection root, List<InventoryRow> rows, CancellationToken token, Action<int, int>? progress = null)
     {
         void Field(string label, string value, string detail = "") => rows.Add(new(label, value, FullText: $"{label}: {value}\n{detail}"));
         try
@@ -214,6 +215,9 @@ public sealed partial class MainWindow
                 .ThenBy(n => n, StringComparer.OrdinalIgnoreCase).ToArray();
             var started = System.Diagnostics.Stopwatch.StartNew();
             int examined = 0;
+            var total = Math.Min(names.Length, 512);
+            var reported = System.Diagnostics.Stopwatch.StartNew();
+            progress?.Invoke(0, total);
             foreach (var name in names)
             {
                 token.ThrowIfCancellationRequested();
@@ -221,6 +225,7 @@ public sealed partial class MainWindow
                 var observation = string.Equals(name, root.Name, StringComparison.OrdinalIgnoreCase)
                     ? root : await serviceInspection.CaptureAsync(name, token);
                 examined++;
+                if (reported.ElapsedMilliseconds >= 250) { progress?.Invoke(examined, total); reported.Restart(); }
                 if (observation.Status == InspectionStatus.Available)
                     inputs.Add(new(observation.Name, observation.Dependencies, observation.LoadOrderGroup));
                 else failures.Add($"{name}: {observation.Status} · {observation.Detail}");

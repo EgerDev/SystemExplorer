@@ -21,12 +21,16 @@ public sealed partial class MainWindow
         var toggle = new Button { Content = "Show table" };
         var chart = new ProcessHistoryChart();
         var table = new InventoryView { Visibility = Visibility.Collapsed };
-        var status = new TextBlock { Text = "Live session history · 8 lifetimes / 180 samples. Missing is not confirmed exit; gaps are not zero.", TextWrapping = TextWrapping.Wrap, FontSize = 12 };
-        var content = new Grid
+        var status = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        var content = new Grid { RowSpacing = 5 };
+        void ResizeContent()
         {
-            Width = Math.Min(800, Math.Max(280, Root.ActualWidth - 100)),
-            Height = Math.Min(470, Math.Max(240, Root.ActualHeight - 190)), RowSpacing = 5
-        };
+            content.Width = Math.Min(800, Math.Max(0, Root.ActualWidth - 100));
+            content.Height = Math.Min(470, Math.Max(0, Root.ActualHeight - 190));
+        }
+        void RootSizeChanged(object sender, SizeChangedEventArgs e) => ResizeContent();
+        void XamlRootChanged(XamlRoot sender, XamlRootChangedEventArgs e) => ResizeContent();
+        ResizeContent();
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -40,24 +44,34 @@ public sealed partial class MainWindow
         Grid.SetRow(chart, 2); content.Children.Add(chart);
         Grid.SetRow(table, 2); content.Children.Add(table);
         bool updating = false;
+        bool rendered = false;
         DateTimeOffset? renderedAt = null;
-        ProcessIdentity? renderedIdentity = null;
+        ProcessIdentity? tableIdentity = null;
         void Render()
         {
             var history = histories.FirstOrDefault(h => h.Identity == identity);
-            chart.Update(history);
-            if (history is null) table.ShowMessage("Select a stable current process to start retaining its history.");
+            status.Text = ProcessHistoryStatus.Build(history);
+            if (chart.Visibility == Visibility.Visible) chart.Update(history);
+            else if (history is null)
+            {
+                table.ShowMessage("Select a stable current process to start retaining its history.");
+                tableIdentity = null;
+            }
             else
+            {
                 table.ShowRows($"PID {history.Identity.Pid} · creation {history.Identity.CreationTimeFileTime}. Session-only history. Select a sample for CPU and I/O details; missing does not establish exit.",
                     history.Points.Select(p => new InventoryRow(p.At.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss"),
                         $"{(p.Observed ? "Observed" : "Not observed")}{(p.BreakBefore ? " · Sampling gap before this row" : "")}",
                         DiagnosticData.Bytes(p.PrivateBytes), DiagnosticData.Bytes(p.WorkingSetBytes), DiagnosticData.Bytes(p.PrivateWorkingSetBytes),
                         p.PrivateBytes, p.WorkingSetBytes, p.PrivateWorkingSetBytes,
-                        $"{p.At:O}\nPID {history.Identity.Pid} · creation {history.Identity.CreationTimeFileTime}\n{(p.Observed ? "Observed" : "Not observed; this does not establish exit")} · Gap before: {p.BreakBefore}\nPrivate commit: {DiagnosticData.Bytes(p.PrivateBytes)}\nWorking set: {DiagnosticData.Bytes(p.WorkingSetBytes)}\nPrivate working set: {DiagnosticData.Bytes(p.PrivateWorkingSetBytes)}\nCPU (machine normalized): {(p.CpuPercent is { } cpu ? $"{cpu:F2}%" : "Unavailable")}\nRead: {(p.ReadBytesPerSecond is { } read ? Display.Rate(read) : "Unavailable")}\nWrite: {(p.WriteBytesPerSecond is { } write ? Display.Rate(write) : "Unavailable")}\nPrivate commit is not physical RAM; shared resident pages are not additive.")),
+                        $"{p.At:O}\nPID {history.Identity.Pid} · creation {history.Identity.CreationTimeFileTime}\n{(p.Observed ? "Observed" : "Not observed; this does not establish exit")} · Gap before: {p.BreakBefore}\nPrivate commit: {DiagnosticData.Bytes(p.PrivateBytes)}\nWorking set: {DiagnosticData.Bytes(p.WorkingSetBytes)}\nPrivate working set: {DiagnosticData.Bytes(p.PrivateWorkingSetBytes)}\nCPU (machine normalized): {(p.CpuPercent is { } cpu ? $"{cpu:F2}%" : "Unavailable")}\nRead: {(p.ReadBytesPerSecond is { } read ? Display.Rate(read) : "Unavailable")}\nWrite: {(p.WriteBytesPerSecond is { } write ? Display.Rate(write) : "Unavailable")}\nPrivate commit is not physical RAM; shared resident pages are not additive.",
+                        NameKey: p.At.UtcTicks, Key: $"{history.Identity}:{p.At.UtcTicks}")),
                     "Sample time", "Private commit", "Working set", "Private WS", reverse: true,
-                    preserveState: renderedIdentity == history.Identity);
-            renderedIdentity = history?.Identity;
+                    preserveState: tableIdentity == history.Identity, live: true);
+                tableIdentity = history.Identity;
+            }
             renderedAt = history?.Points.LastOrDefault()?.At;
+            rendered = true;
         }
         void Refresh()
         {
@@ -72,7 +86,7 @@ public sealed partial class MainWindow
                 targets.SelectedIndex = histories.ToList().FindIndex(h => h.Identity == identity);
                 updating = false;
             }
-            if (changed || renderedAt != histories.FirstOrDefault(h => h.Identity == identity)?.Points.LastOrDefault()?.At) Render();
+            if (!rendered || changed || renderedAt != histories.FirstOrDefault(h => h.Identity == identity)?.Points.LastOrDefault()?.At) Render();
         }
         targets.SelectionChanged += (_, _) =>
         {
@@ -86,6 +100,7 @@ public sealed partial class MainWindow
             chart.Visibility = showChart ? Visibility.Visible : Visibility.Collapsed;
             table.Visibility = showChart ? Visibility.Collapsed : Visibility.Visible;
             toggle.Content = showChart ? "Show table" : "Show chart";
+            Render();
         };
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         timer.Tick += (_, _) => Refresh();
@@ -95,8 +110,17 @@ public sealed partial class MainWindow
             Content = content, CloseButtonText = "Close", DefaultButton = ContentDialogButton.Close
         };
         dialog.Resources["ContentDialogMaxWidth"] = 940d;
-        try { Refresh(); Render(); timer.Start(); await dialog.ShowAsync(); }
-        finally { timer.Stop(); detailsOpen = false; }
+        var xamlRoot = Root.XamlRoot;
+        Root.SizeChanged += RootSizeChanged;
+        xamlRoot.Changed += XamlRootChanged;
+        try { Refresh(); timer.Start(); await dialog.ShowAsync(); }
+        finally
+        {
+            timer.Stop();
+            Root.SizeChanged -= RootSizeChanged;
+            xamlRoot.Changed -= XamlRootChanged;
+            detailsOpen = false;
+        }
     }
 
     private async Task ShowInventoryAsync(string title, Func<InventoryView, CancellationToken, Task> populate)

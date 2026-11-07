@@ -48,7 +48,9 @@ public sealed partial class ProcessInspectionView : UserControl
             _ => descending ? filtered.OrderByDescending(r => r.Name, StringComparer.OrdinalIgnoreCase) : filtered.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
         };
         var displayed = rows.ToArray();
+        var selected = Rows.SelectedItem as InspectionRow;
         Rows.ItemsSource = displayed;
+        if (selected is not null && Array.IndexOf(displayed, selected) >= 0) { Rows.SelectedItem = selected; Rows.ScrollIntoView(selected); }
         Status.Text = $"{status}\n{displayed.Length} of {source.Count} records{(displayed.Length == 0 ? " · No matching observations" : "")}";
     }
     private void SelectionChanged(object sender, SelectionChangedEventArgs args)

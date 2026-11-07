@@ -3,32 +3,36 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid RowSpacing="8">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-        <TextBlock x:Name="Status" Text="Collecting a bounded read-only observation… Close to cancel." TextWrapping="Wrap" FontSize="12"/>
+        <ScrollViewer MaxHeight="96" VerticalScrollBarVisibility="Auto"><TextBlock x:Name="Status" Text="Collecting a bounded read-only observation… Close to cancel." TextWrapping="Wrap" FontSize="12" IsTextSelectionEnabled="True"/></ScrollViewer>
         <ComboBox x:Name="Targets" Grid.Row="1" Visibility="Collapsed" HorizontalAlignment="Stretch" SelectionChanged="TargetChanged" AutomationProperties.Name="Retained process lifetime"/>
         <TextBox x:Name="Search" Grid.Row="2" PlaceholderText="Filter this frozen inventory…" TextChanged="FilterChanged" AutomationProperties.Name="Filter diagnostic inventory"/>
-        <Grid x:Name="Headers" Grid.Row="3" Padding="8,0">
+        <Grid x:Name="Headers" Grid.Row="3" Padding="8,0" SizeChanged="HeadersSizeChanged">
+            <Grid.Resources>
+                <Style TargetType="Button"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="0,5"/><Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="HorizontalContentAlignment" Value="Left"/></Style>
+            </Grid.Resources>
             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="112"/><ColumnDefinition Width="112"/><ColumnDefinition Width="112"/></Grid.ColumnDefinitions>
-            <Button x:Name="NameHeader" Content="Name" Tag="0" Click="SortClicked" Background="Transparent" BorderThickness="0"/>
-            <Button x:Name="FirstHeader" Grid.Column="1" Tag="1" Click="SortClicked" Background="Transparent" BorderThickness="0"/>
-            <Button x:Name="SecondHeader" Grid.Column="2" Tag="2" Click="SortClicked" Background="Transparent" BorderThickness="0"/>
-            <Button x:Name="ThirdHeader" Grid.Column="3" Tag="3" Click="SortClicked" Background="Transparent" BorderThickness="0"/>
+            <Button x:Name="NameHeader" Tag="0" Click="SortClicked"/>
+            <Button x:Name="FirstHeader" Grid.Column="1" Tag="1" Click="SortClicked"/>
+            <Button x:Name="SecondHeader" Grid.Column="2" Tag="2" Click="SortClicked"/>
+            <Button x:Name="ThirdHeader" Grid.Column="3" Tag="3" Click="SortClicked"/>
         </Grid>
         <ListView x:Name="Rows" Grid.Row="4" SelectionMode="Single" SelectionChanged="SelectionChanged" AutomationProperties.Name="Diagnostic observations">
+            <ListView.ItemsPanel><ItemsPanelTemplate><ItemsStackPanel ItemsUpdatingScrollMode="KeepScrollOffset"/></ItemsPanelTemplate></ListView.ItemsPanel>
             <ListView.ItemTemplate><DataTemplate>
                 <Grid Padding="8,5" ToolTipService.ToolTip="{Binding Description}">
-                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="{Binding FirstWidth}"/><ColumnDefinition Width="{Binding SecondWidth}"/><ColumnDefinition Width="{Binding ThirdWidth}"/></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="{Binding Columns.FirstWidth}"/><ColumnDefinition Width="{Binding Columns.SecondWidth}"/><ColumnDefinition Width="{Binding Columns.ThirdWidth}"/></Grid.ColumnDefinitions>
                     <StackPanel Margin="0,0,8,0">
                         <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
                         <TextBlock Text="{Binding Detail}" FontSize="11" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Style="{StaticResource Muted}"/>
                     </StackPanel>
-                    <TextBlock Grid.Column="1" Text="{Binding First}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                    <TextBlock Grid.Column="2" Text="{Binding Second}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                    <TextBlock Grid.Column="3" Text="{Binding Third}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Grid.Column="1" Text="{Binding First}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,6,0"/>
+                    <TextBlock Grid.Column="2" Text="{Binding Second}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,6,0"/>
+                    <TextBlock Grid.Column="3" Text="{Binding Third}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,6,0"/>
                 </Grid>
             </DataTemplate></ListView.ItemTemplate>
             <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/></Style></ListView.ItemContainerStyle>
         </ListView>
-        <ScrollViewer Grid.Row="5" MaxHeight="70"><TextBlock x:Name="Detail" Text="Select an observation for full, copyable details." TextWrapping="Wrap" FontSize="12" IsTextSelectionEnabled="True"/></ScrollViewer>
+        <ScrollViewer x:Name="DetailScroll" Grid.Row="5" MaxHeight="70"><TextBlock x:Name="Detail" Text="Select an observation for full, copyable details." TextWrapping="Wrap" FontSize="12" IsTextSelectionEnabled="True"/></ScrollViewer>
         <StackPanel Grid.Row="6" Orientation="Horizontal" Spacing="8">
             <Button x:Name="Back" Content="Back to list" Visibility="Collapsed" Click="BackClicked"/>
             <Button x:Name="ActionButton" Visibility="Collapsed" IsEnabled="False" Click="ActionClicked"/>

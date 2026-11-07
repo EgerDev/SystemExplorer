@@ -4,6 +4,116 @@ using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Byte and rate formatting preserve small nonzero values and exact zero", () =>
+    {
+        Check(MetricFormatting.Bytes(0) == "0 B" && MetricFormatting.Rate(0) == "0 B/s");
+        Check(MetricFormatting.Rate(-0d) == "0 B/s");
+        Check(MetricFormatting.Bytes(1) == "1 B" && MetricFormatting.Bytes(191) == "191 B");
+        Check(MetricFormatting.Bytes(1024) == "1.0 KiB" && MetricFormatting.Bytes(1536) == "1.5 KiB");
+        Check(DiagnosticData.Rate(191) == "191 B/s" && DiagnosticData.Rate(1024) == "1.0 KiB/s");
+        Check(DiagnosticData.Bytes(191) == MetricFormatting.Bytes(191));
+        foreach (var value in new[] { double.Epsilon, 0.000001, 0.005, 0.01, 0.5, 1, 191, 1023, 1024, 1024 * 1024d })
+        {
+            var formatted = MetricFormatting.Rate(value);
+            Check(!formatted.StartsWith("0 ") && !formatted.StartsWith("0.0 ") && DiagnosticData.Rate(value) == formatted);
+        }
+        Check(MetricFormatting.Bytes(null) == "—" && DiagnosticData.Rate(null) == "—");
+        Check(MetricFormatting.Rate(double.NaN) == "—" && MetricFormatting.Rate(double.PositiveInfinity) == "—" && MetricFormatting.Rate(-1) == "—");
+    }),
+    ("Chart scales round up by binary units and hold until below half", () =>
+    {
+        Check(ChartScale.Next(0, 0) == 1 && ChartScale.Next(0, 191) == 200);
+        Check(ChartScale.Next(0, 501) == 1000 && ChartScale.Next(0, 1500, true) == 2048);
+        Check(ChartScale.Next(1000, 1001, true) == 1024);
+        Check(ChartScale.Next(200, 201) == 500);
+        Check(ChartScale.Next(1000, 800) == 1000 && ChartScale.Next(1000, 500) == 1000);
+        Check(ChartScale.Next(1000, 499) == 500 && ChartScale.Next(1000, 0) == 1);
+        Check(ChartScale.Next(10240, 5120, true) == 10240 && ChartScale.Next(10240, 4096, true) == 5120);
+        Check(ChartScale.Next(0, 14, minimum: 100) == 100 && ChartScale.Next(100, 101, minimum: 100) == 200);
+    }),
+    ("Chart scales retain unavailable history and bound extreme values", () =>
+    {
+        foreach (var invalid in new[] { double.NaN, double.PositiveInfinity, -1d })
+            Check(ChartScale.Next(500, invalid) == 500 && ChartScale.Next(0, invalid) == 1);
+        foreach (var value in new[] { double.Epsilon, 1d, 1023, 1024, 1024 * 1024d, (double)ulong.MaxValue, double.MaxValue })
+        {
+            var scale = ChartScale.Next(0, value, true);
+            Check(double.IsFinite(scale) && scale >= value && scale > 0);
+        }
+    }),
+    ("Keyed live rows retain identities across colliding labels, refreshes and eviction", () =>
+    {
+        var first = (Key: 101L, Name: "12:00:00", Value: 1);
+        var second = (Key: 102L, Name: "12:00:00", Value: 2);
+        var live = new System.Collections.ObjectModel.ObservableCollection<(long Key, string Name, int Value)>();
+        KeyedRows.Reconcile(live, new[] { (first.Key, first.Name, first.Value), (second.Key, second.Name, second.Value) }, r => r.Key);
+        var changes = new List<System.Collections.Specialized.NotifyCollectionChangedAction>();
+        live.CollectionChanged += (_, e) => changes.Add(e.Action);
+        KeyedRows.Reconcile(live, new[] { (101L, "12:00:00", 1), (102L, "12:00:00", 2), (103L, "12:00:01", 3) }, r => r.Item1);
+        Check(live[1].Key == second.Key && changes.SequenceEqual(new[] { System.Collections.Specialized.NotifyCollectionChangedAction.Add }));
+        changes.Clear();
+        KeyedRows.Reconcile(live, new[] { (102L, "12:00:00", 2), (103L, "12:00:01", 3), (104L, "12:00:02", 4) }, r => r.Item1);
+        Check(live[0].Key == second.Key && !changes.Contains(System.Collections.Specialized.NotifyCollectionChangedAction.Reset));
+        KeyedRows.Reconcile(live, live.Reverse().ToArray(), r => r.Key);
+        Check(live.Select(r => r.Key).SequenceEqual(new long[] { 104, 103, 102 }));
+        KeyedRows.Reconcile(live, live.Where(r => r.Value == 2).ToArray(), r => r.Key);
+        Check(live.Single().Key == second.Key);
+    }),
+    ("Keyed live rows reuse equal objects, replace changes, clear and reject duplicate keys", () =>
+    {
+        var original = new KeyedTestRow(1, "sample");
+        var live = new System.Collections.ObjectModel.ObservableCollection<KeyedTestRow> { original };
+        KeyedRows.Reconcile(live, new[] { new KeyedTestRow(1, "sample") }, row => row.Key);
+        Check(ReferenceEquals(live[0], original));
+        var updated = new KeyedTestRow(1, "updated");
+        KeyedRows.Reconcile(live, new[] { updated }, row => row.Key);
+        Check(ReferenceEquals(live[0], updated));
+        bool rejected = false;
+        try { KeyedRows.Reconcile(live, new[] { updated, updated }, row => row.Key); }
+        catch (ArgumentException) { rejected = true; }
+        Check(rejected && live.Count == 1 && ReferenceEquals(live[0], updated));
+        KeyedRows.Reconcile(live, Array.Empty<KeyedTestRow>(), row => row.Key);
+        Check(live.Count == 0);
+    }),
+    ("Inventory loading keeps only progress and applies the pending filter on completion", () =>
+    {
+        var state = new InventoryPresentationState();
+        Check(state.Phase == InventoryPhase.Loading);
+        state.Filter = "physical";
+        state.Filter = "  DiSk 1  ";
+        Check(state.StatusText("Collecting…", 0, 0, "Disk", false, false) == "Collecting…");
+        Check(state.StatusText("Resampling…", 0, 0, "Disk", false, false) == "Resampling…");
+        state.ShowRows(false);
+        Check(state.Phase == InventoryPhase.Rows && state.Filter == "  DiSk 1  ");
+        var rows = new[] { "All physical disks", "Disk 0", "Disk 1" };
+        Check(rows.Where(state.Matches).SequenceEqual(new[] { "Disk 1" }));
+        Check(state.StatusText("Captured", 1, 3, "Disk", true, false).Contains("1 of 3 observations"));
+        Check(state.StatusText("Captured", 1, 3, "Disk", true, false).Contains("Frozen at capture"));
+        state.ShowRows(true);
+        Check(state.Filter == "  DiSk 1  ");
+        state.ShowRows(false);
+        Check(state.Filter == "" && rows.All(state.Matches));
+    }),
+    ("Inventory loading distinguishes empty, unmatched and failed captures", () =>
+    {
+        var state = new InventoryPresentationState();
+        state.Filter = "missing";
+        state.ShowRows(false);
+        Check(!state.Matches("Disk 0"));
+        Check(state.StatusText("Captured", 0, 3, "Disk", false, false).Contains("No matching observations"));
+        Check(state.StatusText("Captured", 0, 0, "Disk", false, false).Contains("No observations returned"));
+        Check(state.StatusText("Updated", 1, 1, "Time", true, true).Contains("Live; updates in place"));
+        state.BeginLoading();
+        Check(state.Filter == "" && state.Phase == InventoryPhase.Loading);
+        state.Filter = "new capture";
+        Check(state.StatusText("Collecting…", 0, 0, "Disk", false, false) == "Collecting…");
+        state.ShowMessage();
+        Check(state.Filter == "" && state.Phase == InventoryPhase.Message);
+        foreach (var message in new[] { "Cancelled", "Unavailable: access denied" })
+            Check(state.StatusText(message, 0, 0, "Disk", false, false) == message);
+        state.ShowRows(false);
+        Check(state.Filter == "" && state.Phase == InventoryPhase.Rows);
+    }),
     ("Inventory identifier keys sort numerically with nulls last in both directions", () =>
     {
         var rows = new (string Text, decimal? Key)[] { ("0xFFC", 0xFFC), ("Unavailable", null), ("0x1010", 0x1010) };
@@ -610,6 +720,396 @@ var tests = new (string Name, Action Run)[]
         Check(seen.Count == 4);
         Check(!ModuleMappingComparer.Instance.Equals(module, null));
         Check(ModuleMappingComparer.Instance.Equals(null, null));
+    }),
+    // Area D: on-demand inventories and inspection dialogs.
+    ("Inventory metric columns adapt to width and always leave the name column readable", () =>
+    {
+        Check(InventoryLayout.MetricWidth(0, 3) == 0 && InventoryLayout.MetricWidth(500, 0) == 0 && InventoryLayout.MetricWidth(double.NaN, 3) == 0);
+        Check(InventoryLayout.MetricWidth(4000, 3) == InventoryLayout.MaximumMetricWidth);
+        Check(InventoryLayout.MetricWidth(700, 3) == 119);
+        foreach (var available in new[] { 120d, 280, 304, 420, 640, 780, 1200 })
+            for (var visible = 1; visible <= 3; visible++)
+            {
+                var width = InventoryLayout.MetricWidth(available, visible);
+                Check(width > 0 && width <= InventoryLayout.MaximumMetricWidth && available - width * visible >= available * 0.4 - 0.001);
+            }
+        Check(InventoryLayout.MetricWidth(300, 3) < InventoryLayout.MetricWidth(800, 3));
+    }),
+    ("Inventory rows reconcile only with complete unique keys, such as adapter plus PID", () =>
+    {
+        Check(KeyedRows.HasUniqueKeys(new[] { "process:1A:42", "process:2B:42", "adapter:1A" }, key => key));
+        Check(!KeyedRows.HasUniqueKeys(new[] { "process:1A:42", "process:1A:42" }, key => key));
+        Check(!KeyedRows.HasUniqueKeys(new[] { "a", null }, key => key));
+        Check(KeyedRows.HasUniqueKeys(Array.Empty<string>(), key => key));
+    }),
+    ("On-demand counter inventories resample warmup or stale long-average intervals", () =>
+    {
+        Check(CounterSampling.NeedsFreshInterval(true, TimeSpan.FromSeconds(1)));
+        Check(CounterSampling.NeedsFreshInterval(false, null) && CounterSampling.NeedsFreshInterval(false, TimeSpan.Zero));
+        Check(CounterSampling.NeedsFreshInterval(false, TimeSpan.FromSeconds(75.1)));
+        Check(!CounterSampling.NeedsFreshInterval(false, TimeSpan.FromSeconds(1)) && !CounterSampling.NeedsFreshInterval(false, CounterSampling.MaximumRateInterval));
+    }),
+    // Overview hardening (Area B)
+    ("Stable ranking obeys greedy bounds and plain sort without history", () =>
+    {
+        var random = new Random(90421);
+        for (var iteration = 0; iteration < 500; iteration++)
+        {
+            var items = Enumerable.Range(0, random.Next(1, 90))
+                .Select(id => (Id: id, Value: random.Next(6) == 0 ? (double?)null : random.NextDouble() * 20)).ToArray();
+            var previous = items.OrderBy(_ => random.Next()).Take(random.Next(items.Length + 1))
+                .Select((item, rank) => (item.Id, Rank: rank)).ToDictionary(item => item.Id, item => item.Rank);
+            var tie = Comparer<(int Id, double? Value)>.Create((a, b) => a.Id.CompareTo(b.Id));
+            double Tolerance(double value) => Math.Max(0.5, value * 0.1);
+            var ordered = StableRanking.Take(items, item => item.Id, item => item.Value, previous, Tolerance, tie, items.Length);
+            Check(ordered.Select(item => item.Id).Distinct().Count() == items.Length);
+            for (var p = 0; p < ordered.Count; p++)
+            {
+                var maximum = ordered.Skip(p).Max(item => item.Value);
+                Check(maximum is null || ordered[p].Value >= maximum - Tolerance(maximum.Value));
+            }
+            var prefix = StableRanking.Take(items, item => item.Id, item => item.Value, previous, Tolerance, tie, 12);
+            Check(prefix.SequenceEqual(ordered.Take(12)));
+            var plain = StableRanking.Take(items, item => item.Id, item => item.Value, new Dictionary<int, int>(), Tolerance, tie, items.Length);
+            Check(plain.SequenceEqual(items.OrderByDescending(item => item.Value).ThenBy(item => item.Id)));
+        }
+    }),
+    ("Stable ranking holds near equals, moves large changes, and places newcomers and nulls", () =>
+    {
+        var previous = new Dictionary<int, int> { [1] = 0, [2] = 1, [3] = 2 };
+        var tie = Comparer<(int Id, double? Value)>.Create((a, b) => a.Id.CompareTo(b.Id));
+        int[] Order(params (int Id, double? Value)[] items) => StableRanking.Take(items, item => item.Id,
+            item => item.Value, previous, _ => 0.5, tie, 50).Select(item => item.Id).ToArray();
+        Check(Order((1, 10), (2, 10.1)).SequenceEqual(new[] { 1, 2 }));
+        Check(Order((1, 10), (2, 15)).SequenceEqual(new[] { 2, 1 }));
+        Check(Order((1, 10), (2, null), (3, null), (4, 20), (5, 15), (6, null))
+            .SequenceEqual(new[] { 4, 5, 1, 2, 3, 6 }));
+        Check(Order((1, 10), (4, 10.2)).SequenceEqual(new[] { 1, 4 }));
+        Check(Order().Length == 0);
+        Check(StableRanking.Take(new[] { (Id: 1, Value: (double?)1) }, item => item.Id, item => item.Value,
+            previous, _ => 0.5, tie, 0).Count == 0);
+        var rejected = false;
+        try { Order((1, double.NaN)); } catch (ArgumentException) { rejected = true; }
+        Check(rejected);
+        rejected = false;
+        try { StableRanking.Take(new[] { (Id: 1, Value: (double?)1) }, item => item.Id, item => item.Value,
+            previous, _ => -1, tie, 1); } catch (ArgumentException) { rejected = true; }
+        Check(rejected);
+    }),
+    ("Overview CPU hysteresis holds small swaps, allows large swaps, and resets on mode change", () =>
+    {
+        var data = new OverviewData();
+        var a = P(10, 100) with { CpuPercent = 10.1, PrivateBytes = 200UL * 1024 * 1024 };
+        var b = P(20, 200) with { CpuPercent = 10, PrivateBytes = 201UL * 1024 * 1024 };
+        int[] Order(ConsumerRanking ranking) => data.Create(null, new(), ranking)!.Consumers.Select(group => group.Key.Pid).ToArray();
+        data.Observe(Snapshot(0, a, b));
+        Check(Order(ConsumerRanking.Cpu).SequenceEqual(new[] { 10, 20 }));
+        data.Observe(Snapshot(1, a with { CpuPercent = 10 }, b with { CpuPercent = 10.1 }));
+        Check(Order(ConsumerRanking.Cpu).SequenceEqual(new[] { 10, 20 }));
+        Check(Order(ConsumerRanking.PrivateCommit).SequenceEqual(new[] { 20, 10 }));
+        Check(Order(ConsumerRanking.Cpu).SequenceEqual(new[] { 20, 10 }));
+        data.Observe(Snapshot(2, a with { CpuPercent = 15.1 }, b));
+        Check(Order(ConsumerRanking.Cpu).SequenceEqual(new[] { 10, 20 }));
+    }),
+    ("Overview private commit holds near equals and reorders beyond tolerance", () =>
+    {
+        var data = new OverviewData();
+        var a = P(10, 100) with { PrivateBytes = 212UL * 1024 * 1024 };
+        var b = P(20, 200) with { PrivateBytes = 211UL * 1024 * 1024 };
+        data.Observe(Snapshot(0, a, b));
+        Check(data.Create(null, new())!.Consumers[0].Key.Pid == 10);
+        data.Observe(Snapshot(1, a with { PrivateBytes = b.PrivateBytes }, b with { PrivateBytes = a.PrivateBytes }));
+        Check(data.Create(null, new())!.Consumers[0].Key.Pid == 10);
+        data.Observe(Snapshot(2, a, b with { PrivateBytes = 230UL * 1024 * 1024 }));
+        Check(data.Create(null, new())!.Consumers[0].Key.Pid == 20);
+    }),
+    ("Live history follows only the newest time edge and anchors other views", () =>
+    {
+        Check(InventoryViewport.FollowLatest(true, true, true, 0, 500) == InventoryEdge.Top);
+        Check(InventoryViewport.FollowLatest(true, true, true, 0.5, 500) == InventoryEdge.Top);
+        Check(InventoryViewport.FollowLatest(true, true, false, 500, 500) == InventoryEdge.Bottom);
+        Check(InventoryViewport.FollowLatest(true, true, false, 499.5, 500) == InventoryEdge.Bottom);
+        foreach (var descending in new[] { false, true })
+        {
+            Check(InventoryViewport.FollowLatest(true, true, descending, 250, 500) == InventoryEdge.Anchor);
+            Check(InventoryViewport.FollowLatest(false, true, descending, 0, 0) == InventoryEdge.Anchor);
+            Check(InventoryViewport.FollowLatest(true, false, descending, 0, 0) == InventoryEdge.Anchor);
+            Check(InventoryViewport.FollowLatest(true, true, descending, 0, 0) == (descending ? InventoryEdge.Top : InventoryEdge.Bottom));
+            Check(InventoryViewport.FollowLatest(true, true, descending, double.NaN, 500) == InventoryEdge.Anchor);
+            Check(InventoryViewport.FollowLatest(true, true, descending, 0, double.PositiveInfinity) == InventoryEdge.Anchor);
+            Check(InventoryViewport.FollowLatest(true, true, descending, -1, 500) == InventoryEdge.Anchor);
+        }
+        Check(InventoryViewport.FollowLatest(true, true, false, 0, 500) == InventoryEdge.Anchor);
+        Check(InventoryViewport.FollowLatest(true, true, true, 500, 500) == InventoryEdge.Anchor);
+    }),
+    ("Overview system cache keeps provider bytes and identifies its distinct definition", () =>
+    {
+        var data = new OverviewData();
+        Check(data.Create(null, new()) is null);
+        data.Observe(Snapshot(0) with { Memory = new() { SystemCacheBytes = 5UL * 1024 * 1024 * 1024 } });
+        Check(data.Create(null, new())!.SystemCacheBytes == 5UL * 1024 * 1024 * 1024);
+        data.Observe(Snapshot(1));
+        Check(data.Create(null, new())!.SystemCacheBytes is null);
+        Check(OverviewData.SystemCacheDefinition.Contains("standby + system working set") && OverviewData.SystemCacheDefinition.Contains("GetPerformanceInfo"));
+    }),
+    ("Insights use shared byte units for large, small, zero and unavailable readings", () =>
+    {
+        var history = new DiagnosticsHistory();
+        var sample = Snapshot(0, P(1, 1) with { PrivateBytes = 5UL * 1024 * 1024 * 1024 }) with
+        {
+            Memory = new() { PhysicalAvailableBytes = 191, PhysicalTotalBytes = 1024, CommitTotalBytes = 0, CommitLimitBytes = 32UL * 1024 * 1024 * 1024 }
+        };
+        var insights = history.Explain(sample);
+        Check(insights.Single(i => i.Title.StartsWith("Largest measured")).Evidence.Contains(MetricFormatting.Bytes(sample.Processes[0].PrivateBytes)));
+        Check(insights.Single(i => i.Title == "Physical memory availability").Evidence.StartsWith("191 B"));
+        Check(insights.Single(i => i.Title == "Commit headroom").Evidence.StartsWith($"0 B / {MetricFormatting.Bytes(sample.Memory.CommitLimitBytes)}"));
+        Check(history.Explain(Snapshot(1)).Count == 0);
+    }),
+    ("Diagnostics budget reserves expanded plot and legend outside summary scrolling", () =>
+    {
+        foreach (var height in new[] { 280d, 360, 520, 900 })
+        {
+            foreach (var expanded in new[] { false, true })
+            {
+                var chart = expanded ? DiagnosticsLayout.ExpandedChartHeight : DiagnosticsLayout.CollapsedChartHeight;
+                var summary = DiagnosticsLayout.MaximumSummaryHeight(height, 48, 6, true, expanded);
+                Check(summary >= 0);
+                if (height >= 48 + 18 + chart + DiagnosticsLayout.MinimumTableHeight)
+                    Check(height - 48 - 18 - summary >= chart + DiagnosticsLayout.MinimumTableHeight);
+            }
+        }
+        var compactSummary = DiagnosticsLayout.MaximumSummaryHeight(390, 48, 6, true, true);
+        Check(compactSummary == 24);
+        Check(390 - 48 - 18 - compactSummary - DiagnosticsLayout.MinimumTableHeight == DiagnosticsLayout.ExpandedChartHeight);
+        Check(DiagnosticsLayout.ExpandedChartHeight >= DiagnosticsLayout.PlotHeight + 32 + 32 + 16 + 8);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(390, 48, 6, true, true, 180) == 8);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(390, 48, 6, false, true) == 194);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(0, 60, 8, true, true) == 0);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(double.NaN, 60, 8, true, true) == 0);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(500, double.PositiveInfinity, 8, true, true) == 0);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(500, 60, -1, true, true) == 0);
+        Check(DiagnosticsLayout.MaximumSummaryHeight(500, 60, 8, true, true, double.NaN) == 0);
+    }),
+    // Area A: shell and process table
+    ("Process viewport anchor compensates insertions, removals and distant sort moves without containers", () =>
+    {
+        var rows = new System.Collections.ObjectModel.ObservableCollection<int>(Enumerable.Range(0, 100));
+        var anchor = RowViewportAnchoring.Capture(rows, id => id.ToString(), _ => 44, "20", 890, -10)!.Value;
+        var desired = Enumerable.Range(0, 100).Where(id => id != 2).Prepend(101).Prepend(100).ToArray();
+        MinimalKeyedRows.Reconcile(rows, desired, id => id, id => id, id => id, (_, _) => { });
+        var offset = RowViewportAnchoring.RestoreOffset(anchor, rows, id => id.ToString(), _ => 44, 5000);
+        Check(rows.SequenceEqual(desired) && offset == 934);
+        Check(rows.IndexOf(20) * 44 - offset == -10);
+        desired = rows.Where(id => id != 20).Append(20).ToArray();
+        MinimalKeyedRows.Reconcile(rows, desired, id => id, id => id, id => id, (_, _) => { });
+        offset = RowViewportAnchoring.RestoreOffset(anchor, rows, id => id.ToString(), _ => 44, 5000);
+        Check(rows.SequenceEqual(desired) && offset == rows.IndexOf(20) * 44 + 10);
+        Check(rows.IndexOf(20) * 44 - offset == anchor.Y);
+        var selected = RowViewportAnchoring.Capture(rows, id => id.ToString(), _ => 44, "30", 800, 44)!.Value;
+        var selectedIndex = rows.IndexOf(30);
+        rows.Insert(0, 200);
+        Check(RowViewportAnchoring.RestoreOffset(selected, rows, id => id.ToString(), _ => 44, 5000) == 844);
+        Check(rows.IndexOf(30) == selectedIndex + 1);
+    }),
+    ("Process viewport anchors handle mixed row heights, bounds, expired keys and invalid geometry", () =>
+    {
+        var rows = new[] { (Key: "group", Height: 44d), (Key: "child", Height: 32d), (Key: "process", Height: 44d) };
+        var anchor = RowViewportAnchoring.Capture(rows, r => r.Key, r => r.Height, "process", 80, -4)!.Value;
+        Check(anchor.ContentTop == 76);
+        Check(RowViewportAnchoring.RestoreOffset(anchor, rows.Skip(1), r => r.Key, r => r.Height, 100) == 36);
+        Check(RowViewportAnchoring.RestoreOffset(anchor, rows, r => r.Key, r => r.Height, 50) == 50);
+        Check(RowViewportAnchoring.RestoreOffset(anchor, rows.Reverse(), r => r.Key, r => r.Height, 100) == 4);
+        Check(RowViewportAnchoring.RestoreOffset(anchor, rows.Take(2), r => r.Key, r => r.Height, 100) is null);
+        Check(RowViewportAnchoring.Capture(Array.Empty<int>(), i => i.ToString(), _ => 44, "1", 0, 0) is null);
+        Check(RowViewportAnchoring.Capture(rows, r => r.Key, r => r.Height, "process", double.NaN, 0) is null);
+        Check(RowViewportAnchoring.Capture(rows, r => r.Key, r => double.NaN, "process", 0, 0) is null);
+        Check(RowViewportAnchoring.RestoreOffset(anchor, rows, r => r.Key, r => r.Height, -1) is null);
+    }),
+    ("Minimal reconciliation preserves unchanged rows without notifications", () =>
+    {
+        var rows = new System.Collections.ObjectModel.ObservableCollection<int>(Enumerable.Range(0, 20));
+        var notifications = 0;
+        var updates = new List<int>();
+        rows.CollectionChanged += (_, _) => notifications++;
+        var result = MinimalKeyedRows.Reconcile(rows, rows.ToArray(), x => x, x => x, x => x, (row, _) => updates.Add(row));
+        Check(result == new ReconciliationCounts(0, 0, 0) && notifications == 0);
+        Check(updates.Order().SequenceEqual(rows));
+    }),
+    ("Minimal reconciliation moves top to bottom exactly once", () =>
+    {
+        var rows = new System.Collections.ObjectModel.ObservableCollection<int>(Enumerable.Range(0, 20));
+        var desired = Enumerable.Range(1, 19).Append(0).ToArray();
+        var events = new List<System.Collections.Specialized.NotifyCollectionChangedAction>();
+        rows.CollectionChanged += (_, e) => events.Add(e.Action);
+        var result = MinimalKeyedRows.Reconcile(rows, desired, x => x, x => x, x => x, (_, _) => { });
+        Check(rows.SequenceEqual(desired) && result == new ReconciliationCounts(0, 1, 0));
+        Check(events.SequenceEqual([System.Collections.Specialized.NotifyCollectionChangedAction.Move]));
+    }),
+    ("Minimal reconciliation randomized orders use retained count minus LIS moves", () =>
+    {
+        var random = new Random(1729);
+        var rows = new System.Collections.ObjectModel.ObservableCollection<int>();
+        for (var iteration = 0; iteration < 1000; iteration++)
+        {
+            var before = rows.ToArray();
+            var desired = Enumerable.Range(0, 50).Where(_ => random.Next(3) != 0).OrderBy(_ => random.Next()).ToArray();
+            if (iteration % 20 == 0) desired = [];
+            var retained = desired.Where(before.Contains).ToArray();
+            var lengths = new int[retained.Length];
+            for (var i = 0; i < retained.Length; i++)
+            {
+                lengths[i] = 1;
+                for (var j = 0; j < i; j++)
+                    if (Array.IndexOf(before, retained[j]) < Array.IndexOf(before, retained[i]))
+                        lengths[i] = Math.Max(lengths[i], lengths[j] + 1);
+            }
+            var updates = new List<int>();
+            var moves = 0;
+            System.Collections.Specialized.NotifyCollectionChangedEventHandler handler = (_, e) =>
+            {
+                if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Move) moves++;
+            };
+            rows.CollectionChanged += handler;
+            var result = MinimalKeyedRows.Reconcile(rows, desired, x => x, x => x, x => x, (row, item) =>
+            {
+                Check(row == item);
+                updates.Add(row);
+            });
+            rows.CollectionChanged -= handler;
+            Check(rows.SequenceEqual(desired));
+            Check(result.Moved == retained.Length - lengths.DefaultIfEmpty(0).Max() && moves == result.Moved);
+            Check(result.Removed == before.Length - retained.Length && result.Inserted == desired.Length - retained.Length);
+            Check(updates.Order().SequenceEqual(retained.Order()));
+        }
+    }),
+    ("Minimal reconciliation rejects duplicate desired keys before mutation", () =>
+    {
+        var rows = new System.Collections.ObjectModel.ObservableCollection<int>([1, 2]);
+        var threw = false;
+        try { MinimalKeyedRows.Reconcile(rows, new[] { 1, 1 }, x => x, x => x, x => x, (_, _) => { }); }
+        catch (ArgumentException) { threw = true; }
+        Check(threw && rows.SequenceEqual([1, 2]));
+    }),
+    ("Process columns match legacy viewport sweep and fit when minimums permit", () =>
+    {
+        var actual = new ProcessColumnWidths();
+        var oracle = new LegacyProcessColumns();
+        for (var width = 100; width <= 2000; width += 7)
+        {
+            actual.FitViewport(width);
+            oracle.FitViewport(width);
+            Check(Enumerable.Range(0, 8).All(i => actual.GetWidth(i) == oracle.Widths[i]));
+            var minimum = 180 + 126 + 68 + 64 + (width >= 740 ? 88 : 0) + (width >= 840 ? 72 : 0);
+            Check(width - 32 < minimum || Math.Abs(actual.ContentWidth - (width - 32)) < 0.0001);
+            Equal(actual.ContentWidth + 32, actual.TableWidth);
+        }
+    }),
+    ("Process columns match legacy resize sequences including name redistribution", () =>
+    {
+        var actual = new ProcessColumnWidths();
+        var oracle = new LegacyProcessColumns();
+        foreach (var viewport in new[] { 572, 900, 1200, 700, 839, 840, 2000, 400 })
+        {
+            actual.FitViewport(viewport);
+            oracle.FitViewport(viewport);
+            foreach (var (index, width) in new (int, double)[]
+                { (0, 350), (1, 200), (0, 180), (3, 150), (4, 90), (2, 130), (7, 140),
+                  (0, 600), (0, 190), (5, 150), (6, 100), (1, -20), (2, 1000), (-1, 100), (8, 100), (0, double.NaN) })
+            {
+                actual.Resize(index, width);
+                oracle.Resize(index, width);
+                Check(Enumerable.Range(0, 8).All(i => actual.GetWidth(i) == oracle.Widths[i]));
+            }
+        }
+    }),
+    ("Process columns hide at exact thresholds and ignore unchanged or invalid viewports", () =>
+    {
+        var columns = new ProcessColumnWidths();
+        Check(!columns.FitViewport(572));
+        columns.FitViewport(739);
+        Check(!columns.IoVisible && !columns.ThreadsVisible);
+        columns.FitViewport(740);
+        Check(columns.IoVisible && !columns.ThreadsVisible);
+        columns.FitViewport(839);
+        Check(columns.IoVisible && !columns.ThreadsVisible);
+        columns.FitViewport(840);
+        Check(columns.IoVisible && columns.ThreadsVisible);
+        var before = Enumerable.Range(0, 8).Select(columns.GetWidth).ToArray();
+        foreach (var width in new[] { 840, 840.49, 839.51, double.NaN, double.PositiveInfinity, double.NegativeInfinity, 32, 0, -1 })
+            Check(!columns.FitViewport(width));
+        Check(Enumerable.Range(0, 8).Select(columns.GetWidth).SequenceEqual(before));
+        Check(columns.FitViewport(840.5));
+        Check(!columns.Resize(0, columns.GetWidth(0)));
+        Check(!columns.Resize(0, double.PositiveInfinity));
+        Check(!columns.Resize(8, 100));
+        columns.FitViewport(100);
+        Check(!columns.FitViewport(101));
+    }),
+    ("Sticky CPU sorting preserves equal displayed values and moves real changes", () =>
+    {
+        var first = new ProcessSortKey("same", 0.021, 100, 30, 0);
+        var second = new ProcessSortKey("same", 0.049, 100, 10, 1);
+        Check(StickyProcessSort.Compare(first, second, "CPU", true) < 0);
+        Check(StickyProcessSort.Compare(first, second, "CPU", false) < 0);
+        Check(StickyProcessSort.Compare(first, second with { Cpu = 0.11 }, "CPU", true) > 0);
+        Check(StickyProcessSort.Compare(first, second with { Cpu = 0.11 }, "CPU", false) < 0);
+        foreach (var value in new[] { 0d, 0.049, 0.05, 0.15, 1.25, 1.35, 99.999 })
+            Check(StickyProcessSort.DisplayedCpu(value).ToString("F1") == value.ToString("F1"));
+    }),
+    ("Sticky process sorting uses current order then existing before new then PID", () =>
+    {
+        foreach (var sort in new[] { "Name", "CPU", "Private memory" })
+        foreach (var descending in new[] { true, false })
+        {
+            var earlier = new ProcessSortKey("Example", 1, 100, 40, 0);
+            var later = new ProcessSortKey("example", 1, 100, 10, 1);
+            var added = new ProcessSortKey("EXAMPLE", 1, 100, 1, int.MaxValue);
+            Check(StickyProcessSort.Compare(earlier, later, sort, descending) < 0);
+            Check(StickyProcessSort.Compare(later, added, sort, descending) < 0);
+            Check(StickyProcessSort.Compare(added, added with { Pid = 2 }, sort, descending) < 0);
+        }
+        var key = new ProcessSortKey("a", 0, 0, 10, 0);
+        Check(StickyProcessSort.Compare(key, key with { Pid = 20 }, "PID", true) > 0);
+        Check(StickyProcessSort.Compare(key, key with { Pid = 20 }, "PID", false) < 0);
+        Check(StickyProcessSort.Compare(key, key, "CPU", true) == 0);
+        Check(!Array.Empty<ProcessSortKey>().Order(Comparer<ProcessSortKey>.Create((a, b) => StickyProcessSort.Compare(a, b, "CPU", true))).Any());
+    }),
+    ("Sticky process sorting preserves unavailable placement in both directions", () =>
+    {
+        var known = new ProcessSortKey("same", 0, 100, 10, 1);
+        var missing = new ProcessSortKey("same", null, null, 20, 0);
+        foreach (var descending in new[] { true, false })
+        {
+            Check(StickyProcessSort.Compare(known, missing, "CPU", descending) < 0);
+            Check(StickyProcessSort.Compare(known, missing, "Private memory", descending) < 0);
+        }
+        Check(StickyProcessSort.Compare(known with { Memory = 0 }, missing, "Private memory", true) > 0);
+        Check(StickyProcessSort.Compare(known with { Memory = ulong.MaxValue }, missing, "Private memory", false) > 0);
+    }),
+    ("Sticky sort keys cache CPU display precision with F1 parity", () =>
+    {
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        var values = Enumerable.Range(0, 200001).Select(i => i * 0.0005).Concat(
+            new[] { -0d, -0.05, 0.05, 0.15, 0.25, 1.25, 1.35, 99.95, 100d,
+                double.Epsilon, double.MaxValue, double.MinValue, double.NaN, double.PositiveInfinity, double.NegativeInfinity });
+        foreach (var value in values)
+        {
+            var expected = double.Parse(value.ToString("F1", culture), culture);
+            var key = new ProcessSortKey("test", value, 0, 1, 0);
+            Check(key.Cpu!.Value.Equals(expected));
+            Check((key with { Cpu = value }).Cpu!.Value.Equals(expected));
+        }
+        var unknown = new ProcessSortKey("test", null, 0, 1, 0);
+        Check(unknown.Cpu is null);
+        Check((unknown with { Cpu = 1.25 }).Cpu == 1.2);
+        Check((unknown with { Cpu = null }).Cpu is null);
+        var left = new ProcessSortKey("same", 0.021, 0, 1, 0);
+        var right = new ProcessSortKey("same", 0.049, 0, 2, 1);
+        var comparer = Comparer<ProcessSortKey>.Create((a, b) => StickyProcessSort.Compare(a, b, "CPU", true));
+        comparer.Compare(left, right);
+        var allocated = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 10000; i++) comparer.Compare(left, right);
+        Check(GC.GetAllocatedBytesForCurrentThread() == allocated);
     })
 };
 var failures = 0;
@@ -640,6 +1140,8 @@ static MonitorSnapshot Snapshot(int seconds, params ProcessSnapshot[] processes)
     Processes = processes
 };
 
+sealed record KeyedTestRow(int Key, string Text);
+
 sealed class ManualTimeProvider : TimeProvider
 {
     private DateTimeOffset current;
@@ -647,4 +1149,125 @@ sealed class ManualTimeProvider : TimeProvider
     public ManualTimeProvider(DateTimeOffset current) => this.current = current;
     public override DateTimeOffset GetUtcNow() => current;
     public void Advance(TimeSpan duration) => current += duration;
+}
+
+// Area C: diagnostics labels and history status
+static class AreaCDiagnosticsTests
+{
+    [System.Runtime.CompilerServices.ModuleInitializer]
+    internal static void Run()
+    {
+        var tests = new (string Name, Action Run)[]
+        {
+            ("Area C rows retain instances, reorder, append and remove", Rows),
+            ("Area C service ownership distinguishes no process from unverified", Services),
+            ("Area C GPU notes include unavailable reasons", Gpu),
+            ("Area C history status distinguishes missing and observed samples", History),
+            ("Area C missing rates remain unavailable", () => Require(DiagnosticData.Rate(null) == "—" && DiagnosticData.Rate(0) == "0 B/s"))
+        };
+        foreach (var (name, run) in tests)
+        {
+            try { run(); Console.WriteLine($"PASS {name}"); }
+            catch (Exception ex) { throw new InvalidOperationException($"FAIL {name}: {ex.Message}", ex); }
+        }
+        Console.WriteLine($"{tests.Length}/{tests.Length} Area C passed");
+    }
+
+    private static void Require(bool condition)
+    {
+        if (!condition) throw new InvalidOperationException("Assertion failed");
+    }
+
+    private static DiagnosticItem Item(string key, string detail = "") => new(key, null, key, detail, null, "", "", "");
+
+    private static void Rows()
+    {
+        var rows = new DiagnosticRows();
+        rows.Apply([], true);
+        Require(rows.Rows.Count == 0);
+        rows.Apply([Item("a"), Item("b"), Item("c")], true);
+        var a = rows.Rows[0];
+        var b = rows.Rows[1];
+        var c = rows.Rows[2];
+        var moves = new List<int>();
+        rows.Rows.CollectionChanged += (_, e) =>
+        {
+            if (e.Action is System.Collections.Specialized.NotifyCollectionChangedAction.Move) moves.Add(e.NewStartingIndex);
+        };
+        rows.Apply([Item("c", "updated"), Item("d"), Item("a"), Item("b")], true);
+        Require(rows.Rows.Select(r => r.Key).SequenceEqual(["c", "d", "a", "b"]));
+        Require(ReferenceEquals(c, rows.Rows[0]) && ReferenceEquals(a, rows.Rows[2]) && ReferenceEquals(b, rows.Rows[3]));
+        Require(c.Detail == "updated" && moves.SequenceEqual([0]));
+        rows.Apply([Item("b", "new"), Item("e"), Item("a")], false);
+        Require(rows.Rows.Select(r => r.Key).SequenceEqual(["a", "b", "e"]));
+        Require(ReferenceEquals(a, rows.Rows[0]) && ReferenceEquals(b, rows.Rows[1]) && b.Detail == "new");
+        var random = new Random(23);
+        for (var pass = 0; pass < 50; pass++)
+        {
+            var desired = Enumerable.Range(0, 25).OrderBy(_ => random.Next()).Take(random.Next(26)).Select(n => Item(n.ToString())).ToArray();
+            var retained = rows.Rows.ToDictionary(r => r.Key);
+            rows.Apply(desired, true);
+            Require(rows.Rows.Select(r => r.Key).SequenceEqual(desired.Select(r => r.Key)));
+            foreach (var row in rows.Rows)
+                if (retained.TryGetValue(row.Key, out var old)) Require(ReferenceEquals(row, old));
+        }
+        rows.Apply([], false);
+        Require(rows.Rows.Count == 0);
+    }
+
+    private static void Services()
+    {
+        var at = DateTimeOffset.UnixEpoch;
+        var identity = new ProcessIdentity(42, 123);
+        var snapshot = new MonitorSnapshot { CapturedAt = at, Processes = [new ProcessSnapshot { Identity = identity, Name = "owner" }] };
+        var service = new ServiceSnapshot { Name = "svc", DisplayName = "Service", State = "Stopped" };
+        DiagnosticItem[] Create(params ServiceSnapshot[] services) => DiagnosticData.Create("Services", snapshot,
+            new RelationshipSnapshot { CapturedAt = at, Services = services }, [], new(), _ => null).ToArray();
+        Require(Create().Length == 0);
+        foreach (var pid in new int?[] { null, 0 })
+        {
+            var row = Create(service with { ProcessId = pid, OwnerIdentity = identity }).Single();
+            Require(row.Third == "No process" && row.Detail == "svc · Not running; no owner process" && row.Identity is null);
+        }
+        var running = service with { State = "Running", ProcessId = 42 };
+        var unknown = Create(running).Single();
+        Require(unknown.Third == "Owner unavailable" && unknown.Detail.Contains("Owner unverified or stale"));
+        var verified = Create(running with { OwnerIdentity = identity }).Single();
+        Require(verified.Third == "owner" && verified.Identity == identity);
+        var stale = Create(running with { OwnerIdentity = new(42, 456) }).Single();
+        Require(stale.Third == "Owner unavailable");
+        var duplicate = Create(service, running);
+        Require(duplicate.Length == 1 && duplicate[0].Third == "No process");
+    }
+
+    private static void Gpu()
+    {
+        var missing = CounterValue.Unavailable("Provider denied access");
+        var adapter = new GpuAdapterRow(1, "Adapter", 0, 0, missing, missing, [], missing, null);
+        DiagnosticItem Create(CounterValue value) => DiagnosticData.Create("GPU",
+            new MonitorSnapshot { CapturedAt = DateTimeOffset.UnixEpoch, Processes = [], GpuAdapters = [adapter with { HeadlineUtilizationPercent = value }] },
+            null, [], new(), _ => null).Single();
+        Require(Create(missing).Detail.Contains("GPU utilization: unavailable (Provider denied access)"));
+        var warmup = CounterValue.Warmup("First sample");
+        Require(Create(warmup).Detail.Contains("unavailable (First sample)"));
+        var invalid = CounterValue.Measured(double.NaN);
+        Require(Create(invalid).Detail.Contains($"unavailable ({invalid.State})"));
+        Require(Create(CounterValue.Measured(0)).Detail.Contains("GPU utilization: 0.0%"));
+    }
+
+    private static void History()
+    {
+        var at = DateTimeOffset.UnixEpoch;
+        var history = new ProcessHistorySnapshot(new(42, 123), "owner", []);
+        var baseline = ProcessHistoryStatus.Build(null);
+        Require(baseline.Contains("updates every second · 8 lifetimes / 180 samples"));
+        Require(ProcessHistoryStatus.Build(history) == baseline);
+        var observed = new ProcessHistoryPoint(at, true, false, 1, 2, 3, 0, 0, 0);
+        Require(ProcessHistoryStatus.Build(history with { Points = [observed] }) == baseline);
+        var missing = observed with { At = at.AddSeconds(1), Observed = false };
+        var status = ProcessHistoryStatus.Build(history with { Points = [observed, missing] });
+        Require(status.Contains($"not observed since {missing.At.LocalDateTime:HH:mm:ss}"));
+        Require(status.Contains("retained samples stay visible (missing is not confirmed exit)"));
+        Require(ProcessHistoryStatus.Build(history with { Points = [missing, observed with { At = at.AddSeconds(2) }] }) == baseline);
+    }
 }

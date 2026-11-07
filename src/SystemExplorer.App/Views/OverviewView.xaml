@@ -42,8 +42,8 @@
                         <Grid x:Name="ConsumerTableHeader" Grid.Row="1" Background="{ThemeResource HeaderSurface}" Padding="10,8,42,8" ColumnSpacing="8">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="106"/><ColumnDefinition Width="62"/></Grid.ColumnDefinitions>
                             <TextBlock Text="Application / process" FontSize="{StaticResource CaptionSize}"/>
-                            <TextBlock Grid.Column="1" Text="Private commit" FontSize="{StaticResource CaptionSize}" HorizontalAlignment="Right"/>
-                            <TextBlock Grid.Column="2" Text="CPU" FontSize="{StaticResource CaptionSize}" HorizontalAlignment="Right"/>
+                            <TextBlock x:Name="ConsumerCommitHeader" Grid.Column="1" Text="Private commit" FontSize="{StaticResource CaptionSize}" HorizontalAlignment="Right"/>
+                            <TextBlock x:Name="ConsumerCpuHeader" Grid.Column="2" Text="CPU" FontSize="{StaticResource CaptionSize}" HorizontalAlignment="Right"/>
                         </Grid>
                         <ListView x:Name="ConsumersList" Grid.Row="2" ItemsSource="{x:Bind Rows}" SelectionMode="Single" MaxHeight="80" KeyDown="ConsumerKeyDown" AutomationProperties.Name="Ranked resource consumers" AutomationProperties.HelpText="Applications and observed process groups, ranked by the selected resource." ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                             <ListView.ItemContainerStyle>
@@ -100,12 +100,12 @@
                                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                     <TextBlock Text="Available physical" Style="{StaticResource Muted}"/>
                                     <TextBlock x:Name="AvailableValue" Grid.Column="1" HorizontalAlignment="Right" AutomationProperties.Name="Available physical memory"/>
-                                    <TextBlock Grid.Row="1" Text="Cache (overlaps physical)" Style="{StaticResource Muted}"/>
+                                    <TextBlock Grid.Row="1" Text="System cache" Style="{StaticResource Muted}"/>
                                     <TextBlock x:Name="CacheValue" Grid.Row="1" Grid.Column="1" HorizontalAlignment="Right" AutomationProperties.Name="System cache, overlaps physical memory"/>
                                     <TextBlock Grid.Row="2" Text="Virtual commit / limit" Style="{StaticResource Muted}"/>
                                     <TextBlock x:Name="CommitValue" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Right" AutomationProperties.Name="Committed virtual memory and limit"/>
                                 </Grid>
-                                <TextBlock Text="Cache and commit are different views, not additional physical usage." Style="{StaticResource Muted}"/>
+                                <TextBlock x:Name="CacheDefinition" TextWrapping="Wrap" Style="{StaticResource Muted}"/>
                             </StackPanel>
                         </ScrollViewer>
                         <Button x:Name="InsightsAction" Grid.Row="1" Click="InsightsClicked" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="12,10">

@@ -21,20 +21,26 @@ public sealed record OverviewReading(
     int? ObservedEndpointCount,
     DateTimeOffset? RelationshipsCapturedAt,
     IReadOnlyList<ProcessGroup> Consumers,
-    IReadOnlyList<Insight> Insights,
     ResourceTrend CpuTrend,
     ResourceTrend MemoryTrend,
     ResourceTrend DiskTrend);
 
 public sealed class OverviewData
 {
+    public const string SystemCacheDefinition = "System cache = standby + system working set (GetPerformanceInfo). This overlaps physical totals; it is not Memory\\Cache Bytes or Task Manager Cached. Commit is not a physical-usage total.";
     private const int Capacity = 180;
     private readonly Queue<Point> points = new();
     private MonitorSnapshot? latest;
     private bool breakBefore;
+    private ConsumerRanking? previousRanking;
+    private IReadOnlyDictionary<ProcessIdentity, int> previousRanks = new Dictionary<ProcessIdentity, int>();
     private sealed record Point(DateTimeOffset At, double? Cpu, double? Memory, double? Disk, bool BreakBefore);
 
     public void BreakContinuity() => breakBefore = true;
+
+    public static string RankingDescription(ConsumerRanking ranking) => ranking == ConsumerRanking.Cpu
+        ? "Near-equal values (within 0.5 points or 10%) keep their position."
+        : "Near-equal values (within 1 MiB or 2%) keep their position.";
 
     public void Observe(MonitorSnapshot snapshot)
     {
@@ -52,9 +58,17 @@ public sealed class OverviewData
         var query = search.Trim();
         var groups = ProcessGrouping.Create(snapshot.Processes).Where(g => query.Length == 0 || g.Members.Any(p =>
             $"{p.Name} {descriptionLookup?.Invoke(p)} {p.Identity.Pid} {p.ExecutablePath} {p.UserName}".Contains(query, StringComparison.OrdinalIgnoreCase)));
-        groups = ranking == ConsumerRanking.Cpu
-            ? groups.OrderByDescending(g => g.CpuPercent ?? -1).ThenBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ThenBy(g => g.Key.Pid)
-            : groups.OrderByDescending(g => g.PrivateBytes.HasValue).ThenByDescending(g => g.PrivateBytes).ThenBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ThenBy(g => g.Key.Pid);
+        if (previousRanking != ranking) previousRanks = new Dictionary<ProcessIdentity, int>();
+        previousRanking = ranking;
+        var consumers = StableRanking.Take(groups, g => g.Key,
+            g => ranking == ConsumerRanking.Cpu ? g.CpuPercent : g.PrivateBytes,
+            previousRanks, value => ranking == ConsumerRanking.Cpu ? Math.Max(0.5, value * 0.1) : Math.Max(1024 * 1024, value * 0.02),
+            Comparer<ProcessGroup>.Create((a, b) =>
+            {
+                var name = StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name);
+                return name != 0 ? name : a.Key.Pid.CompareTo(b.Key.Pid);
+            }), 50);
+        previousRanks = consumers.Select((group, rank) => (group.Key, Rank: rank)).ToDictionary(entry => entry.Key, entry => entry.Rank);
         var memory = snapshot.Memory;
         var freshRelationships = relationships is not null && Math.Abs((snapshot.CapturedAt - relationships.CapturedAt).TotalSeconds) <= 10;
         var samples = points.ToArray();
@@ -63,7 +77,7 @@ public sealed class OverviewData
             memory.SystemCacheBytes, memory.CommitTotalBytes, memory.CommitLimitBytes,
             ValidRate(snapshot.DiskReadBytesPerSecond), ValidRate(snapshot.DiskWriteBytesPerSecond), DiskTotal(snapshot),
             freshRelationships ? relationships!.Connections.Count : null, relationships?.CapturedAt,
-            groups.Take(50).ToArray(), history.Explain(snapshot, freshRelationships ? relationships : null),
+            consumers,
             Trend(samples, p => p.Cpu, 100), Trend(samples, p => p.Memory, 100), Trend(samples, p => p.Disk, null));
     }
 
