@@ -24,6 +24,7 @@ public static class DeveloperBloatAnalyzer
         string Env(string key, string fallback) => ctx.EnvironmentOverrides?.FirstOrDefault(x => x.Key.Equals(key, StringComparison.OrdinalIgnoreCase)).Value is { Length: > 0 } v ? v : fallback;
         void Catalog(string tool, string path, string kind = "Cache", string? command = null, string? warning = null, BloatConfidence? confidence = null, string? reason = null)
         {
+            path = StoragePaths.Native(path);
             if (!StoragePaths.Contains(scan.Root, path)) { outside.Add(new(path, "Not scanned (outside scanned folder)")); return; }
             var matches = Resolve(path).ToArray();
             if (matches.Length == 0) absent++;

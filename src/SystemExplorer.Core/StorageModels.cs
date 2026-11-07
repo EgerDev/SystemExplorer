@@ -63,14 +63,15 @@ public sealed record StorageScanResult(string Root, string Method, StorageScanSt
     {
         var parts = new Stack<string>();
         while (node > 0) { parts.Push(Nodes[node].Name); node = Nodes[node].Parent; }
-        return parts.Count == 0 ? Root : StoragePaths.Join(Root, string.Join("/", parts));
+        return parts.Count == 0 ? StoragePaths.Native(Root) : StoragePaths.Join(Root, string.Join("/", parts));
     }
 }
 
 public static class StoragePaths
 {
+    public static string Native(string path) => path.Replace('/', '\\');
     public static string Normalize(string path) => path.Replace('\\', '/').TrimEnd('/');
-    public static string Join(string root, string tail) => Normalize(root) + "/" + Normalize(tail).TrimStart('/');
+    public static string Join(string root, string tail) => Native(Normalize(root) + "/" + Normalize(tail).TrimStart('/'));
     public static bool Contains(string parent, string path) => string.Equals(Normalize(parent), Normalize(path), StringComparison.OrdinalIgnoreCase)
         || Normalize(path).StartsWith(Normalize(parent) + "/", StringComparison.OrdinalIgnoreCase);
 }

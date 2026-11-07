@@ -37,7 +37,7 @@ public sealed class StorageScanAggregator
     {
         if (limits.DirectoryNodes < 1 || limits.HardLinkIds < 0 || limits.LargestFiles < 0 || limits.Extensions < 0 || limits.Problems < 0)
             throw new ArgumentOutOfRangeException(nameof(limits));
-        root = rootPath; this.limits = limits; this.trackHardLinks = trackHardLinks; started = startedAt ?? DateTimeOffset.UtcNow;
+        root = StoragePaths.Native(rootPath); this.limits = limits; this.trackHardLinks = trackHardLinks; started = startedAt ?? DateTimeOffset.UtcNow;
     }
 
     public IReadOnlyList<(int Node, string Path)> AddListing(int dirNode, string dirPath, IReadOnlyList<StorageEntry> entries)
@@ -45,6 +45,7 @@ public sealed class StorageScanAggregator
         lock (gate)
         {
             EnsureOpen();
+            dirPath = StoragePaths.Native(dirPath);
             var node = nodes[dirNode];
             var descend = new List<(int, string)>();
             var p = progress;
@@ -116,7 +117,7 @@ public sealed class StorageScanAggregator
     {
         lock (gate)
         {
-            EnsureOpen(); nodes[parentNode].Denied++; deniedTotal++;
+            EnsureOpen(); nodes[parentNode].Denied++; deniedTotal++; path = StoragePaths.Native(path);
             if (denied.Count < limits.Problems) denied.Add(new(path, reason));
             Volatile.Write(ref progress, progress with { Denied = deniedTotal, CurrentPath = path });
         }

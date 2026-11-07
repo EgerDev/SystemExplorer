@@ -1128,7 +1128,7 @@ var tests = new (string Name, Action Run)[]
         Check(r.ReparseTotal == 2 && r.ReparsePoints.Count == 1 && r.ReparsePoints[0].Reason.Contains("junction"));
         Check(r.DeniedTotal == 2 && r.DeniedPaths.Count == 1 && r.Nodes.Sum(n => n.Denied) == 2);
         Check(r.Totals.Files == 10 && r.Totals.Directories == 4 && r.Totals.LogicalBytes == 4600 && r.Totals.AllocatedBytes == 50);
-        Check(r.Nodes[1].LogicalBytes == 1000 && r.FullPath(1) == "C:/kept");
+        Check(r.Nodes[1].LogicalBytes == 1000 && r.FullPath(1) == @"C:\kept");
         Check(r.LargestFiles.Count == 2 && r.Extensions.Count == 2 && r.Extensions.Any(e => e.Name == "(other)"));
         Check(r.AgeBuckets.Select(b => b.Count).SequenceEqual(new long[] { 5, 1, 1, 1, 1, 1 }));
         var threw = false; try { a.AddListing(0, "C:/", []); } catch (InvalidOperationException) { threw = true; } Check(threw);
@@ -1175,13 +1175,13 @@ var tests = new (string Name, Action Run)[]
         var scan = a.Complete(StorageScanState.Completed, TimeSpan.Zero, "names only", []);
         var ctx = new DeveloperLocationContext("C:/home", "C:/local", "D:/roaming", "D:/programdata", "C:/temp", new Dictionary<string, string> { ["NUGET_PACKAGES"] = "C:/custom-nuget" });
         var report = DeveloperBloatAnalyzer.Analyze(scan, ctx, now, TimeSpan.FromDays(90));
-        var project = report.Projects.Single(p => p.Path == "C:/repo");
-        Check(!report.Projects.Any(p => p.Path == "C:/repo/pkg") && project.RegenerableBytes == 60 && project.Artifacts.Count == 5);
-        Check(!report.Items.Any(i => i.Path == "C:/bin" || i.Path == "C:/target" || i.Path == "C:/repo/venv"));
-        Check(report.Projects.Single(p => p.Path == "C:/old").IsStale && !project.IsStale);
+        var project = report.Projects.Single(p => p.Path == @"C:\repo");
+        Check(!report.Projects.Any(p => p.Path == @"C:\repo\pkg") && project.RegenerableBytes == 60 && project.Artifacts.Count == 5);
+        Check(!report.Items.Any(i => i.Path == @"C:\bin" || i.Path == @"C:\target" || i.Path == @"C:\repo\venv"));
+        Check(report.Projects.Single(p => p.Path == @"C:\old").IsStale && !project.IsStale);
         Check(report.Items.Where(i => i.Tool.StartsWith("WSL — ") && i.Path.EndsWith("LocalState") && i.ReclaimableBytes == null).Select(i => i.Tool).Distinct().Count() == 2);
-        Check(report.Items.Any(i => i.Tool == "NuGet packages" && i.Path == "C:/custom-nuget"));
-        Check(report.Items.Any(i => i.Tool == "NuGet HTTP cache" && i.Path == "C:/local/NuGet/v3-cache"));
+        Check(report.Items.Any(i => i.Tool == "NuGet packages" && i.Path == @"C:\custom-nuget"));
+        Check(report.Items.Any(i => i.Tool == "NuGet HTTP cache" && i.Path == @"C:\local\NuGet\v3-cache"));
         Check(report.Items.Single(i => i.Tool == "User temp") is { Confidence: BloatConfidence.Medium, ReclaimableBytes: 10, Reason: "files may be in use by running programs; delete only items not in use" });
         Check(report.NotScanned.Any(i => i.Reason == "Not scanned (outside scanned folder)") && report.AbsentCatalogEntries > 0);
         Check(report.Items.Any(i => i.IsLead && i.Tool == "Bulk creation") && report.Items.Any(i => i.IsLead && i.Tool == "Git worktree" && i.Confidence == BloatConfidence.Medium));
@@ -1201,6 +1201,21 @@ var tests = new (string Name, Action Run)[]
         using var json = System.Text.Json.JsonDocument.Parse(StorageExport.ToJson(scan));
         Check(json.RootElement.GetProperty("Scan").GetProperty("IsPartial").GetBoolean());
         Check(json.RootElement.GetProperty("Scan").GetProperty("Root").GetString() == scan.Root);
+        var native = new StorageScanAggregator("C:/fixture", new(), false);
+        var child = native.AddListing(0, "C:/fixture", [new("folder", true, 0, 0, 0, 0, 0, default, default)]).Single();
+        native.AddListing(child.Node, child.Path, [new("package.json", false, 1, 1, 0, 0, 0, default, default)]);
+        native.AddDenied(child.Node, "C:/fixture/folder/denied", "Access denied");
+        var nativeScan = native.Complete(StorageScanState.Completed, TimeSpan.Zero, "metadata", []);
+        var nativeReport = DeveloperBloatAnalyzer.Analyze(nativeScan, new("C:/fixture", "D:/local", "D:/roaming", "D:/data", "D:/temp"), DateTimeOffset.UtcNow, TimeSpan.FromDays(90));
+        Check(child.Path == @"C:\fixture\folder" && nativeScan.Root == @"C:\fixture" && nativeScan.FullPath(child.Node) == child.Path);
+        Check(nativeScan.LargestFiles.Single().Path == @"C:\fixture\folder\package.json" && nativeScan.DeniedPaths.Single().Path == @"C:\fixture\folder\denied");
+        Check(nativeReport.Projects.Single().Path == child.Path && nativeReport.NotScanned.All(p => !p.Path.Contains('/')));
+        Check(StoragePaths.Join("//server/share", "folder/file") == @"\\server\share\folder\file");
+        Check(StoragePaths.Native("") == "" && StoragePaths.Native(@"C:\") == @"C:\");
+        var nativeCsv = StorageExport.ToCsv(nativeScan, nativeReport);
+        Check(nativeCsv.Contains(@"C:\fixture\folder\package.json") && !nativeCsv.Contains("C:/"));
+        using var nativeJson = System.Text.Json.JsonDocument.Parse(StorageExport.ToJson(nativeScan, nativeReport));
+        Check(nativeJson.RootElement.GetProperty("Bloat").GetProperty("Projects")[0].GetProperty("Path").GetString() == child.Path);
     }),
     ("Storage million-file bounded-memory performance sanity", () =>
     {
