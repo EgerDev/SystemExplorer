@@ -33,6 +33,13 @@ public sealed partial class MainWindow : Window
     private DateTimeOffset? selectedCapturedAt;
     private string? selectedRowKey;
     private bool restoringSelection;
+    private ScrollViewer? processScrollViewer;
+    private global::Windows.Foundation.Point? processPointer;
+    private (string Key, double Y)? processAnchor;
+    private bool processAnchorScheduled;
+    private int processAnchorAttempts;
+    private bool restoreProcessKeyboardFocus;
+    private bool windowActive;
     private IReadOnlyList<StartupItem> startup = Array.Empty<StartupItem>();
     private DateTimeOffset? startupCapturedAt;
     private string? startupError;
@@ -46,7 +53,23 @@ public sealed partial class MainWindow : Window
         SetTitleBar(WindowTitleBar);
         Root.ActualThemeChanged += (_, _) => UpdateCaptionColors();
         ProcessList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(ProcessKeyDown), true);
-        Model.RowsRebuilt += (_, _) => RestoreSelection();
+        ProcessList.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(ProcessPointerMoved), true);
+        ProcessList.AddHandler(UIElement.PointerExitedEvent, new PointerEventHandler(ProcessPointerExited), true);
+        ProcessList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, _) => CancelProcessAnchor()), true);
+        ProcessList.Loaded += (_, _) =>
+        {
+            if (processScrollViewer is not null) return;
+            processScrollViewer = ProcessVisualDescendants(ProcessList).OfType<ScrollViewer>().FirstOrDefault();
+            if (processScrollViewer is not null) processScrollViewer.ViewChanged += (_, _) => ScheduleProcessAnchorRestore();
+        };
+        ProcessList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => CancelProcessAnchor()), true);
+        ProcessList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, _) => CancelProcessAnchor()), true);
+        Model.RowsRebuilding += ProcessRowsRebuilding;
+        Model.RowsRebuilt += (_, _) =>
+        {
+            RestoreSelection();
+            RestoreProcessViewport();
+        };
         tray = new NativeTray(this);
         ready = true;
         InitializeOverview();
@@ -66,9 +89,14 @@ public sealed partial class MainWindow : Window
         var accelerator = new KeyboardAccelerator { Key = VirtualKey.K, Modifiers = VirtualKeyModifiers.Control };
         accelerator.Invoked += (_, args) => { GlobalSearch.Focus(FocusState.Keyboard); args.Handled = true; };
         Root.KeyboardAccelerators.Add(accelerator);
-        Activated += (_, _) => polling ??= PollAsync();
+        Activated += (_, args) =>
+        {
+            windowActive = args.WindowActivationState != WindowActivationState.Deactivated;
+            polling ??= PollAsync();
+        };
         Closed += async (_, _) =>
         {
+            CancelProcessAnchor();
             tray.Dispose();
             shutdown.Cancel();
             if (polling is not null) await polling;
@@ -185,7 +213,7 @@ public sealed partial class MainWindow : Window
         try
         {
             if (!await Model.Descriptions.RefreshAsync(cancellationToken) || cancellationToken.IsCancellationRequested) return;
-            Model.Rebuild();
+            Model.Rebuild(live: true);
             RefreshInspector();
             RefreshOverview();
         }
@@ -292,9 +320,57 @@ public sealed partial class MainWindow : Window
     {
         if (detailsOpen || SelectedProcess is not { } process) return;
         detailsOpen = true;
+        (Button Source, RoutedEventHandler Handler)? requestedAction = null;
+        var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        void ResizeDetails(object? sender, SizeChangedEventArgs? args)
+        {
+            scroll.Width = Math.Min(520, Math.Max(0, Root.ActualWidth - 100));
+            scroll.MaxHeight = Math.Max(120, Root.ActualHeight - 240);
+        }
+        ResizeDetails(null, null);
+        Root.SizeChanged += ResizeDetails;
         try
         {
-            var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, RequestedTheme = Root.RequestedTheme, Title = SelectedName.Text, Content = new ScrollViewer { Content = new TextBlock { Text = $"{SelectedRawName.Text}\n{SelectedStatus.Text}\n{SelectedIdentity.Text}\n{SelectedAvailability.Text}\n\nExecutable path\n{SelectedPath.Value}\n\nCommand line\n{SelectedCommandLine.Text}\n\nOwnership\n{SelectedOwner.Value}\n\nParent process\n{SelectedParent.Value}\n\nMemory\n{SelectedMemory.Text}\n\nAssociated services\n{SelectedServices.Value}\n\nNetwork endpoints\n{SelectedNetwork.Value}", TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } }, PrimaryButtonText = "Copy PID", CloseButtonText = "Close", DefaultButton = ContentDialogButton.Close };
+            var content = new StackPanel { Spacing = 10 };
+            content.Children.Add(new TextBlock { Text = "Read-only native inspection", Style = (Style)Application.Current.Resources["SectionLabel"] });
+            var actions = new Grid { ColumnSpacing = 6, RowSpacing = 6 };
+            content.Children.Add(actions);
+            content.Children.Add(new TextBlock { Text = $"{SelectedRawName.Text}\n{SelectedStatus.Text}\n{SelectedIdentity.Text}\n{SelectedAvailability.Text}\n\nExecutable path\n{SelectedPath.Value}\n\nCommand line\n{SelectedCommandLine.Text}\n\nOwnership\n{SelectedOwner.Value}\n\nParent process\n{SelectedParent.Value}\n\nMemory\n{SelectedMemory.Text}\n\nAssociated services\n{SelectedServices.Value}\n\nNetwork endpoints\n{SelectedNetwork.Value}", TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+            scroll.Content = content;
+            var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, RequestedTheme = Root.RequestedTheme, Title = SelectedName.Text, Content = scroll, PrimaryButtonText = "Copy PID", CloseButtonText = "Close", DefaultButton = ContentDialogButton.Close };
+            foreach (var (source, handler) in new (Button, RoutedEventHandler)[]
+                { (ModulesButton, InspectionClicked), (RegionsButton, InspectionClicked), (ThreadsButton, ThreadsClicked),
+                  (HistoryButton, HistoryClicked), (SecurityButton, SecurityClicked), (HandlesButton, HandlesClicked), (ActivityButton, ActivityClicked) })
+            {
+                var button = new Button { Content = source.Content, Style = source.Style, HorizontalAlignment = HorizontalAlignment.Stretch };
+                button.SetBinding(Control.IsEnabledProperty, new Microsoft.UI.Xaml.Data.Binding { Source = source, Path = new PropertyPath(nameof(source.IsEnabled)) });
+                button.SetBinding(UIElement.VisibilityProperty, new Microsoft.UI.Xaml.Data.Binding { Source = source, Path = new PropertyPath(nameof(source.Visibility)) });
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, source.Content.ToString());
+                ToolTipService.SetToolTip(button, ToolTipService.GetToolTip(source));
+                button.Click += (_, _) =>
+                {
+                    requestedAction = (source, handler);
+                    dialog.Hide();
+                };
+                actions.Children.Add(button);
+            }
+            void WrapActions(double width)
+            {
+                var columns = Math.Max(1, (int)((width + 6) / 150));
+                if (columns == actions.ColumnDefinitions.Count) return;
+                actions.ColumnDefinitions.Clear();
+                actions.RowDefinitions.Clear();
+                for (var i = 0; i < columns; i++) actions.ColumnDefinitions.Add(new ColumnDefinition());
+                for (var i = 0; i < (actions.Children.Count + columns - 1) / columns; i++)
+                    actions.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                for (var i = 0; i < actions.Children.Count; i++)
+                {
+                    Grid.SetColumn((FrameworkElement)actions.Children[i], i % columns);
+                    Grid.SetRow((FrameworkElement)actions.Children[i], i / columns);
+                }
+            }
+            WrapActions(scroll.Width);
+            actions.SizeChanged += (_, args) => WrapActions(args.NewSize.Width);
             dialog.PrimaryButtonClick += (_, args) =>
             {
                 args.Cancel = true;
@@ -303,10 +379,17 @@ public sealed partial class MainWindow : Window
             await dialog.ShowAsync();
         }
         catch (Exception ex) { if (!shutdown.IsCancellationRequested) StatusText.Text = $"Details unavailable: {ex.Message}"; }
-        finally { detailsOpen = false; }
+        finally
+        {
+            Root.SizeChanged -= ResizeDetails;
+            detailsOpen = false;
+        }
+        if (!shutdown.IsCancellationRequested && requestedAction is { } requested && requested.Source.IsEnabled && requested.Source.Visibility == Visibility.Visible)
+            requested.Handler(requested.Source, new RoutedEventArgs());
     }
     private async void ProcessKeyDown(object sender, KeyRoutedEventArgs args)
     {
+        CancelProcessAnchor();
         if (FocusManager.GetFocusedElement(Root.XamlRoot) is not ListViewItem) return;
         if ((args.Key is VirtualKey.Right or VirtualKey.Left or VirtualKey.Enter) && ProcessList.SelectedItem is ProcessRow row && row.HasChildren)
         {
@@ -322,6 +405,7 @@ public sealed partial class MainWindow : Window
     private void ProcessSelectionChanged(object sender, SelectionChangedEventArgs args)
     {
         if (!ready || Model.IsRebuilding || restoringSelection) return;
+        CancelProcessAnchor();
         foreach (var current in Model.Rows) current.SetSelected(ReferenceEquals(ProcessList.SelectedItem, current));
         if (ProcessList.SelectedItem is ProcessRow row)
         {
@@ -335,6 +419,130 @@ public sealed partial class MainWindow : Window
         RefreshInspector();
     }
 
+    private static IEnumerable<DependencyObject> ProcessVisualDescendants(DependencyObject parent)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            yield return child;
+            foreach (var descendant in ProcessVisualDescendants(child)) yield return descendant;
+        }
+    }
+
+    private ListViewItem? FocusedProcessContainer()
+    {
+        var current = FocusManager.GetFocusedElement(Root.XamlRoot) as DependencyObject;
+        ListViewItem? container = null;
+        while (current is not null)
+        {
+            if (ReferenceEquals(current, ProcessList)) return container;
+            if (current is ListViewItem item) container = item;
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
+    }
+
+    private void ProcessPointerMoved(object sender, PointerRoutedEventArgs args)
+    {
+        var point = args.GetCurrentPoint(ProcessList).Position;
+        if (processPointer is not { } previous || Math.Abs(previous.X - point.X) >= 0.5 || Math.Abs(previous.Y - point.Y) >= 0.5)
+            CancelProcessAnchor();
+        processPointer = point;
+    }
+
+    private void ProcessPointerExited(object sender, PointerRoutedEventArgs args)
+    {
+        var point = args.GetCurrentPoint(ProcessList).Position;
+        processPointer = point.X >= 0 && point.X < ProcessList.ActualWidth && point.Y >= 0 && point.Y < ProcessList.ActualHeight ? point : null;
+        if (processPointer is null) CancelProcessAnchor();
+    }
+
+    private bool HasProcessKeyboardFocus() => FocusedProcessContainer() is { } focused &&
+        (focused.FocusState == FocusState.Keyboard ||
+         FocusManager.GetFocusedElement(Root.XamlRoot) is Control { FocusState: FocusState.Keyboard });
+
+    private void ProcessRowsRebuilding(object? sender, EventArgs args)
+    {
+        restoreProcessKeyboardFocus = windowActive && HasProcessKeyboardFocus();
+        if (!Model.IsLiveRebuild)
+        {
+            CancelProcessAnchor();
+            return;
+        }
+        if (processAnchor is not null || processScrollViewer is not { } viewer || ProcessList.Visibility != Visibility.Visible) return;
+        var visible = ProcessVisualDescendants(ProcessList).OfType<ListViewItem>()
+            .Where(item => item.Content is ProcessRow)
+            .Select(item => (Item: item, Y: item.TransformToVisual(viewer).TransformPoint(new()).Y))
+            .Where(entry => entry.Y < viewer.ViewportHeight && entry.Y + entry.Item.ActualHeight > 0)
+            .OrderBy(entry => entry.Y).ToArray();
+        if (visible.Length == 0) return;
+        ListViewItem? anchor = null;
+        if (processPointer is { } pointer && pointer.X >= 0 && pointer.X < ProcessList.ActualWidth &&
+            pointer.Y >= 0 && pointer.Y < ProcessList.ActualHeight)
+            anchor = visible.Select(entry => entry.Item).FirstOrDefault(item =>
+            {
+                var origin = item.TransformToVisual(ProcessList).TransformPoint(new());
+                return pointer.X >= origin.X && pointer.X < origin.X + item.ActualWidth &&
+                    pointer.Y >= origin.Y && pointer.Y < origin.Y + item.ActualHeight;
+            });
+        anchor ??= visible.Select(entry => entry.Item).FirstOrDefault(item => ReferenceEquals(item.Content, ProcessList.SelectedItem));
+        if (anchor is null && viewer.VerticalOffset == 0) return;
+        anchor ??= visible[0].Item;
+        processAnchor = (((ProcessRow)anchor.Content).RowKey, anchor.TransformToVisual(viewer).TransformPoint(new()).Y);
+    }
+
+    private void RestoreProcessViewport()
+    {
+        if (restoreProcessKeyboardFocus) ProcessList.UpdateLayout();
+        if (restoreProcessKeyboardFocus && windowActive && !HasProcessKeyboardFocus() &&
+            ProcessList.SelectedItem is ProcessRow selected && ProcessList.ContainerFromItem(selected) is ListViewItem selectedContainer)
+            selectedContainer.Focus(FocusState.Keyboard);
+        restoreProcessKeyboardFocus = false;
+        processAnchorAttempts = 0;
+        ScheduleProcessAnchorRestore();
+    }
+
+    private void ScheduleProcessAnchorRestore()
+    {
+        if (processAnchor is null || processAnchorScheduled || processAnchorAttempts >= 8) return;
+        processAnchorScheduled = true;
+        CompositionTarget.Rendering += RestoreProcessAnchorAfterLayout;
+    }
+
+    private void CancelProcessAnchor()
+    {
+        processAnchor = null;
+        if (!processAnchorScheduled) return;
+        CompositionTarget.Rendering -= RestoreProcessAnchorAfterLayout;
+        processAnchorScheduled = false;
+    }
+
+    private void RestoreProcessAnchorAfterLayout(object? sender, object args)
+    {
+        CompositionTarget.Rendering -= RestoreProcessAnchorAfterLayout;
+        processAnchorScheduled = false;
+        if (processAnchor is not { } saved || processScrollViewer is not { } viewer ||
+            Model.Rows.FirstOrDefault(row => row.RowKey == saved.Key) is not { } row ||
+            ProcessList.ContainerFromItem(row) is not ListViewItem container)
+        {
+            CancelProcessAnchor();
+            return;
+        }
+        var delta = container.TransformToVisual(viewer).TransformPoint(new()).Y - saved.Y;
+        if (Math.Abs(delta) < 0.5)
+        {
+            return;
+        }
+        processAnchorAttempts++;
+        var target = Math.Clamp(viewer.VerticalOffset + delta, 0, viewer.ScrollableHeight);
+        if (Math.Abs(target - viewer.VerticalOffset) < 0.5) CancelProcessAnchor();
+        else
+        {
+            viewer.ChangeView(null, target, null, disableAnimation: true);
+            ScheduleProcessAnchorRestore();
+        }
+    }
+
     private void RestoreSelection()
     {
         if (selectedRowKey is null) return;
@@ -343,7 +551,7 @@ public sealed partial class MainWindow : Window
         restoringSelection = true;
         try
         {
-            ProcessList.SelectedItem = row;
+            if (!ReferenceEquals(ProcessList.SelectedItem, row)) ProcessList.SelectedItem = row;
             foreach (var current in Model.Rows) current.SetSelected(ReferenceEquals(row, current));
             if (expired || row is null && SelectedProcess is not null)
             {
@@ -528,8 +736,11 @@ public sealed partial class MainWindow : Window
         DetailsButton.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private void TableSizeChanged(object sender, SizeChangedEventArgs args) =>
+    private void TableSizeChanged(object sender, SizeChangedEventArgs args)
+    {
+        if (args.NewSize.Width == args.PreviousSize.Width) return;
         ((Controls.ProcessColumns)Root.Resources["ProcessColumns"]).FitViewport(args.NewSize.Width - 2);
+    }
 
     private void UpdateCaptionColors()
     {
