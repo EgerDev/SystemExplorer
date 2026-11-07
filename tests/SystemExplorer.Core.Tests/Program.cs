@@ -1112,6 +1112,7 @@ var tests = new (string Name, Action Run)[]
         Check(GC.GetAllocatedBytesForCurrentThread() == allocated);
     })
 };
+tests = tests.Append(("Hidden item classification and conservative lead rules", (Action)HiddenItemsTests.Run)).ToArray();
 var failures = 0;
 foreach (var (name, run) in tests)
 {
@@ -1398,5 +1399,187 @@ static class RamPresentationTests
         Require(json.RootElement.GetProperty("Tab").GetString() == "Overview" && json.RootElement.GetProperty("Rows")[0].GetProperty("Values").GetProperty("Size").GetString() == "25");
         Require(RamAttributionPresentation.Csv(document with { Rows = [] }).Split("\r\n").Length == 2);
         Console.WriteLine("PASS RAM presentation: unused/unknown labels, pool text, bar proportions, CSV escaping and JSON shape");
+    }
+}
+
+static class HiddenItemsTests
+{
+    internal static void Run()
+    {
+        void Require(bool condition) { if (!condition) throw new InvalidOperationException("Hidden items assertion failed"); }
+        var at = DateTimeOffset.UnixEpoch;
+        var id = new ProcessIdentity(42, 100);
+        BoundedItems<T> B<T>(params T[] rows) => new(rows, 100);
+        ProcessSighting S(ProcessSightingSource source, bool exited = false, InspectionStatus status = InspectionStatus.Available, long time = 100) => new(new(42, time), source, Exited: exited, Status: status);
+        ProcessCrossViewSnapshot Snap(params ProcessSighting[] rows) => new(at, InspectionStatus.Available, "", false,
+            B(new ProcessSourceStatus(ProcessSightingSource.Toolhelp, InspectionStatus.Available, ""), new(ProcessSightingSource.NtSystemInformation, InspectionStatus.Available, "")), B(rows));
+        ProcessDiscrepancyKind Classify(ProcessCrossViewSnapshot a, ProcessCrossViewSnapshot b) => ProcessCrossView.Compare(a, b).Items.Single().Classification;
+        var tool = S(ProcessSightingSource.Toolhelp);
+        var nt = S(ProcessSightingSource.NtSystemInformation);
+        var probe = S(ProcessSightingSource.PidProbe);
+        var owner = S(ProcessSightingSource.TcpOwner);
+        Require(Classify(Snap(tool, nt), Snap(tool, nt)) == ProcessDiscrepancyKind.Consistent);
+        Require(Classify(Snap(probe), Snap(tool, nt, probe)) == ProcessDiscrepancyKind.StartedDuringScan);
+        Require(Classify(Snap(probe), Snap(tool, probe)) == ProcessDiscrepancyKind.StartedDuringScan);
+        Require(Classify(Snap(nt), Snap(S(ProcessSightingSource.PidProbe, status: InspectionStatus.Exited))) == ProcessDiscrepancyKind.ExitedDuringScan);
+        Require(Classify(Snap(owner), Snap(S(ProcessSightingSource.PidProbe, status: InspectionStatus.Exited))) == ProcessDiscrepancyKind.StaleOwner);
+        Require(Classify(Snap(probe), Snap(S(ProcessSightingSource.NtGetNextProcess, exited: true))) == ProcessDiscrepancyKind.Zombie);
+        Require(Classify(Snap(probe), Snap(S(ProcessSightingSource.PidProbe, status: InspectionStatus.AccessDenied))) == ProcessDiscrepancyKind.ProtectedDenied);
+        Require(Classify(Snap(probe), Snap(probe)) == ProcessDiscrepancyKind.Unknown);
+        Require(Classify(Snap(probe), Snap()) == ProcessDiscrepancyKind.Unavailable);
+        Require(Classify(Snap(tool, nt), Snap(S(ProcessSightingSource.Toolhelp, time: 200))) == ProcessDiscrepancyKind.PidReused);
+        Require(Classify(Snap(tool, S(ProcessSightingSource.NtSystemInformation, time: 200)), Snap()) == ProcessDiscrepancyKind.PidReused);
+        Require(ProcessCrossView.Compare(Snap(), Snap()).Items.Count == 0);
+        Require(ProcessCrossView.ToLead(ProcessCrossView.Compare(Snap(probe), Snap(probe)).Items.Single())?.Severity == LeadSeverity.High);
+        Require(ProcessCrossView.ToLead(ProcessCrossView.Compare(Snap(tool, nt), Snap(tool, nt)).Items.Single()) is null);
+        Require(ProcessCrossView.Compare(Snap(probe), Snap(probe), 0).Truncated);
+        var denied = Snap(probe) with { Sources = B(new ProcessSourceStatus(ProcessSightingSource.Toolhelp, InspectionStatus.AccessDenied, "denied")) };
+        Require(Classify(denied, Snap(probe)) == ProcessDiscrepancyKind.Unavailable);
+        var services = new ServiceCrossViewSnapshot(at, InspectionStatus.Available, InspectionStatus.Available, "", 1,
+            B(new ServiceRegistryEntry("deleted", 16, 2, true, null), new("ignored", null, null, false, null)),
+            B(new ServiceSnapshot { Name = "user_ab123", DisplayName = "", State = "Stopped" }));
+        var serviceDiff = ConfigurationCrossView.CompareServices(services);
+        Require(serviceDiff.Items.Count == 2 && serviceDiff.Items.Any(d => d.Reason.Contains("DeleteFlag")));
+        Require(ConfigurationCrossView.CompareServices(services with { RegistryStatus = InspectionStatus.AccessDenied, ScmStatus = InspectionStatus.AccessDenied }).Items.Count == 0);
+        Require(ConfigurationCrossView.CompareServices(services, 1).Truncated);
+        Require(ConfigurationCrossView.CompareServices(services with { Registry = B<ServiceRegistryEntry>(), Scm = B<ServiceSnapshot>() }).Items.Count == 0);
+        var tasks = new TaskCrossViewSnapshot(at, InspectionStatus.Available, InspectionStatus.Available, InspectionStatus.Available,
+            InspectionStatus.Available, "", true, B(new ScheduledTaskObservation(@"\com", "", "", null, "", "", InspectionStatus.Available, "")),
+            B(new TaskTreeEntry(@"\tree", "id", false)), B<TaskCacheEntry>(), B(@"\file"));
+        var taskDiff = ConfigurationCrossView.CompareTasks(tasks);
+        foreach (var kind in new[] { ConfigurationDiscrepancyKind.MissingSecurityDescriptor, ConfigurationDiscrepancyKind.TreeIdNotInTasks,
+            ConfigurationDiscrepancyKind.RegistryNotCom, ConfigurationDiscrepancyKind.ComNotRegistry, ConfigurationDiscrepancyKind.FileNotRegistry, ConfigurationDiscrepancyKind.RegistryNotFile })
+            Require(taskDiff.Items.Any(d => d.Kind == kind));
+        var matched = tasks with { Com = B(new ScheduledTaskObservation(@"\TREE", "", "", null, "", "", InspectionStatus.Available, "")),
+            Tree = B(new TaskTreeEntry(@"\tree", "id", true)), Cache = B(new TaskCacheEntry("ID", @"\tree")), Files = B("tree") };
+        Require(ConfigurationCrossView.CompareTasks(matched).Items.Count == 0);
+        Require(ConfigurationCrossView.CompareTasks(tasks with { FilesStatus = InspectionStatus.AccessDenied }).Items.All(d => d.Kind != ConfigurationDiscrepancyKind.RegistryNotFile));
+        Require(ConfigurationCrossView.CompareTasks(tasks, 0).Truncated);
+        Require(ConfigurationCrossView.CompareTasks(tasks with { Com = B<ScheduledTaskObservation>(), Tree = B<TaskTreeEntry>(), Cache = B<TaskCacheEntry>(), Files = B<string>() }).Items.Count == 0);
+        var paths = new[] { (@"C:\Users\a\AppData\Local\Temp\x.exe", UnusualLocation.Temp), (@"C:\Users\a\AppData\Roaming\x.exe", UnusualLocation.AppData),
+            (@"C:\Users\a\Downloads\x.exe", UnusualLocation.Downloads), (@"C:\ProgramData\x.exe", UnusualLocation.ProgramDataRoot),
+            (@"C:\$Recycle.Bin\x.exe", UnusualLocation.RecycleBin), (@"C:\x.exe:payload", UnusualLocation.AlternateDataStream), (@"C:\Users\Public\x.exe", UnusualLocation.Public) };
+        foreach (var (path, expected) in paths) Require(SuspiciousLeadRules.ClassifyLocation(path) == expected);
+        foreach (var path in new string?[] { null, "", @"C:\ProgramData\Vendor\x.exe", @"C:\Windows\System32\svchost.exe", @"C:\Users\Publicity\x.exe", @"C:\Users\Public\..\x.exe" }) Require(SuspiciousLeadRules.ClassifyLocation(path) == UnusualLocation.None);
+        Require(SuspiciousLeadRules.ClassifyLocation(@"D:\Scratch\x.exe", @"D:\Scratch") == UnusualLocation.Temp);
+        foreach (var raw in new[] { "", "relative.exe", @"%windir%\x.exe", @"C:\Program Files\x.exe -arg", "\"C:\\x.exe", "\"C:\\x.exe\"junk", @"C:\x.exe:ads", @"C:\x.exe,C:\y.exe", @"C:\Windows\System32\rundll32.exe C:\x.dll,Entry", @"C:\a\..\x.exe", "C:\\x.exe\nsecret" })
+            Require(SuspiciousLeadRules.ParsePersistenceTarget(raw).Path is null);
+        Require(SuspiciousLeadRules.ParsePersistenceTarget("\"C:\\Program Files\\x.exe\" -secret").Path == @"C:\Program Files\x.exe");
+        Require(SuspiciousLeadRules.ParsePersistenceTarget(@"C:\x.exe -args").Path == @"C:\x.exe");
+        Require(SuspiciousLeadRules.ParsePersistenceTarget(@"\\server\share\x.dll").Path == @"\\server\share\x.dll");
+        ImageProvenance Image(string path, SignatureState signature) => new(path, InspectionStatus.Available, "", null, null, null, null, null, null, null, signature, null, null, null, at);
+        foreach (var state in Enum.GetValues<SignatureState>()) Require((SuspiciousLeadRules.SignatureLead(Image(@"C:\x.exe", state)) is not null) == (state is SignatureState.Unsigned or SignatureState.NotTrusted));
+        Require(SuspiciousLeadRules.SignatureLead(Image(@"C:\x.exe", SignatureState.Unsigned) with { Status = InspectionStatus.AccessDenied }) is null);
+        var process = new ProcessSnapshot { Identity = id, Name = "svchost.exe", ExecutablePath = @"C:\Windows\System32\svchost.exe", ParentPid = 7 };
+        var parent = new ProcessSnapshot { Identity = new(7, 50), Name = "wrong.exe" };
+        var input = new LeadSweepInput(B(new ProcessLeadInput(process, parent, false, false, null)), B<ConnectionSnapshot>(), B<PersistenceTarget>(), true);
+        Require(SuspiciousLeadRules.Evaluate(input).Items.Count == 0);
+        Require(SuspiciousLeadRules.Evaluate(input with { Processes = B<ProcessLeadInput>() }).Items.Count == 0);
+        var verified = input with { Processes = B(new ProcessLeadInput(process, parent, true, null, null)) };
+        Require(SuspiciousLeadRules.Evaluate(verified).Items.Single().Category == LeadCategory.ParentMismatch);
+        foreach (var p in new[] { parent with { Identity = new(7, 150) }, parent with { Identity = new(7, null) }, parent with { Name = "services.exe" } })
+            Require(SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(process, p, true, null, null)) }).Items.Count == 0);
+        var unusual = process with { ExecutablePath = @"C:\Users\a\Downloads\svchost.exe" };
+        var leads = SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(unusual, null, false, false, Image(unusual.ExecutablePath, SignatureState.Unsigned))) });
+        foreach (var category in new[] { LeadCategory.UnusualLocation, LeadCategory.NoVisibleWindow, LeadCategory.Masquerading, LeadCategory.Signature }) Require(leads.Items.Any(l => l.Category == category));
+        Require(leads.Items.All(l => !string.IsNullOrWhiteSpace(l.BenignNote) && l.ProcessIdentity == id));
+        Require(SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(process with { ExecutablePath = @"C:\Apps\scvhost.exe" }, null, false, null, null)) }).Items.Single().Severity == LeadSeverity.High);
+        SuspiciousLead[] Masquerades(string path, SignatureState state, string? signer = null, string? dev = null, bool verifiedParent = false) =>
+            SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(process with { ExecutablePath = path }, parent, verifiedParent, null,
+                Image(path, state) with { SignerSubject = signer }, dev)) }, tempDirectory: @"C:\Temp").Items
+                .Where(l => l.Category is LeadCategory.Masquerading or LeadCategory.ParentMismatch).ToArray();
+        var exactTemp = Masquerades(@"C:\Temp\svchost.exe", SignatureState.Unsigned).Single();
+        Require(exactTemp.Severity == LeadSeverity.High && exactTemp.Evidence.Contains("Name match: exact of svchost.exe") && exactTemp.Evidence.Contains("user-writable") && exactTemp.Evidence.Contains("Signer: unsigned") && exactTemp.Evidence.Contains("Parent: unverified"));
+        foreach (var name in new[] { "svch0st", "lsasss", "scvhost", "svchоst", "ѕνсһοѕт", "svchst", "servicex", "ｗｉｎｌｏｇｏｎ" })
+        {
+            var near = Masquerades(@"C:\Temp\" + name + ".exe", SignatureState.Unsigned).Single();
+            Require(near.Severity == LeadSeverity.High && near.Evidence.Contains("Name match: lookalike"));
+        }
+        foreach (var name in new[] { "lsass", "csrss", "smss", "wininit", "services" })
+        {
+            var badParent = Masquerades(@"C:\Windows\System32\" + name + ".exe", SignatureState.CatalogTrusted, "Microsoft Windows", verifiedParent: true).Single();
+            Require(badParent.Category == LeadCategory.ParentMismatch && badParent.Severity == LeadSeverity.High && badParent.Evidence.Contains("Parent: verified unexpected"));
+        }
+        var copied = Masquerades(@"C:\Temp\svchost.exe", SignatureState.CatalogTrusted, "Microsoft Windows Publisher").Single();
+        Require(copied.Severity == LeadSeverity.Medium && copied.Evidence.Contains("Signer: Microsoft"));
+        var devLead = Masquerades(@"C:\src\project\bin\svchost.exe", SignatureState.Unsigned, dev: @"Build output directory: bin; Project marker .git in C:\src\project").Single();
+        Require(devLead.Severity == LeadSeverity.Medium && devLead.Evidence.Contains("Dev context:") && devLead.Evidence.Contains(".git"));
+        Require(Masquerades(@"C:\src\bin\svchost.exe", SignatureState.Unsigned).Single().Severity == LeadSeverity.Medium);
+        foreach (var folder in new[] { "WinSxS", "servicing", "Temp" })
+        {
+            var installed = Masquerades(@"C:\Windows\" + folder + @"\component\svchost.exe", SignatureState.EmbeddedTrusted, "Microsoft Corporation").Single();
+            Require(installed.Severity == LeadSeverity.Low && installed.Evidence.Contains("expected-but-unusual Microsoft location"));
+        }
+        Require(Masquerades(@"C:\Temp\svchost.exe", SignatureState.EmbeddedTrusted, "Other Publisher").Single().Severity == LeadSeverity.High);
+        foreach (var name in new[] { "svchost", "svch0st" })
+        {
+            foreach (var state in new[] { SignatureState.EmbeddedTrusted, SignatureState.CatalogTrusted })
+            {
+                var developer = Masquerades(@"C:\src\project\bin\" + name + ".exe", state, "Other Publisher").Single();
+                Require(developer.Severity == LeadSeverity.Medium && developer.Evidence.Contains("Signer: Other Publisher") && developer.Evidence.Contains("Dev context: Build output directory: bin") && developer.Evidence.Contains("locally trusted"));
+                var outside = Masquerades(@"C:\Temp\" + name + ".exe", state, "Other Publisher").Single();
+                Require(outside.Severity == LeadSeverity.High && outside.Evidence.Contains("Signer: Other Publisher"));
+            }
+            foreach (var (state, label) in new[] { (SignatureState.Unsigned, "Unsigned"), (SignatureState.NotTrusted, "Not trusted"), (SignatureState.NotChecked, "Not checked"), (SignatureState.Unreadable, "Unreadable") })
+            {
+                var developer = Masquerades(@"C:\src\project\bin\" + name + ".exe", state, "Other Publisher").Single();
+                Require(developer.Severity == LeadSeverity.Medium && developer.Evidence.Contains("Dev context:") && developer.Evidence.Contains($"Signature state: {label}; treated as unsigned for tiering"));
+                var outside = Masquerades(@"C:\Temp\" + name + ".exe", state, "Other Publisher").Single();
+                Require(outside.Severity == LeadSeverity.High && outside.Evidence.Contains($"Signature state: {label}; treated as unsigned for tiering"));
+            }
+        }
+        var unknownSigner = Masquerades(@"C:\Temp\svchost.exe", SignatureState.EmbeddedTrusted).Single();
+        Require(unknownSigner.Severity == LeadSeverity.High && unknownSigner.Evidence.Contains("signer unknown; treated as not Microsoft-signed"));
+        Require(Masquerades(@"C:\Temp\svchost.exe", SignatureState.NotTrusted, "Microsoft Corporation").Single().Severity == LeadSeverity.High);
+        Require(Masquerades(@"C:\Windows\System32\svchost.exe", SignatureState.CatalogTrusted, "Microsoft Windows").Length == 0);
+        Require(Masquerades(@"C:\Windows\explorer.exe", SignatureState.EmbeddedTrusted, "Microsoft Windows").Length == 0);
+        Require(Masquerades(@"C:\Apps\ordinary.exe", SignatureState.Unsigned).Length == 0);
+        Require(Masquerades(@"C:\Apps\lsm1.exe", SignatureState.Unsigned).Length == 0);
+        Require(Masquerades(@"C:\Windows\SysWOW64\svchost.exe", SignatureState.Unsigned).Length == 0);
+        Require(Masquerades(@"C:\Windows\System32\lsass.exe", SignatureState.CatalogTrusted, "Microsoft Windows").Length == 0);
+        var expectedParentLead = SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(process with { ExecutablePath = @"C:\Temp\svchost.exe" }, parent with { Name = "services.exe" }, true, null, null)) }).Items.Single(l => l.Category == LeadCategory.Masquerading);
+        Require(expectedParentLead.Evidence.Contains("Parent: verified expected"));
+        Require(SuspiciousLeadRules.DeveloperPathContext(@"C:\tools\Docker\svchost.exe") is not null);
+        Require(SuspiciousLeadRules.DeveloperPathContext(@"C:\binary\svchost.exe") is null);
+        var endpoint = new ConnectionSnapshot { Protocol = "TCP", LocalAddress = "0.0.0.0", LocalPort = 12, OwningPid = 999, State = "Listen" };
+        Require(SuspiciousLeadRules.Evaluate(input with { Endpoints = B(endpoint) }).Items.Single().Category == LeadCategory.EndpointOwner);
+        Require(SuspiciousLeadRules.Evaluate(input with { Endpoints = B(endpoint with { OwningPid = 42, OwnerIdentity = id }) }).Items.Count == 0);
+        Require(SuspiciousLeadRules.Evaluate(input with { Endpoints = B(endpoint with { State = "Established" }) }).Items.Count == 0);
+        Require(SuspiciousLeadRules.Evaluate(input with { Endpoints = B(endpoint with { Protocol = "UDP", State = null }) }).Items.Count == 1);
+        var missing = new PersistenceTarget("entry", @"C:\missing.exe", InspectionStatus.Available, false, null);
+        var persistence = input with { Persistence = B(missing, missing, missing with { Name = "unsigned", Exists = true, Provenance = Image(missing.ParsedPath!, SignatureState.Unsigned) }, missing with { Name = "unparseable", ParsedPath = null }) };
+        Require(SuspiciousLeadRules.Evaluate(persistence).Items.Count == 3);
+        Require(SuspiciousLeadRules.Evaluate(input with { Persistence = B(missing with { Status = InspectionStatus.AccessDenied }, missing with { IsReference = true }, missing with { Exists = null }) }).Items.Count == 0);
+        Require(SuspiciousLeadRules.Evaluate(persistence, cap: 1).Truncated);
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.EtwOwner, 4200, false) == "Requires administrator: ETW provider-owner enumeration is denied without elevation (Win32 4200)");
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.EtwOwner, 4200, true) is null);
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.EtwOwner, 4200, null) is null);
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.Toolhelp, 4200, false) is null);
+        Require(ProcessSourceErrors.AdministratorRequirement(ProcessSightingSource.EtwOwner, 5, false) is null);
+        var unsigned = SuspiciousLeadRules.SignatureLead(Image(@"C:\apps\chrome.exe", SignatureState.Unsigned), id)!;
+        Require(unsigned.Title == "Unsigned image");
+        Require(SuspiciousLeadRules.SignatureLead(Image(@"C:\x.exe", SignatureState.NotTrusted))!.Title == "Signature not trusted");
+        var otherIdentity = new ProcessIdentity(81, 200);
+        var grouped = SuspiciousLeadRules.Aggregate(B(unsigned, unsigned with { ProcessIdentity = otherIdentity, Path = @"c:\APPS\chrome.exe" }), new HashSet<ProcessIdentity> { otherIdentity }, 1);
+        Require(grouped.Items.Count == 1 && grouped.Items[0].ProcessIdentity == otherIdentity);
+        Require(grouped.Items[0].Evidence.Contains("2 running instances") && grouped.Items[0].Evidence.Contains("remaining PIDs omitted"));
+        Require(SuspiciousLeadRules.Aggregate(B(unsigned), new HashSet<ProcessIdentity>()).Items[0].ProcessIdentity is null);
+        Require(SuspiciousLeadRules.Aggregate(B<SuspiciousLead>(), new HashSet<ProcessIdentity>()).Items.Count == 0);
+        Require(SuspiciousLeadRules.Aggregate(new BoundedItems<SuspiciousLead>([unsigned], 1, true), new HashSet<ProcessIdentity>()).Truncated);
+        var coverage = new SuspiciousLead(LeadCategory.Persistence, LeadSeverity.Info, "Persistence target unavailable", "Cannot parse", "entry A", "Indirect launcher");
+        var coverageRows = SuspiciousLeadRules.Aggregate(B(coverage, coverage with { Evidence = "entry B" }), new HashSet<ProcessIdentity>());
+        Require(coverageRows.Items.Count == 1 && coverageRows.Items[0].Evidence.Contains("2 configuration observations"));
+        bool invalidDetailCap = false;
+        try { SuspiciousLeadRules.Aggregate(B(unsigned), new HashSet<ProcessIdentity>(), 0); } catch (ArgumentOutOfRangeException) { invalidDetailCap = true; }
+        Require(invalidDetailCap);
+        Require(new BoundedItems<int>([1, 2], 1).Items.SequenceEqual([1]) && new BoundedItems<int>([], 0).Items.Count == 0);
+        Require(new BoundedItems<int>([], 2, true).Truncated);
+        Require(new AdsObservation("x", ":Zone.Identifier:$DATA", 10).Severity == LeadSeverity.Info);
+        Require(new AdsObservation("x", ":payload:$DATA", 10).Severity == LeadSeverity.Low);
+        using var cancel = new CancellationTokenSource();
+        cancel.Cancel();
+        bool cancelled = false;
+        try { SuspiciousLeadRules.Evaluate(input, cancellationToken: cancel.Token); } catch (OperationCanceledException) { cancelled = true; }
+        Require(cancelled);
     }
 }

@@ -40,6 +40,8 @@ jobs:
         run: dotnet run --project tests/SystemExplorer.Threads.Smoke -c Release
       - name: Read-only scheduled task checks
         run: dotnet run --project tests/SystemExplorer.ScheduledTasks.Smoke -c Release
+      - name: Read-only hidden items cross-view and ADS checks
+        run: dotnet run --project tests/SystemExplorer.HiddenItems.Smoke -c Release
       - name: Read-only system counter checks
         run: dotnet run --project tests/SystemExplorer.SystemCounters.Smoke -c Release
       - name: Read-only object inventory checks

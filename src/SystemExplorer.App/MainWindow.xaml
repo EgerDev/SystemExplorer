@@ -59,6 +59,9 @@
                         <FontIcon Glyph="&#xEA80;"/>
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Content="Hidden items" Tag="Hidden">
+                    <NavigationViewItem.Icon><FontIcon Glyph="&#xE730;"/></NavigationViewItem.Icon>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
             <NavigationView.FooterMenuItems>
                 <NavigationViewItem Content="Settings" Tag="Settings" Icon="Setting"/>
@@ -326,6 +329,7 @@
                     </Grid>
                 </Grid>
                 <views:OverviewView x:Name="OverviewPanel" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed"/>
+                <views:HiddenItemsView x:Name="HiddenPanel" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed" Loaded="HiddenLoaded"/>
                 <views:DiagnosticsView x:Name="DiagnosticsPanel" Grid.Row="2" Visibility="Collapsed"/>
                 <StackPanel x:Name="SettingsPanel" Grid.Row="2" Visibility="Collapsed" Spacing="16">
                     <TextBlock Text="Appearance" FontSize="18" FontWeight="SemiBold"/>
