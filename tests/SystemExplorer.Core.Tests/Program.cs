@@ -4,6 +4,7 @@ using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Activity trace Core model", ActivityTraceTests.Run),
     ("Byte and rate formatting preserve small nonzero values and exact zero", () =>
     {
         Check(MetricFormatting.Bytes(0) == "0 B" && MetricFormatting.Rate(0) == "0 B/s");
@@ -1739,5 +1740,128 @@ static class HiddenItemsTests
         bool cancelled = false;
         try { SuspiciousLeadRules.Evaluate(input, cancellationToken: cancel.Token); } catch (OperationCanceledException) { cancelled = true; }
         Require(cancelled);
+    }
+}
+
+static class ActivityTraceTests
+{
+    private static readonly DateTimeOffset At = DateTimeOffset.UtcNow;
+    private static void Require(bool condition) { if (!condition) throw new InvalidOperationException("Activity trace assertion failed"); }
+    internal static void Run()
+    {
+        var tests = new (string Name, Action Run)[]
+        {
+            ("clamping, ring overflow and bounded intern pool", Bounds),
+            ("PID reuse, seeded parents, tree and descendants", Processes),
+            ("category, text, time and process filtering; 500k under 1s", Filtering),
+            ("bounded summaries and Partial diagnostics", Summaries),
+            ("RFC4180 CSV formula guard and streaming JSON metadata", Exports),
+            ("live tail, exclusion, immutable final and empty/error cases", Lifecycle)
+        };
+        foreach (var (name, run) in tests) { run(); Console.WriteLine($"PASS Activity trace {name}"); }
+    }
+    private static TraceRecorderState State(int processCap = 16384, int stringCap = 100000) => new(new(ExcludeSelf: false), At, processCap: processCap, stringCap: stringCap);
+    private static void Bounds()
+    {
+        Require(new TraceOptions().Duration == TimeSpan.FromMinutes(2) && new TraceOptions().EventCap == 200000);
+        var low = new TraceOptions(TraceCategories.All, TimeSpan.MinValue, -1);
+        var high = new TraceOptions((TraceCategories)127, TimeSpan.MaxValue, int.MaxValue);
+        Require(low.Duration.TotalSeconds == 5 && low.EventCap == 10000 && low.ExcludeSelf);
+        Require(high.Duration.TotalMinutes == 10 && high.EventCap == 500000 && high.Categories == TraceCategories.All);
+        var ring = new TraceRingBuffer(2);
+        for (int i = 1; i <= 4; i++) ring.Add(new(i, At.UtcTicks, 1, 0, -1, TraceOperation.FileRead));
+        Require(ring.Dropped == 2 && ring.Snapshot().Select(e => e.Sequence).SequenceEqual(new long[] { 3, 4 }));
+        Require(ring.Snapshot(1)[0].Sequence == 4 && ring.Snapshot(0).Length == 0);
+        var pool = new TraceStringPool(1); var name = new string('x', 3);
+        Require(ReferenceEquals(pool.Intern(name), pool.Intern(new string('x', 3))));
+        var other = new string('y', 3); Require(ReferenceEquals(other, pool.Intern(other)) && pool.Count == 1 && pool.Capped && pool.Intern(null) is null);
+    }
+    private static void Processes()
+    {
+        var state = State();
+        state.Seed([new(2, 1, 200, "child"), new(1, 0, 100, "parent"), new(3, 4, 300, "orphan"), new(4, 0, 400, "too new")]);
+        state.Record(At, 2, 0, TraceOperation.FileRead);
+        state.Record(At, 2, 0, TraceOperation.ProcessStop, exitCode: 7);
+        state.Record(At, 2, 0, TraceOperation.FileRead);
+        state.Record(At, 2, 0, TraceOperation.ProcessStart, processStart: new(2, 1, 500, "replacement"));
+        state.RecordThread(2, true); state.RecordThread(2, false);
+        state.Record(At, 2, 0, TraceOperation.FileWrite);
+        var r = state.Complete(At);
+        Require(r.Processes[0].ParentIndex == 1 && r.Processes[0].Seeded && r.Processes[0].StartUtc is null);
+        Require(r.Processes[2].ParentIndex == -1 && r.Processes[0].ExitCode == 7);
+        Require(r.Events[0].ProcessIndex == 0 && r.Events[2].ProcessIndex == 0 && r.Events[^1].ProcessIndex == 4);
+        Require(r.Processes[4].ThreadsStarted == 1 && r.Processes[4].ThreadsStopped == 1);
+        Require(TraceTree.Descendants(r.Processes, 1).SetEquals(new[] { 0, 1, 4 }));
+        Require(TraceTree.Build(r.Processes).Single(row => row.Process.Index == 0).Depth == 1);
+        var capped = State(processCap: 1); capped.Seed([new(1, 0, 1, "one"), new(1, 0, 2, "two")]);
+        capped.Record(At, 1, 0, TraceOperation.FileRead);
+        var c = capped.Complete(At); Require(c.ProcessTableTruncated && c.Status == TraceStatus.Partial && c.Events[0].ProcessIndex == -1);
+    }
+    private static void Filtering()
+    {
+        var s = State(); s.Seed([new(1, 0, 1, "Alpha"), new(2, 1, 2, "Beta")]);
+        s.Record(At, 1, 1, TraceOperation.FileRead, "C:\\target", detail: "detail");
+        s.Record(At.AddSeconds(1), 2, 1, TraceOperation.NetSend, "endpoint");
+        var r = s.Complete(At);
+        Require(new TraceFilter(Categories: TraceCategories.File, Text: "TARGET").Match(r.Events, r.Processes).SequenceEqual(new[] { 0 }));
+        Require(new TraceFilter(Text: "ALPHA").Match(r.Events, r.Processes).Length == 1);
+        Require(new TraceFilter(Text: "detail").Match(r.Events, r.Processes).Length == 1);
+        Require(new TraceFilter(Text: "2", FromUtc: At.AddSeconds(1), ToUtc: At.AddSeconds(1)).Match(r.Events, r.Processes).SequenceEqual(new[] { 1 }));
+        Require(new TraceFilter(0).Match(r.Events, r.Processes).Length == 2 && new TraceFilter(0, false).Match(r.Events, r.Processes).Length == 1);
+        Require(new TraceFilter(Text: "absent").Match(r.Events, r.Processes).Length == 0);
+        var events = Enumerable.Range(0, 500000).Select(i => new TraceEvent(i, At.UtcTicks, 1, 1, 0, TraceOperation.FileRead, "C:\\target")).ToArray();
+        var filter = new TraceFilter(0, true, TraceCategories.File, "target", At, At);
+        filter.Match(r.Events, r.Processes);
+        var watch = System.Diagnostics.Stopwatch.StartNew(); var found = filter.Match(events, r.Processes); watch.Stop();
+        Require(found.Length == 500000 && watch.Elapsed < TimeSpan.FromSeconds(1));
+        Console.WriteLine($"Activity trace 500k filter: {watch.Elapsed.TotalMilliseconds:F1} ms");
+    }
+    private static void Summaries()
+    {
+        var s = State(); s.Seed([new(1, 0, 1, "one")]);
+        for (int i = 0; i < 1025; i++) s.Record(At, 1, 1, TraceOperation.FileRead, "file" + i, 2);
+        s.Record(At, 1, 1, TraceOperation.FileWrite, "file0", 3);
+        s.Record(At, 1, 1, TraceOperation.NetSend, "endpoint", 4);
+        s.Record(At, 1, 1, TraceOperation.NetReceive, "endpoint", 5);
+        s.Record(At, 1, 1, TraceOperation.RegistryOpen, "key"); s.Record(At, 1, 1, TraceOperation.ImageLoad);
+        var r = s.Complete(At); var summary = TraceProcessSummary.Build(r, 0);
+        Require(summary.Files.DistinctRetained == 1024 && summary.Files.UntrackedObservations == 1 && summary.Capped && summary.Files.Top[0].Count == 2);
+        Require(summary.BytesRead == 2050 && summary.BytesWritten == 3 && summary.BytesSent == 4 && summary.BytesReceived == 5 && summary.ImagesLoaded == 1);
+        Require(summary.RegistryKeys.DistinctRetained == 1 && summary.Endpoints.DistinctRetained == 1 && r.CapsHit && r.Status == TraceStatus.Partial);
+        Require(TraceProcessSummary.Build(r, 999).Files.DistinctRetained == 0);
+        Require(State().Complete(At, eventsLost: 1).Status == TraceStatus.Partial);
+        var unresolved = State(); unresolved.ReportDiagnostics(unresolvedNames: 5);
+        var unresolvedResult = unresolved.Complete(At);
+        Require(unresolvedResult.Status == TraceStatus.Completed && unresolvedResult.UnresolvedNames == 5 && unresolvedResult.Detail.Contains("5 events with unresolved names"));
+        var strings = State(stringCap: 0); strings.Record(At, 1, 0, TraceOperation.FileRead, "x"); Require(strings.Complete(At).Status == TraceStatus.Partial);
+        var overflow = State(); for (int i = 0; i < 200001; i++) overflow.Record(At, 1, 0, TraceOperation.FileRead);
+        var o = overflow.Complete(At); Require(o.BufferDropped == 1 && o.Status == TraceStatus.Partial && o.Events[0].Sequence == 2);
+    }
+    private static void Exports()
+    {
+        var s = State();
+        foreach (var text in new[] { "=formula", "+formula", "-formula", "@formula", "\tformula", "\rformula", "comma,quote\"\r\nline" }) s.Record(At, 1, 1, TraceOperation.FileRead, text, detail: "detail");
+        var r = s.Complete(At, eventsLost: 2); using var csv = new StringWriter(); TraceExport.WriteCsv(csv, r);
+        var value = csv.ToString();
+        Require(value.Contains("'=formula") && value.Contains("'+formula") && value.Contains("'-formula") && value.Contains("'@formula") && value.Contains("'\tformula") && value.Contains("'\rformula"));
+        Require(value.Contains("\"comma,quote\"\"\r\nline\"") && value.Contains("Sequence,TimeUtc,RelativeMs,Category,Operation,PID,TID,Process,ParentPID,Path,Bytes,Detail\r\n"));
+        using var stream = new MemoryStream(); TraceExport.WriteJson(stream, r, new(Text: "=formula")); stream.Position = 0;
+        using var json = System.Text.Json.JsonDocument.Parse(stream); var root = json.RootElement;
+        Require(root.GetProperty("status").GetString() == "Partial" && root.GetProperty("eventsLost").GetInt64() == 2 && root.GetProperty("bufferDropped").GetInt64() == 0);
+        Require(root.GetProperty("filter").GetProperty("text").GetString() == "=formula" && root.GetProperty("events").GetArrayLength() == 1 && root.TryGetProperty("limitations", out _));
+        using var empty = new MemoryStream(); TraceExport.WriteJson(empty, State().Complete(At)); empty.Position = 0; using var parsed = System.Text.Json.JsonDocument.Parse(empty); Require(parsed.RootElement.GetProperty("events").GetArrayLength() == 0);
+    }
+    private static void Lifecycle()
+    {
+        var s = new TraceRecorderState(new(), At, 99);
+        s.Record(At, 99, 0, TraceOperation.FileRead);
+        for (int i = 0; i < 200; i++) s.Record(At, 1, 0, TraceOperation.FileRead);
+        var live = s.Live(At.AddSeconds(1), 1000); Require(live.Tail.Count == 100 && live.Stored == 200 && live.ExcludedSelf == 1 && live.EventsSeen == 201);
+        s.Record(At, 1, 0, (TraceOperation)999); s.ReportDiagnostics(2, 3, true);
+        var r = s.Complete(At); Require(r.Malformed == 3 && r.UnresolvedNames == 3 && r.Status == TraceStatus.Partial);
+        s.Record(At, 1, 0, TraceOperation.FileRead); Require(ReferenceEquals(r, s.Complete(At)) && r.Events.Count == 200);
+        Require(State().Complete(At).Status == TraceStatus.Completed && State().Complete(At, TraceStatus.Cancelled, eventsLost: 1).Status == TraceStatus.Cancelled);
+        Require(State().Complete(At, TraceStatus.Failed).Status == TraceStatus.Failed);
+        bool threw = false; try { _ = new TraceRingBuffer(0); } catch (ArgumentOutOfRangeException) { threw = true; } Require(threw);
     }
 }

@@ -74,6 +74,7 @@ public sealed partial class MainWindow : Window
         tray = new NativeTray(this);
         ready = true;
         InitializeOverview();
+        InitializeTrace();
         DiagnosticsPanel.InspectRequested += InspectOverviewProcess;
         DiagnosticsPanel.ServiceRequested += InspectService;
         DiagnosticsPanel.InventoryRequested += ShowExtraInventory;
@@ -98,6 +99,7 @@ public sealed partial class MainWindow : Window
         Closed += async (_, _) =>
         {
             CloseStorage();
+            TracePanel.Shutdown();
             CancelProcessAnchor();
             tray.Dispose();
             shutdown.Cancel();
@@ -237,6 +239,7 @@ public sealed partial class MainWindow : Window
             "Services" => "Read-only Windows service inventory with verified process-lifetime associations.",
             "Insights" => "Local, deterministic explanations supported by observed measurements.",
             "Hidden" => "Read-only cross-view checks and local leads. Click Run to scan.",
+            "Trace" => "Opt-in, read-only activity recording via ETW. Requires administrator. Nothing is saved unless you export.",
             "Startup" => "Observed startup entries. Presence does not measure startup impact.",
             _ => "Read-only diagnostics from your local Windows system. Unavailable measurements are explicit."
         };
@@ -244,8 +247,9 @@ public sealed partial class MainWindow : Window
         OverviewPanel.Visibility = section == "Overview" ? Visibility.Visible : Visibility.Collapsed;
         HiddenPanel.Visibility = section == "Hidden" ? Visibility.Visible : Visibility.Collapsed;
         StoragePanel.Visibility = section == "Storage" ? Visibility.Visible : Visibility.Collapsed; OnStorageNavigated();
+        TracePanel.Visibility = section == "Trace" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPanel.Visibility = section == "Settings" ? Visibility.Visible : Visibility.Collapsed;
-        DiagnosticsPanel.Visibility = section is "Processes" or "Overview" or "Settings" or "Storage" or "Hidden" ? Visibility.Collapsed : Visibility.Visible;
+        DiagnosticsPanel.Visibility = section is "Processes" or "Overview" or "Settings" or "Trace" or "Storage" or "Hidden" ? Visibility.Collapsed : Visibility.Visible;
         if (section == "Processes") ProcessSearch.Text = GlobalSearch.Text;
         RefreshDiagnostics();
     }
