@@ -128,6 +128,7 @@ public sealed class StorageScanAggregator
         lock (gate)
         {
             EnsureOpen(); completed = true;
+            if (state == StorageScanState.Completed && deniedTotal > 0) state = StorageScanState.Partial;
             var result = new StorageNode[nodes.Count];
             for (var i = nodes.Count - 1; i >= 0; i--)
             {

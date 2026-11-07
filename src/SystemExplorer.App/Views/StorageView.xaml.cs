@@ -171,7 +171,7 @@ public sealed partial class StorageView : UserControl, IDisposable
     private void RenderScan()
     {
         if (result is not { } scan) return;
-        ResultTitle.Text = scan.State switch { StorageScanState.Completed => "Complete", StorageScanState.Cancelled => "Partial – cancelled", _ => "Failed — " + (scan.DeniedPaths.FirstOrDefault()?.Reason ?? "scan did not complete") };
+        ResultTitle.Text = scan.State switch { StorageScanState.Completed => "Complete", StorageScanState.Partial => $"Partial — {scan.DeniedTotal:N0} access denial / enumeration error(s)", StorageScanState.Cancelled => "Partial – cancelled", _ => "Failed — " + (scan.DeniedPaths.FirstOrDefault()?.Reason ?? "scan did not complete") };
         ResultDetail.Text = $"{scan.Method}\n{Count(scan.Totals.Files, "file")} · {Count(scan.Totals.Directories, "folder")} · {Bytes(scan.Totals.LogicalBytes)} logical / {Bytes(scan.Totals.AllocatedBytes)} allocated · {Count(scan.HardLinkDuplicates, "hard-link duplicate")} skipped ({Bytes(scan.HardLinkAllocatedBytes)} allocated)";
         ResultNotes.Text = string.Join("\n", scan.Notes); ResultNotes.Visibility = scan.Notes.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         RenderFolder();

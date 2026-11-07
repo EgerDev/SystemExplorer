@@ -37,7 +37,7 @@ public static class StorageFileSystems
 
 public sealed record StorageScanLimits(int DirectoryNodes = 250_000, int HardLinkIds = 1_000_000,
     int LargestFiles = 1000, int Extensions = 4096, int Problems = 500);
-public enum StorageScanState { Completed, Cancelled, Failed }
+public enum StorageScanState { Completed, Cancelled, Failed, Partial }
 [Flags]
 public enum StorageMarkers
 {

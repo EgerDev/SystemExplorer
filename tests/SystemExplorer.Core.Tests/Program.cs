@@ -5,6 +5,7 @@ using SystemExplorer.App;
 var tests = new (string Name, Action Run)[]
 {
     ("CSV exports have unique headers and round-trip RAM tabs, Hidden, Storage and Trace", CsvExportTests.Run),
+    ("Storage denied child folders mark completed scans partial and preserve evidence", StorageCompletenessTests.Run),
     ("Activity trace Core model", ActivityTraceTests.Run),
     ("Byte and rate formatting preserve small nonzero values and exact zero", () =>
     {

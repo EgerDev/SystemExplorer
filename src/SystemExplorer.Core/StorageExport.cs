@@ -14,13 +14,14 @@ public static class StorageExport
     {
         var output = new StringBuilder();
         void Row(params object?[] cells) => output.AppendLine(string.Join(",", cells.Select(c => Cell(c is IFormattable f ? f.ToString(null, CultureInfo.InvariantCulture) ?? "" : c?.ToString() ?? ""))));
-        var columns = new[] { "RecordType", "Root", "Method", "State", "Completeness", "StartedAt", "Elapsed", "Category", "Tool", "Path", "AllocatedBytes", "ReclaimableBytes (blank=unknown)", "LatestWrite", "Confidence", "Reason", "CleanupCommand (not executed)", "Warning", "Kind", "IsLead", "Kinds", "RegenerableBytes", "LastActivity", "IsStale", "HasAIMarkers", "LogicalBytes", "LastWriteUtc", "Extension", "Count" };
+        var columns = new[] { "RecordType", "Root", "Method", "State", "Completeness", "StartedAt", "Elapsed", "DeniedTotal", "Category", "Tool", "Path", "AllocatedBytes", "ReclaimableBytes (blank=unknown)", "LatestWrite", "Confidence", "Reason", "CleanupCommand (not executed)", "Warning", "Kind", "IsLead", "Kinds", "RegenerableBytes", "LastActivity", "IsStale", "HasAIMarkers", "LogicalBytes", "LastWriteUtc", "Extension", "Count" };
         Row(columns.Cast<object?>().ToArray());
         void Record(string kind, params (string Column, object? Value)[] cells)
         {
             var values = cells.ToDictionary(c => c.Column, c => c.Value);
             values["RecordType"] = kind; values["Root"] = scan.Root; values["Method"] = scan.Method; values["State"] = scan.State;
             values["Completeness"] = scan.IsPartial ? "Partial" : "Complete"; values["StartedAt"] = scan.StartedAt.ToString("O"); values["Elapsed"] = scan.Elapsed;
+            values["DeniedTotal"] = scan.DeniedTotal;
             Row(columns.Select(c => values.GetValueOrDefault(c)).ToArray());
         }
         Record("Metadata");
