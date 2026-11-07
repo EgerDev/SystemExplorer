@@ -34,6 +34,8 @@ jobs:
         run: dotnet run --project tests/SystemExplorer.Relationships.Smoke -c Release
       - name: Pagefile inventory checks
         run: dotnet run --project tests/SystemExplorer.Pagefiles.Smoke -c Release
+      - name: Read-only storage inventory and allocation checks
+        run: dotnet run --project tests/SystemExplorer.Storage.Smoke -c Release
       - name: Service configuration and startup checks
         run: dotnet run --project tests/SystemExplorer.ServiceInspection.Smoke -c Release
       - name: Thread timing, wait-chain and lifetime checks

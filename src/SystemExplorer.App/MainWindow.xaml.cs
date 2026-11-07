@@ -97,6 +97,7 @@ public sealed partial class MainWindow : Window
         };
         Closed += async (_, _) =>
         {
+            CloseStorage();
             CancelProcessAnchor();
             tray.Dispose();
             shutdown.Cancel();
@@ -229,6 +230,7 @@ public sealed partial class MainWindow : Window
         PageSubtitle.Text = section switch
         {
             "Overview" => "Live resource use, top consumers, and system insights.",
+            "Storage" => "Disk-space usage, developer artifacts and AI tool data — metadata only.",
             "Processes" => "See what's using your system and explore related processes.",
             "Memory" => "Physical memory, private commit and reclaimable categories are different views—not additive totals.",
             "Network" => "Observed TCP connections and UDP endpoints. No inferred bandwidth, DNS or geography.",
@@ -241,8 +243,9 @@ public sealed partial class MainWindow : Window
         ProcessesPanel.Visibility = section == "Processes" ? Visibility.Visible : Visibility.Collapsed;
         OverviewPanel.Visibility = section == "Overview" ? Visibility.Visible : Visibility.Collapsed;
         HiddenPanel.Visibility = section == "Hidden" ? Visibility.Visible : Visibility.Collapsed;
+        StoragePanel.Visibility = section == "Storage" ? Visibility.Visible : Visibility.Collapsed; OnStorageNavigated();
         SettingsPanel.Visibility = section == "Settings" ? Visibility.Visible : Visibility.Collapsed;
-        DiagnosticsPanel.Visibility = section is "Processes" or "Overview" or "Settings" or "Hidden" ? Visibility.Collapsed : Visibility.Visible;
+        DiagnosticsPanel.Visibility = section is "Processes" or "Overview" or "Settings" or "Storage" or "Hidden" ? Visibility.Collapsed : Visibility.Visible;
         if (section == "Processes") ProcessSearch.Text = GlobalSearch.Text;
         RefreshDiagnostics();
     }
