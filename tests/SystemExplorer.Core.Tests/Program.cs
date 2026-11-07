@@ -7,6 +7,17 @@ var tests = new (string Name, Action Run)[]
     ("CSV exports have unique headers and round-trip RAM tabs, Hidden, Storage and Trace", CsvExportTests.Run),
     ("Storage denied child folders mark completed scans partial and preserve evidence", StorageCompletenessTests.Run),
     ("Task cross-view comparisons never infer absence from unavailable or truncated views", HiddenTaskAvailabilityTests.Run),
+    ("RAM process status distinguishes Idle and unverifiable identities from exited or reused lifetimes", () =>
+    {
+        foreach (long? creation in new long?[] { null, 0 })
+        {
+            Check(RamAttributionPresentation.ProcessStatusName(new(0, creation), RamReadingStatus.IdentityMismatch) == "Idle (no creation time)");
+            Check(RamAttributionPresentation.ProcessStatusName(new(123, creation), RamReadingStatus.IdentityMismatch) == "Unverifiable identity");
+        }
+        Check(RamAttributionPresentation.ProcessStatusName(new(123, 1), RamReadingStatus.IdentityMismatch) == "Exited / PID reused");
+        foreach (var status in Enum.GetValues<RamReadingStatus>().Where(s => s != RamReadingStatus.IdentityMismatch))
+            Check(RamAttributionPresentation.ProcessStatusName(new(123, null), status) == RamAttributionPresentation.StatusName(status));
+    }),
     ("Activity trace Core model", ActivityTraceTests.Run),
     ("Byte and rate formatting preserve small nonzero values and exact zero", () =>
     {

@@ -159,17 +159,18 @@ public sealed partial class RamAttributionView : UserControl
         var headers = new[] { "Process", "PID", "Private resident", "Actually shared", "Shareable (sole)", "Proportional est.", "Shared commit", "Private commit", "Status" };
         var rows = result.Select(r =>
         {
+            var status = RamAttributionPresentation.ProcessStatusName(r.Identity, r.Status);
             var valid = r.PagesScanned > 0 || r.Status == RamReadingStatus.Available;
             string Resident(ulong n) => valid ? Bytes(n) : "Unavailable";
             return Row([r.Name, r.Identity.Pid.ToString(), Resident(r.PrivateResidentBytes), Resident(r.ActuallySharedBytes), Resident(r.ShareableSoleBytes),
-                valid ? Bytes((ulong)r.ProportionalEstimateBytes) : "Unavailable", Bytes(r.SharedCommitBytes), Bytes(r.PrivateCommitBytes), RamAttributionPresentation.StatusName(r.Status)],
+                valid ? Bytes((ulong)r.ProportionalEstimateBytes) : "Unavailable", Bytes(r.SharedCommitBytes), Bytes(r.PrivateCommitBytes), status],
                 [null, r.Identity.Pid, valid ? r.PrivateResidentBytes : null, valid ? r.ActuallySharedBytes : null, valid ? r.ShareableSoleBytes : null,
-                    valid ? (decimal)r.ProportionalEstimateBytes : null, r.SharedCommitBytes, r.PrivateCommitBytes, null], r.Status.ToString(),
+                    valid ? (decimal)r.ProportionalEstimateBytes : null, r.SharedCommitBytes, r.PrivateCommitBytes, null], status,
                 $"{r.Identity}; {r.PagesScanned:N0} pages; source: NtQueryVirtualMemory MemoryWorkingSetInformation / VM_COUNTERS_EX2. {r.Detail}");
         }).ToArray();
         Table(ProcessTable, headers, [170, 55, 112, 112, 112, 118, 110, 110, 120], [false, true, true, true, true, true, true, true, false], rows, 2, true);
         SaveRows(1, "Process resident attributes", headers, rows);
-        ProcessStatus.Text = $"Captured {captured[1]:g} · {result.Count} rows · " + string.Join(", ", result.GroupBy(r => r.Status).Select(g => $"{RamAttributionPresentation.StatusName(g.Key)}: {g.Count()}"));
+        ProcessStatus.Text = $"Captured {captured[1]:g} · {result.Count} rows · " + string.Join(", ", result.GroupBy(r => RamAttributionPresentation.ProcessStatusName(r.Identity, r.Status)).Select(g => $"{g.Key}: {g.Count()}"));
         ProcessScan.Content = "Rescan processes";
         Message.Text = "Process scan complete. Status tooltips include denied / truncated reasons. Sort with column headers; scroll horizontally for all columns.";
     });

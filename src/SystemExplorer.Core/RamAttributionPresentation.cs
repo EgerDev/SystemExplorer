@@ -9,6 +9,11 @@ public sealed record RamBarSegment(string Name, double Fraction);
 
 public static class RamAttributionPresentation
 {
+    public static string ProcessStatusName(ProcessIdentity identity, RamReadingStatus status) =>
+        status == RamReadingStatus.IdentityMismatch && !identity.IsStable
+            ? identity.Pid == 0 ? "Idle (no creation time)" : "Unverifiable identity"
+            : StatusName(status);
+
     public static string StatusName(RamReadingStatus status) => status switch
     {
         RamReadingStatus.IdentityMismatch => "Exited / PID reused",
