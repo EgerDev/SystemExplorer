@@ -21,7 +21,7 @@ public sealed partial class MainWindow
     private async Task<SystemCounterSnapshot> CaptureCountersAsync(CancellationToken token)
     {
         var result = await systemCounters.CaptureAsync(token);
-        if (!result.IsWarmup) return result;
+        if (!CounterSampling.NeedsFreshInterval(result.IsWarmup, result.Interval)) return result;
         await Task.Delay(TimeSpan.FromSeconds(1), token);
         return await systemCounters.CaptureAsync(token);
     }
@@ -105,7 +105,7 @@ public sealed partial class MainWindow
                 {
                     var r = await CaptureCountersAsync(token);
                     var c = r.Cpu;
-                    view.ShowRows($"{c.Status} · {r.CapturedAt.LocalDateTime:T} · total utility {V(c.TotalProcessorUtilityPercent, Pct)}, privileged {V(c.TotalPrivilegedTimePercent, Pct)} · context switches {V(c.ContextSwitchesPerSecond, Num)}/s · processor queue {V(c.ProcessorQueueLength, Num)} · {c.Detail} Utility can exceed 100% when cores run above base frequency.",
+                    view.ShowRows($"{c.Status} · {r.CapturedAt.LocalDateTime:T} · total utility {V(c.TotalProcessorUtilityPercent, Pct)}, privileged {V(c.TotalPrivilegedTimePercent, Pct)} · context switches {V(c.ContextSwitchesPerSecond, Num)}/s · processor queue {V(c.ProcessorQueueLength, Num)} · {c.Detail}",
                         c.LogicalProcessors.Select(p => new InventoryRow($"CPU {p.Instance}", p.Group is { } g ? $"Group {g} · number {p.Number}" : "Group unavailable",
                             V(p.ProcessorUtilityPercent, Pct), V(p.PrivilegedTimePercent, Pct), "",
                             N(p.ProcessorUtilityPercent), N(p.PrivilegedTimePercent), null,
@@ -119,15 +119,17 @@ public sealed partial class MainWindow
                 {
                     var r = await CaptureCountersAsync(token);
                     var g = r.Gpu;
+                    var adapterNames = g.Adapters.GroupBy(a => a.Luid).ToDictionary(a => a.Key, a => a.First().Description ?? $"Adapter 0x{a.Key:X}");
+                    string Adapter(ulong luid) => adapterNames.TryGetValue(luid, out var name) ? name : $"Adapter 0x{luid:X}";
                     var rows = g.Adapters.Select(a => new InventoryRow(a.Description ?? $"Adapter 0x{a.Luid:X}", $"Busiest engine: {a.HeadlineEngineType ?? "—"} · {string.Join(", ", a.Engines.Select(e => $"{e.EngineType} {V(e.UtilizationPercent, Pct)}"))}",
                         V(a.HeadlineUtilizationPercent, Pct), V(a.DedicatedUsageBytes, B), V(a.SharedUsageBytes, B),
                         N(a.HeadlineUtilizationPercent), N(a.DedicatedUsageBytes), N(a.SharedUsageBytes),
-                        $"{a.Description ?? "Description unavailable"} · LUID 0x{a.Luid:X}\nBusiest engine type: {a.HeadlineEngineType ?? "—"} at {V(a.HeadlineUtilizationPercent, Pct)} (maximum over engine types, not a sum)\nDedicated in use: {V(a.DedicatedUsageBytes, B)} of {DiagnosticData.Bytes(a.DedicatedVideoMemoryBytes)}\nShared in use: {V(a.SharedUsageBytes, B)} of {DiagnosticData.Bytes(a.SharedSystemMemoryBytes)} (shared GPU memory is system RAM, not additional memory)"))
-                        .Concat(g.Processes.Select(p => new InventoryRow($"PID {p.Pid}", $"{(p.Identity is null ? $"{p.IdentityStatus}: {p.IdentityDetail}" : "Identity verified")} · busiest {p.MaxEngineType ?? "—"}",
+                        $"{a.Description ?? "Description unavailable"} · LUID 0x{a.Luid:X}\nBusiest engine type: {a.HeadlineEngineType ?? "—"} at {V(a.HeadlineUtilizationPercent, Pct)} (maximum over engine types, not a sum)\nDedicated in use: {V(a.DedicatedUsageBytes, B)} of {DiagnosticData.Bytes(a.DedicatedVideoMemoryBytes)}\nShared in use: {V(a.SharedUsageBytes, B)} of {DiagnosticData.Bytes(a.SharedSystemMemoryBytes)} (shared GPU memory is system RAM, not additional memory)", Key: $"adapter:{a.Luid:X}"))
+                        .Concat(g.Processes.Select(p => new InventoryRow($"PID {p.Pid} · {Adapter(p.AdapterLuid)}", $"{(p.Identity is null ? $"{p.IdentityStatus}: {p.IdentityDetail}" : "Identity verified")} · busiest {p.MaxEngineType ?? "—"}",
                             V(p.MaxUtilizationPercent, Pct), V(p.DedicatedUsageBytes, B), V(p.SharedUsageBytes, B),
                             N(p.MaxUtilizationPercent), N(p.DedicatedUsageBytes), N(p.SharedUsageBytes),
                             $"PID {p.Pid} · creation {p.Identity?.CreationTimeFileTime.ToString() ?? "unverified"} · adapter 0x{p.AdapterLuid:X}\n{string.Join("\n", p.Engines.Select(e => $"{e.EngineType}: {V(e.UtilizationPercent, Pct)}"))}\nDedicated: {V(p.DedicatedUsageBytes, B)} · Shared: {V(p.SharedUsageBytes, B)}",
-                            p.Identity)));
+                            p.Identity, Key: $"process:{p.AdapterLuid:X}:{p.Pid}")));
                     view.ShowRows($"{g.Status} · {r.CapturedAt.LocalDateTime:T} · {g.Detail} Inventory: {g.InventoryStatus} · {g.InventoryDetail}{(g.MalformedInstanceCount > 0 ? $" {g.MalformedInstanceCount} malformed counter instance(s) skipped. {g.MalformedDetail}" : "")}",
                         rows, "Adapter / process", "Busiest engine", "Dedicated", "Shared", initialSort: 1, reverse: true);
                 });
@@ -135,10 +137,11 @@ public sealed partial class MainWindow
             case "MemoryLists":
                 await ShowInventoryAsync("Memory lists and paging", async (view, token) =>
                 {
-                    var m = (await CaptureCountersAsync(token)).Memory;
+                    var r = await CaptureCountersAsync(token);
+                    var m = r.Memory;
                     InventoryRow Row(string name, CounterValue value, Func<double, string> format, string note) =>
                         new(name, note, V(value, format), Number1: N(value), FullText: $"{name}: {V(value, format)}{Why(value)}\n{note}");
-                    view.ShowRows($"{m.Status} · {m.Detail}", [
+                    view.ShowRows($"{m.Status} · {r.CapturedAt.LocalDateTime:T} · interval {r.Interval?.TotalSeconds:F1} s · {m.Detail}", [
                         Row("Standby (reserve priority)", m.StandbyCacheReserveBytes, B, "Cached pages that can be repurposed; counted as available."),
                         Row("Standby (normal priority)", m.StandbyCacheNormalPriorityBytes, B, "Cached pages that can be repurposed; counted as available."),
                         Row("Standby (core)", m.StandbyCacheCoreBytes, B, "Cached pages that can be repurposed; counted as available."),
@@ -155,7 +158,7 @@ public sealed partial class MainWindow
                 await ShowInventoryAsync("Kernel pool tags", async (view, token) =>
                 {
                     var r = await poolTags.CaptureAsync(token);
-                    view.ShowRows($"{r.Status} · {r.CapturedAt.LocalDateTime:T} · {r.Detail} Tags identify allocating code by convention only; no driver attribution is downloaded.",
+                    view.ShowRows($"{r.Status} · {r.CapturedAt.LocalDateTime:T} · {r.Detail} Tags identify allocating code by convention only.",
                         r.Tags.Select(t => new InventoryRow(t.Tag, $"Paged allocs {t.PagedAllocations - Math.Min(t.PagedAllocations, t.PagedFrees):N0} outstanding · nonpaged {t.NonPagedAllocations - Math.Min(t.NonPagedAllocations, t.NonPagedFrees):N0} outstanding",
                             DiagnosticData.Bytes(t.PagedUsedBytes), DiagnosticData.Bytes(t.NonPagedUsedBytes), DiagnosticData.Bytes(t.PagedUsedBytes + t.NonPagedUsedBytes),
                             t.PagedUsedBytes, t.NonPagedUsedBytes, t.PagedUsedBytes + t.NonPagedUsedBytes,

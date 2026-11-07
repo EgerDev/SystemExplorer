@@ -4,6 +4,14 @@ namespace SystemExplorer.Core;
 
 public static class KeyedRows
 {
+    public static bool HasUniqueKeys<T, TKey>(IEnumerable<T> rows, Func<T, TKey?> key) where TKey : notnull
+    {
+        var seen = new HashSet<TKey>();
+        foreach (var row in rows)
+            if (key(row) is not { } value || !seen.Add(value)) return false;
+        return true;
+    }
+
     public static void Reconcile<T, TKey>(ObservableCollection<T> rows, IReadOnlyList<T> desired, Func<T, TKey> key) where TKey : notnull
     {
         var wanted = desired.ToDictionary(key);
