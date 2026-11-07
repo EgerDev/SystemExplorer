@@ -10,6 +10,7 @@ static void Require(bool condition, string detail)
     if (!condition) throw new InvalidOperationException(detail);
 }
 
+HiddenExportTests.Run();
 using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 var token = timeout.Token;
 var provider = new WindowsHiddenProcessProvider();

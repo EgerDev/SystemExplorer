@@ -26,6 +26,7 @@ public sealed partial class MainWindow
         HiddenPanel.ScanRequested += RunHiddenScan;
         HiddenPanel.CancelRequested += () => hiddenCancellation?.Cancel();
         HiddenPanel.InspectRequested += InspectOverviewProcess;
+        HiddenPanel.ExportRequested += ExportHiddenAsync;
     }
 
     private async void RunHiddenScan(int scan)
@@ -105,6 +106,7 @@ public sealed partial class MainWindow
                 result.Classification is ProcessDiscrepancyKind.Zombie or ProcessDiscrepancyKind.StaleOwner ? LeadSeverity.Low : LeadSeverity.Info,
                 result.Classification.ToString(), result.Reason, "", "Scan races, exited objects with references still held, stale owners or PID reuse are commonly benign.", result.Identity);
             return lead with { Title = $"{observed?.ImageName ?? "PID " + result.Identity.Pid} · {result.Classification}", Path = observed?.ImagePath,
+                SourcesSeen = new(seen, 8), SourcesMissing = new(missing, 8), Status = result.Classification.ToString(), StatusDetail = result.Reason,
                 Reason = observed?.ImagePath is null && result.Classification == ProcessDiscrepancyKind.Zombie
                     ? (result.Evidence.Items.FirstOrDefault(s => s.ImageDetail is not null)?.ImageDetail ?? "Image unavailable: no limited-query image observation") + ". " + lead.Reason : lead.Reason,
                 BenignNote = result.Classification == ProcessDiscrepancyKind.Zombie ? "A handle held by another process keeps the exited process object alive, commonly a parent or monitoring tool. This is not evidence of compromise." : lead.BenignNote,
@@ -195,8 +197,13 @@ public sealed partial class MainWindow
         {
             token.ThrowIfCancellationRequested();
             HiddenPanel.Progress($"Verifying signatures {provenance.Count + 1}/{Math.Min(paths.Length, signatureCap)} (local only)…");
-            provenance[path] = await verifier.InspectAsync(path, token);
+            provenance[path] = (await verifier.InspectAsync(path, token)) with { Path = path };
         }
+        var developerContexts = await Task.Run(() =>
+        {
+            var detector = new HiddenDeveloperContext();
+            return paths.Take(signatureCap).ToDictionary(path => path, path => detector.Inspect(path, token), StringComparer.OrdinalIgnoreCase);
+        }, token);
         using var currentProcess = Process.GetCurrentProcess();
         int currentSession = currentProcess.SessionId;
         var processInputs = processes.Items.Select(p =>
@@ -204,7 +211,8 @@ public sealed partial class MainWindow
             var parent = processes.Items.FirstOrDefault(candidate => candidate.Identity.Pid == p.ParentPid);
             bool verified = parent is not null && parent.Identity.IsStable && p.Identity.IsStable && parent.Identity.CreationTimeFileTime < p.Identity.CreationTimeFileTime;
             bool? visible = windows.Pids.Items.Contains(p.Identity.Pid) ? true : windows.Status == InspectionStatus.Available && p.SessionId == currentSession ? false : null;
-            return new ProcessLeadInput(p, parent, verified, visible, p.ExecutablePath is { } path ? provenance.GetValueOrDefault(path) : null);
+            return new ProcessLeadInput(p, parent, verified, visible, p.ExecutablePath is { } path ? provenance.GetValueOrDefault(path) : null,
+                p.ExecutablePath is { } image ? developerContexts.GetValueOrDefault(image) : null);
         }).ToArray();
         var persistenceTargets = await Task.Run(() => targets.Items.Select(t =>
         {

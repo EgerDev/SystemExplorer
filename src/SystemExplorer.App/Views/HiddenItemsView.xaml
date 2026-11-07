@@ -7,11 +7,14 @@
     <Grid x:Name="LayoutRoot" RowSpacing="10" VerticalAlignment="Top" SizeChanged="HiddenSizeChanged">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <Grid ColumnSpacing="10">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*" MaxWidth="420"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" MaxWidth="420"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <ComboBox x:Name="Selector" SelectedIndex="0" SelectionChanged="ScanChanged" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Hidden items scan">
                 <x:String>Processes cross-view</x:String><x:String>Services cross-view</x:String><x:String>Scheduled tasks cross-view</x:String><x:String>Suspicious leads</x:String><x:String>Alternate data streams</x:String>
             </ComboBox>
             <Button x:Name="RunButton" Grid.Column="1" Content="Run" Click="RunClicked" MinWidth="88" Style="{StaticResource AccentButtonStyle}"/>
+            <Button x:Name="ExportButton" Grid.Column="2" Content="Export" IsEnabled="False">
+                <Button.Flyout><MenuFlyout><MenuFlyoutItem Text="Export CSV" Tag="csv" Click="ExportClicked"/><MenuFlyoutItem Text="Export JSON" Tag="json" Click="ExportClicked"/></MenuFlyout></Button.Flyout>
+            </Button>
         </Grid>
         <TextBlock x:Name="Elevation" Grid.Row="1" Style="{StaticResource Muted}" TextWrapping="Wrap"/>
         <Grid Grid.Row="2" ColumnSpacing="8">

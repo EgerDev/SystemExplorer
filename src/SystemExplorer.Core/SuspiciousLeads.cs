@@ -3,21 +3,102 @@ namespace SystemExplorer.Core;
 public enum LeadSeverity { Info, Low, Medium, High }
 public enum LeadCategory { CrossView, Signature, UnusualLocation, Masquerading, ParentMismatch, EndpointOwner, Persistence, NoVisibleWindow, AlternateDataStream }
 public sealed record SuspiciousLead(LeadCategory Category, LeadSeverity Severity, string Title, string Reason,
-    string Evidence, string BenignNote, ProcessIdentity? ProcessIdentity = null, string? Path = null);
+    string Evidence, string BenignNote, ProcessIdentity? ProcessIdentity = null, string? Path = null,
+    BoundedItems<ProcessIdentity>? ProcessIdentities = null, BoundedItems<ProcessSightingSource>? SourcesSeen = null,
+    BoundedItems<ProcessSightingSource>? SourcesMissing = null, string? Status = null, string? StatusDetail = null);
 public enum UnusualLocation { None, Temp, AppData, Downloads, ProgramDataRoot, RecycleBin, AlternateDataStream, Public }
 public sealed record PersistenceTarget(string Name, string? ParsedPath, InspectionStatus Status, bool? Exists,
     ImageProvenance? Provenance, bool IsReference = false);
 public sealed record ProcessLeadInput(ProcessSnapshot Process, ProcessSnapshot? Parent, bool ParentIdentityVerified,
-    bool? HasVisibleWindow, ImageProvenance? Provenance);
+    bool? HasVisibleWindow, ImageProvenance? Provenance, string? DeveloperContext = null);
 public sealed record LeadSweepInput(BoundedItems<ProcessLeadInput> Processes, BoundedItems<ConnectionSnapshot> Endpoints,
     BoundedItems<PersistenceTarget> Persistence, bool ProcessInventoryComplete);
 public sealed record PersistencePathResult(string? Path, InspectionStatus Status, string Detail);
 
 public static class SuspiciousLeadRules
 {
-    private static readonly HashSet<string> SystemNames = new(StringComparer.OrdinalIgnoreCase)
-    { "svchost.exe", "lsass.exe", "csrss.exe", "smss.exe", "wininit.exe", "winlogon.exe", "services.exe", "taskhostw.exe", "dllhost.exe", "conhost.exe", "spoolsv.exe", "lsm.exe", "RuntimeBroker.exe" };
-    private static readonly HashSet<string> Lookalikes = new(StringComparer.OrdinalIgnoreCase) { "scvhost.exe", "svch0st.exe", "lsas.exe" };
+    private static readonly string[] SystemNames = ["lsass", "csrss", "smss", "wininit", "winlogon", "services", "svchost", "lsm", "explorer", "spoolsv", "taskhostw", "dwm", "conhost", "rundll32", "dllhost"];
+
+    private static string ConfusableName(string name) => string.Concat(name.ToLowerInvariant().Normalize(System.Text.NormalizationForm.FormKC).Select(c => c switch
+    {
+        '0' or 'ο' or 'о' => 'o', '1' or 'i' or 'і' or 'ι' or 'ӏ' => 'l', '5' or 'ѕ' => 's',
+        'а' or 'α' => 'a', 'с' or 'ϲ' => 'c', 'е' or 'ε' => 'e', 'р' or 'ρ' => 'p',
+        'х' or 'χ' => 'x', 'у' => 'y', 'т' or 'τ' => 't', 'ν' => 'v', 'һ' or 'հ' => 'h',
+        'ԁ' => 'd', 'ɡ' => 'g', 'м' => 'm', 'ո' => 'n', 'օ' => 'o', 'ս' or 'υ' => 'u', 'ԝ' => 'w', _ => c
+    }));
+
+    private static bool OneEdit(string a, string b)
+    {
+        if (Math.Abs(a.Length - b.Length) > 1) return false;
+        int i = 0;
+        while (i < Math.Min(a.Length, b.Length) && a[i] == b[i]) i++;
+        if (i == Math.Min(a.Length, b.Length)) return a.Length != b.Length;
+        if (a.Length == b.Length)
+            return a[(i + 1)..] == b[(i + 1)..] || i + 1 < a.Length && a[i] == b[i + 1] && a[i + 1] == b[i] && a[(i + 2)..] == b[(i + 2)..];
+        return a.Length > b.Length ? a[(i + 1)..] == b[i..] : a[i..] == b[(i + 1)..];
+    }
+
+    private static (string Name, bool Exact)? CriticalName(string fileName)
+    {
+        if (!fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return null;
+        var stem = fileName[..^4].ToLowerInvariant();
+        foreach (var name in SystemNames) if (stem == name) return (name, true);
+        if (stem.Length is < 5 or > 10 || stem.Any(char.IsSurrogate)) return null;
+        foreach (var name in SystemNames.Where(n => n.Length >= 5))
+            if (ConfusableName(stem) == ConfusableName(name) || OneEdit(stem, name)) return (name, false);
+        return null;
+    }
+
+    public static string? DeveloperPathContext(string path)
+    {
+        var segments = Normalize(path).Split('\\').SkipLast(1).ToArray();
+        var segment = segments.FirstOrDefault(s => new[] { "bin", "obj", "target", "dist" }.Contains(s, StringComparer.OrdinalIgnoreCase));
+        if (segment is not null) return $"Build output directory: {segment}";
+        if (segments.Any(s => new[] { "Microsoft Visual Studio", "Visual Studio", "WSL", "wsl$", "wsl.localhost", "lxss", "Docker", ".docker" }.Contains(s, StringComparer.OrdinalIgnoreCase)))
+            return "Visual Studio / WSL / Docker directory";
+        return null;
+    }
+
+    private static IEnumerable<SuspiciousLead> MasqueradingLeads(ProcessLeadInput item, string windowsDirectory, string? tempDirectory)
+    {
+        var process = item.Process;
+        var path = Normalize(process.ExecutablePath!);
+        if (CriticalName(FileName(path)) is not { } match) yield break;
+        var directory = path[..path.LastIndexOf('\\')];
+        bool expected = match.Name == "explorer" ? Same(directory, Normalize(windowsDirectory))
+            : Same(directory, Normalize(windowsDirectory) + "\\System32") || Same(directory, Normalize(windowsDirectory) + "\\SysWOW64");
+        bool unusualMicrosoft = new[] { "WinSxS", "servicing", "Temp" }.Any(folder => Under(path, Normalize(windowsDirectory) + "\\" + folder));
+        var provenance = item.Provenance is { } value && Same(value.Path, process.ExecutablePath) ? value : null;
+        bool trusted = provenance?.Status == InspectionStatus.Available && provenance.Signature is SignatureState.EmbeddedTrusted or SignatureState.CatalogTrusted;
+        var signer = provenance?.SignerSubject;
+        bool microsoft = trusted && new[] { "Microsoft Corporation", "Microsoft Windows", "Microsoft Windows Publisher", "Microsoft Windows Hardware Compatibility Publisher" }.Any(s => Same(s, signer));
+        bool unsigned = provenance?.Status == InspectionStatus.Available && provenance.Signature == SignatureState.Unsigned;
+        string signerEvidence = unsigned ? "unsigned" : string.IsNullOrWhiteSpace(signer) ? "signer unknown; treated as not Microsoft-signed"
+            : microsoft ? "Microsoft (" + signer + ")" : signer + (trusted ? "" : "; signature not locally trusted; treated as not Microsoft-signed");
+        var parentName = match.Name switch { "svchost" => "services.exe", "lsass" or "services" => "wininit.exe", "csrss" or "wininit" => "smss.exe", "smss" => "System", _ => null };
+        bool verified = parentName is not null && item.ParentIdentityVerified && item.Parent is { } parent && parent.Identity.IsStable && process.Identity.IsStable
+            && process.ParentPid == parent.Identity.Pid && parent.Identity.CreationTimeFileTime < process.Identity.CreationTimeFileTime;
+        bool unexpected = verified && !Same(FileName(item.Parent!.ExecutablePath ?? item.Parent.Name), parentName);
+        var dev = item.DeveloperContext ?? DeveloperPathContext(path);
+        string pathClass = expected ? "expected directory" : unusualMicrosoft ? "expected-but-unusual Microsoft location" : ClassifyLocation(path, tempDirectory) is { } location && location != UnusualLocation.None
+            ? "user-writable / unusual location: " + location : "outside expected directory";
+        string evidence = $"{path}\nName match: {(match.Exact ? "exact" : "lookalike")} of {match.Name}.exe\nPath class: {pathClass}\nSigner: {signerEvidence}\nParent: {(verified ? unexpected ? "verified unexpected" : "verified expected" : "unverified")}";
+        if (verified) evidence += $"; expected {parentName}; observed {FileName(item.Parent!.ExecutablePath ?? item.Parent.Name)}";
+        if (dev is not null) evidence += "\nDev context: " + dev;
+        SuspiciousLead Lead(LeadCategory category, LeadSeverity severity, string title, string reason) => new(category, severity, title, reason, evidence,
+            "A copied diagnostic binary, developer build, installer or alternate launch arrangement may be legitimate. These factors are leads, not proof of compromise.", process.Identity, process.ExecutablePath);
+        if (!expected)
+        {
+            var severity = match.Exact && unusualMicrosoft && microsoft ? LeadSeverity.Low : microsoft || unsigned && dev is not null ? LeadSeverity.Medium : LeadSeverity.High;
+            yield return Lead(LeadCategory.Masquerading, severity, match.Exact ? "System name outside expected directory" : "Lookalike system name",
+                "Critical OS name and location evaluated with local signer and developer-context evidence.");
+        }
+        if (unexpected && match.Exact)
+        {
+            bool singleton = match.Name is "lsass" or "csrss" or "smss" or "wininit" or "services";
+            yield return Lead(LeadCategory.ParentMismatch, singleton ? LeadSeverity.High : LeadSeverity.Medium, "Unexpected verified parent", $"Expected {parentName}; observed {FileName(item.Parent!.ExecutablePath ?? item.Parent.Name)}.");
+        }
+    }
     private static string Normalize(string path) => path.Replace('/', '\\').TrimEnd('\\');
     private static bool Same(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
     private static string FileName(string path) => Normalize(path).Split('\\')[^1];
@@ -86,21 +167,12 @@ public static class SuspiciousLeadRules
                 var p = item.Process;
                 var path = p.ExecutablePath;
                 if (path is null || !SafePath(Normalize(path))) continue;
-                var name = FileName(path);
                 SuspiciousLead Lead(LeadCategory category, LeadSeverity severity, string title, string reason, string benign) => new(category, severity, title, reason, path, benign, p.Identity, path);
                 var location = ClassifyLocation(path, tempDirectory);
                 if (location != UnusualLocation.None) yield return Lead(LeadCategory.UnusualLocation, LeadSeverity.Low, "Unusual image location", location.ToString(), "Installers, portable apps and developer tools often use these locations.");
                 if (item.HasVisibleWindow == false && location is UnusualLocation.Temp or UnusualLocation.AppData or UnusualLocation.Downloads or UnusualLocation.Public)
                     yield return Lead(LeadCategory.NoVisibleWindow, LeadSeverity.Low, "No visible top-level window", "Image is in a commonly user-writable location and no visible top-level window was observed.", "Background helpers and tray apps commonly have no visible window; permissions were not inferred from the path.");
-                var directory = Normalize(path)[..Normalize(path).LastIndexOf('\\')];
-                bool expectedDirectory = Same(directory, Normalize(windowsDirectory) + "\\System32") || Same(directory, Normalize(windowsDirectory) + "\\SysWOW64");
-                if ((SystemNames.Contains(name) && !expectedDirectory) || Same(name, "explorer.exe") && !Same(directory, Normalize(windowsDirectory)))
-                    yield return Lead(LeadCategory.Masquerading, LeadSeverity.Medium, "System name outside expected directory", name, "A copied diagnostic binary or alternative installation may be legitimate.");
-                if (Lookalikes.Contains(name)) yield return Lead(LeadCategory.Masquerading, LeadSeverity.Low, "Lookalike system name", name, "Similar names can be coincidental.");
-                var expectedParent = name.ToLowerInvariant() switch { "svchost.exe" => "services.exe", "lsass.exe" or "services.exe" => "wininit.exe", _ => null };
-                if (expectedParent is not null && item.ParentIdentityVerified && item.Parent is { } parent && parent.Identity.IsStable && p.Identity.IsStable
-                    && p.ParentPid == parent.Identity.Pid && parent.Identity.CreationTimeFileTime < p.Identity.CreationTimeFileTime && !Same(FileName(parent.ExecutablePath ?? parent.Name), expectedParent))
-                    yield return Lead(LeadCategory.ParentMismatch, LeadSeverity.Medium, "Unexpected verified parent", $"Expected {expectedParent}; observed {FileName(parent.ExecutablePath ?? parent.Name)}.", "Debuggers, test environments or alternate launch arrangements may explain the parent.");
+                foreach (var masquerading in MasqueradingLeads(item, windowsDirectory, tempDirectory)) yield return masquerading;
                 if (item.Provenance is { } provenance && Same(provenance.Path, path) && SignatureLead(provenance, p.Identity) is { } signature) yield return signature;
             }
             foreach (var endpoint in input.Endpoints.Items)
@@ -150,7 +222,8 @@ public static class SuspiciousLeadRules
                 Title = coverage ? "Persistence targets not assessed" : first.Title,
                 Evidence = instances + (coverage ? $"{group.Count()} configuration observations; coverage limitation, not a suspicious finding.\n" : "") +
                     string.Join("\n", evidence.Take(detailCap)) + (evidence.Length > detailCap ? $"\nFirst {detailCap} evidence entries shown." : ""),
-                ProcessIdentity = identities.Where(runningIdentities.Contains).Select(i => (ProcessIdentity?)i).FirstOrDefault()
+                ProcessIdentity = identities.Where(runningIdentities.Contains).Select(i => (ProcessIdentity?)i).FirstOrDefault(),
+                ProcessIdentities = new(identities, detailCap)
             };
         });
         return new(rows, leads.Items.Count, leads.Truncated);

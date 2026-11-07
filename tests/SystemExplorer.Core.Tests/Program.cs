@@ -1354,7 +1354,47 @@ static class HiddenItemsTests
         var leads = SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(unusual, null, false, false, Image(unusual.ExecutablePath, SignatureState.Unsigned))) });
         foreach (var category in new[] { LeadCategory.UnusualLocation, LeadCategory.NoVisibleWindow, LeadCategory.Masquerading, LeadCategory.Signature }) Require(leads.Items.Any(l => l.Category == category));
         Require(leads.Items.All(l => !string.IsNullOrWhiteSpace(l.BenignNote) && l.ProcessIdentity == id));
-        Require(SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(process with { ExecutablePath = @"C:\Apps\scvhost.exe" }, null, false, null, null)) }).Items.Single().Severity == LeadSeverity.Low);
+        Require(SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(process with { ExecutablePath = @"C:\Apps\scvhost.exe" }, null, false, null, null)) }).Items.Single().Severity == LeadSeverity.High);
+        SuspiciousLead[] Masquerades(string path, SignatureState state, string? signer = null, string? dev = null, bool verifiedParent = false) =>
+            SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(process with { ExecutablePath = path }, parent, verifiedParent, null,
+                Image(path, state) with { SignerSubject = signer }, dev)) }, tempDirectory: @"C:\Temp").Items
+                .Where(l => l.Category is LeadCategory.Masquerading or LeadCategory.ParentMismatch).ToArray();
+        var exactTemp = Masquerades(@"C:\Temp\svchost.exe", SignatureState.Unsigned).Single();
+        Require(exactTemp.Severity == LeadSeverity.High && exactTemp.Evidence.Contains("Name match: exact of svchost.exe") && exactTemp.Evidence.Contains("user-writable") && exactTemp.Evidence.Contains("Signer: unsigned") && exactTemp.Evidence.Contains("Parent: unverified"));
+        foreach (var name in new[] { "svch0st", "lsasss", "scvhost", "svchоst", "ѕνсһοѕт", "svchst", "servicex", "ｗｉｎｌｏｇｏｎ" })
+        {
+            var near = Masquerades(@"C:\Temp\" + name + ".exe", SignatureState.Unsigned).Single();
+            Require(near.Severity == LeadSeverity.High && near.Evidence.Contains("Name match: lookalike"));
+        }
+        foreach (var name in new[] { "lsass", "csrss", "smss", "wininit", "services" })
+        {
+            var badParent = Masquerades(@"C:\Windows\System32\" + name + ".exe", SignatureState.CatalogTrusted, "Microsoft Windows", verifiedParent: true).Single();
+            Require(badParent.Category == LeadCategory.ParentMismatch && badParent.Severity == LeadSeverity.High && badParent.Evidence.Contains("Parent: verified unexpected"));
+        }
+        var copied = Masquerades(@"C:\Temp\svchost.exe", SignatureState.CatalogTrusted, "Microsoft Windows Publisher").Single();
+        Require(copied.Severity == LeadSeverity.Medium && copied.Evidence.Contains("Signer: Microsoft"));
+        var devLead = Masquerades(@"C:\src\project\bin\svchost.exe", SignatureState.Unsigned, dev: @"Build output directory: bin; Project marker .git in C:\src\project").Single();
+        Require(devLead.Severity == LeadSeverity.Medium && devLead.Evidence.Contains("Dev context:") && devLead.Evidence.Contains(".git"));
+        Require(Masquerades(@"C:\src\bin\svchost.exe", SignatureState.Unsigned).Single().Severity == LeadSeverity.Medium);
+        foreach (var folder in new[] { "WinSxS", "servicing", "Temp" })
+        {
+            var installed = Masquerades(@"C:\Windows\" + folder + @"\component\svchost.exe", SignatureState.EmbeddedTrusted, "Microsoft Corporation").Single();
+            Require(installed.Severity == LeadSeverity.Low && installed.Evidence.Contains("expected-but-unusual Microsoft location"));
+        }
+        Require(Masquerades(@"C:\Temp\svchost.exe", SignatureState.EmbeddedTrusted, "Other Publisher").Single().Severity == LeadSeverity.High);
+        var unknownSigner = Masquerades(@"C:\Temp\svchost.exe", SignatureState.EmbeddedTrusted).Single();
+        Require(unknownSigner.Severity == LeadSeverity.High && unknownSigner.Evidence.Contains("signer unknown; treated as not Microsoft-signed"));
+        Require(Masquerades(@"C:\Temp\svchost.exe", SignatureState.NotTrusted, "Microsoft Corporation").Single().Severity == LeadSeverity.High);
+        Require(Masquerades(@"C:\Windows\System32\svchost.exe", SignatureState.CatalogTrusted, "Microsoft Windows").Length == 0);
+        Require(Masquerades(@"C:\Windows\explorer.exe", SignatureState.EmbeddedTrusted, "Microsoft Windows").Length == 0);
+        Require(Masquerades(@"C:\Apps\ordinary.exe", SignatureState.Unsigned).Length == 0);
+        Require(Masquerades(@"C:\Apps\lsm1.exe", SignatureState.Unsigned).Length == 0);
+        Require(Masquerades(@"C:\Windows\SysWOW64\svchost.exe", SignatureState.Unsigned).Length == 0);
+        Require(Masquerades(@"C:\Windows\System32\lsass.exe", SignatureState.CatalogTrusted, "Microsoft Windows").Length == 0);
+        var expectedParentLead = SuspiciousLeadRules.Evaluate(input with { Processes = B(new ProcessLeadInput(process with { ExecutablePath = @"C:\Temp\svchost.exe" }, parent with { Name = "services.exe" }, true, null, null)) }).Items.Single(l => l.Category == LeadCategory.Masquerading);
+        Require(expectedParentLead.Evidence.Contains("Parent: verified expected"));
+        Require(SuspiciousLeadRules.DeveloperPathContext(@"C:\tools\Docker\svchost.exe") is not null);
+        Require(SuspiciousLeadRules.DeveloperPathContext(@"C:\binary\svchost.exe") is null);
         var endpoint = new ConnectionSnapshot { Protocol = "TCP", LocalAddress = "0.0.0.0", LocalPort = 12, OwningPid = 999, State = "Listen" };
         Require(SuspiciousLeadRules.Evaluate(input with { Endpoints = B(endpoint) }).Items.Single().Category == LeadCategory.EndpointOwner);
         Require(SuspiciousLeadRules.Evaluate(input with { Endpoints = B(endpoint with { OwningPid = 42, OwnerIdentity = id }) }).Items.Count == 0);
