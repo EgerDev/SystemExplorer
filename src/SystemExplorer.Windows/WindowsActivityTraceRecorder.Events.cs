@@ -70,7 +70,7 @@ public sealed partial class WindowsActivityTraceRecorder
     {
         int id = (int)data.ID;
         if (id is < 1 or > 5) return;
-        if ((id == 1 && data.Version > 3) || (id == 2 && data.Version > 2) || (id is 3 or 4 && data.Version > 1) || (id == 5 && data.Version != 0))
+        if ((id == 1 && data.Version > 4) || (id == 2 && data.Version > 2) || (id is 3 or 4 && data.Version > 1) || (id == 5 && data.Version != 0))
         { Malformed(data, "unsupported version"); return; }
         int pid = Int(data, "ProcessID");
         if (id is 3 or 4) { state.RecordThread(pid, id == 3); return; }
@@ -78,7 +78,7 @@ public sealed partial class WindowsActivityTraceRecorder
         {
             var creation = Required(data, "CreateTime");
             long fileTime = creation is DateTime time ? time.ToUniversalTime().ToFileTimeUtc() : Convert.ToInt64(creation, CultureInfo.InvariantCulture);
-            string? image = data.Version == 3 ? ProcessStartV3Image(data) : Text(data, "ImageName");
+            string? image = data.Version is 3 or 4 ? ProcessStartImage(data.DataStart, data.EventDataLength, data.Version) : Text(data, "ImageName");
             image = Name(image);
             state.Record(at, pid, data.ThreadID, TraceOperation.ProcessStart, image,
                 processStart: new(pid, Int(data, "ParentProcessID"), fileTime, Path.GetFileName(image), image));
@@ -91,20 +91,21 @@ public sealed partial class WindowsActivityTraceRecorder
         else state.Record(at, pid, data.ThreadID, TraceOperation.ImageLoad, Name(Text(data, "ImageName")));
     }
 
-    // Host manifest v3: fixed leading fields (48 bytes), SID, then ImageName.
+    // Manifests v3/v4 share 48 leading bytes, SID, then ImageName; v4 appends SecurityMitigations.
     // TraceEvent 4.0's dynamic parser stops at the SID. Read only this bounded string.
-    private static string ProcessStartV3Image(EtwEvent data)
+    internal static string ProcessStartImage(nint dataStart, int dataLength, int version)
     {
-        if (data.EventDataLength < 56) throw new FormatException("Short process start.");
-        int count = Marshal.ReadByte(data.DataStart, 49);
-        if (Marshal.ReadByte(data.DataStart, 48) != 1 || count > 15) throw new FormatException("Invalid SID layout.");
+        if (version is not (3 or 4)) throw new FormatException("Unsupported process start version.");
+        if (dataLength < 56) throw new FormatException("Short process start.");
+        int count = Marshal.ReadByte(dataStart, 49);
+        if (Marshal.ReadByte(dataStart, 48) != 1 || count > 15) throw new FormatException("Invalid SID layout.");
         int offset = 56 + 4 * count;
-        if (offset >= data.EventDataLength) throw new FormatException("Missing image name.");
+        if (offset >= dataLength) throw new FormatException("Missing image name.");
         int chars = 0;
-        while (offset + chars * 2 + 1 < data.EventDataLength)
+        while (offset + chars * 2 + 1 < dataLength)
         {
-            if (Marshal.ReadInt16(data.DataStart, offset + chars * 2) == 0)
-                return Marshal.PtrToStringUni(data.DataStart + offset, chars) ?? "";
+            if (Marshal.ReadInt16(dataStart, offset + chars * 2) == 0)
+                return Marshal.PtrToStringUni(dataStart + offset, chars) ?? "";
             chars++;
         }
         throw new FormatException("Unterminated image name.");

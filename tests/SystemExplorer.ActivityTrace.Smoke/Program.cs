@@ -27,6 +27,36 @@ diagnostics.Add(Guid.Empty, 0, 3, "unsupported version");
 Check(diagnostics.Summary.Contains("id=0, version=3, reason=unsupported version, count=2") &&
     diagnostics.Summary.Contains("id=15,") && !diagnostics.Summary.Contains("id=16,") && diagnostics.Summary.Contains("unlisted failures=1"), "Decode diagnostics must aggregate and remain bounded.");
 Console.WriteLine("PASS: empty and bounded metadata-only decoder diagnostics.");
+byte[] processStart = new byte[160];
+processStart[48] = 1; processStart[49] = 1; processStart[55] = 16; processStart[57] = 0x20;
+byte[] imageName = System.Text.Encoding.Unicode.GetBytes("C:\\test\\cmd.exe\0");
+imageName.CopyTo(processStart, 60);
+Array.Fill(processStart, (byte)0xFF, 60 + imageName.Length, processStart.Length - 60 - imageName.Length);
+var processStartBuffer = Marshal.AllocHGlobal(processStart.Length);
+try
+{
+    void Reject(int length, int version)
+    {
+        bool rejected = false;
+        try { WindowsActivityTraceRecorder.ProcessStartImage(processStartBuffer, length, version); }
+        catch (FormatException) { rejected = true; }
+        Check(rejected, "Invalid or unsupported process-start image must be rejected.");
+    }
+    Marshal.Copy(processStart, 0, processStartBuffer, processStart.Length);
+    foreach (int version in new[] { 3, 4 })
+    {
+        Check(WindowsActivityTraceRecorder.ProcessStartImage(processStartBuffer, processStart.Length, version) == "C:\\test\\cmd.exe", "Process-start v3/v4 must read only ImageName, not trailing fields.");
+        Reject(0, version); Reject(55, version); Reject(60, version); Reject(61, version); Reject(62, version);
+        Marshal.WriteByte(processStartBuffer, 48, 0); Reject(processStart.Length, version); Marshal.WriteByte(processStartBuffer, 48, 1);
+        Marshal.WriteByte(processStartBuffer, 49, 16); Reject(processStart.Length, version); Marshal.WriteByte(processStartBuffer, 49, 1);
+        Marshal.WriteInt16(processStartBuffer, 60, 0);
+        Check(WindowsActivityTraceRecorder.ProcessStartImage(processStartBuffer, 62, version) == "", "Empty image must stay empty.");
+        Marshal.Copy(imageName, 0, processStartBuffer + 60, imageName.Length);
+    }
+    Reject(processStart.Length, 5);
+}
+finally { Marshal.FreeHGlobal(processStartBuffer); }
+Console.WriteLine("PASS: process-start v3/v4 bounded image prefix; empty, truncated, invalid SID and unsupported version fixtures.");
 TraceProcessSeed[] seeds = [new(Environment.ProcessId, -1, own.StartTime.ToUniversalTime().ToFileTimeUtc(), own.ProcessName)];
 var before = TraceEventSession.GetActiveSessionNames().Where(n => n.StartsWith(WindowsActivityTraceRecorder.SessionPrefix, StringComparison.Ordinal)).ToHashSet();
 using var preCancelled = new CancellationTokenSource(); preCancelled.Cancel();
