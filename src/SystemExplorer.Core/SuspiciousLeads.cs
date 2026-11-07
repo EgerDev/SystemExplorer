@@ -72,9 +72,16 @@ public static class SuspiciousLeadRules
         bool trusted = provenance?.Status == InspectionStatus.Available && provenance.Signature is SignatureState.EmbeddedTrusted or SignatureState.CatalogTrusted;
         var signer = provenance?.SignerSubject;
         bool microsoft = trusted && new[] { "Microsoft Corporation", "Microsoft Windows", "Microsoft Windows Publisher", "Microsoft Windows Hardware Compatibility Publisher" }.Any(s => Same(s, signer));
-        bool unsigned = provenance?.Status == InspectionStatus.Available && provenance.Signature == SignatureState.Unsigned;
-        string signerEvidence = unsigned ? "unsigned" : string.IsNullOrWhiteSpace(signer) ? "signer unknown; treated as not Microsoft-signed"
+        string signerEvidence = provenance?.Signature == SignatureState.Unsigned ? "unsigned" : string.IsNullOrWhiteSpace(signer) ? "signer unknown; treated as not Microsoft-signed"
             : microsoft ? "Microsoft (" + signer + ")" : signer + (trusted ? "" : "; signature not locally trusted; treated as not Microsoft-signed");
+        string signatureState = provenance?.Signature switch
+        {
+            SignatureState.EmbeddedTrusted => "Embedded trusted", SignatureState.CatalogTrusted => "Catalog trusted",
+            SignatureState.NotTrusted => "Not trusted", SignatureState.NotChecked => "Not checked",
+            SignatureState.Unsigned => "Unsigned", SignatureState.Unreadable => "Unreadable", _ => "Not checked (provenance unavailable)"
+        };
+        string signatureEvidence = signatureState + (trusted ? "; locally trusted" : "; treated as unsigned for tiering");
+        if (provenance is { Status: not InspectionStatus.Available }) signatureEvidence += "; local verification unavailable: " + provenance.Detail;
         var parentName = match.Name switch { "svchost" => "services.exe", "lsass" or "services" => "wininit.exe", "csrss" or "wininit" => "smss.exe", "smss" => "System", _ => null };
         bool verified = parentName is not null && item.ParentIdentityVerified && item.Parent is { } parent && parent.Identity.IsStable && process.Identity.IsStable
             && process.ParentPid == parent.Identity.Pid && parent.Identity.CreationTimeFileTime < process.Identity.CreationTimeFileTime;
@@ -82,14 +89,14 @@ public static class SuspiciousLeadRules
         var dev = item.DeveloperContext ?? DeveloperPathContext(path);
         string pathClass = expected ? "expected directory" : unusualMicrosoft ? "expected-but-unusual Microsoft location" : ClassifyLocation(path, tempDirectory) is { } location && location != UnusualLocation.None
             ? "user-writable / unusual location: " + location : "outside expected directory";
-        string evidence = $"{path}\nName match: {(match.Exact ? "exact" : "lookalike")} of {match.Name}.exe\nPath class: {pathClass}\nSigner: {signerEvidence}\nParent: {(verified ? unexpected ? "verified unexpected" : "verified expected" : "unverified")}";
+        string evidence = $"{path}\nName match: {(match.Exact ? "exact" : "lookalike")} of {match.Name}.exe\nPath class: {pathClass}\nSigner: {signerEvidence}\nSignature state: {signatureEvidence}\nParent: {(verified ? unexpected ? "verified unexpected" : "verified expected" : "unverified")}";
         if (verified) evidence += $"; expected {parentName}; observed {FileName(item.Parent!.ExecutablePath ?? item.Parent.Name)}";
         if (dev is not null) evidence += "\nDev context: " + dev;
         SuspiciousLead Lead(LeadCategory category, LeadSeverity severity, string title, string reason) => new(category, severity, title, reason, evidence,
             "A copied diagnostic binary, developer build, installer or alternate launch arrangement may be legitimate. These factors are leads, not proof of compromise.", process.Identity, process.ExecutablePath);
         if (!expected)
         {
-            var severity = match.Exact && unusualMicrosoft && microsoft ? LeadSeverity.Low : microsoft || unsigned && dev is not null ? LeadSeverity.Medium : LeadSeverity.High;
+            var severity = match.Exact && unusualMicrosoft && microsoft ? LeadSeverity.Low : microsoft || dev is not null ? LeadSeverity.Medium : LeadSeverity.High;
             yield return Lead(LeadCategory.Masquerading, severity, match.Exact ? "System name outside expected directory" : "Lookalike system name",
                 "Critical OS name and location evaluated with local signer and developer-context evidence.");
         }

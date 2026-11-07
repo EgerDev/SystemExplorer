@@ -1382,6 +1382,23 @@ static class HiddenItemsTests
             Require(installed.Severity == LeadSeverity.Low && installed.Evidence.Contains("expected-but-unusual Microsoft location"));
         }
         Require(Masquerades(@"C:\Temp\svchost.exe", SignatureState.EmbeddedTrusted, "Other Publisher").Single().Severity == LeadSeverity.High);
+        foreach (var name in new[] { "svchost", "svch0st" })
+        {
+            foreach (var state in new[] { SignatureState.EmbeddedTrusted, SignatureState.CatalogTrusted })
+            {
+                var developer = Masquerades(@"C:\src\project\bin\" + name + ".exe", state, "Other Publisher").Single();
+                Require(developer.Severity == LeadSeverity.Medium && developer.Evidence.Contains("Signer: Other Publisher") && developer.Evidence.Contains("Dev context: Build output directory: bin") && developer.Evidence.Contains("locally trusted"));
+                var outside = Masquerades(@"C:\Temp\" + name + ".exe", state, "Other Publisher").Single();
+                Require(outside.Severity == LeadSeverity.High && outside.Evidence.Contains("Signer: Other Publisher"));
+            }
+            foreach (var (state, label) in new[] { (SignatureState.Unsigned, "Unsigned"), (SignatureState.NotTrusted, "Not trusted"), (SignatureState.NotChecked, "Not checked"), (SignatureState.Unreadable, "Unreadable") })
+            {
+                var developer = Masquerades(@"C:\src\project\bin\" + name + ".exe", state, "Other Publisher").Single();
+                Require(developer.Severity == LeadSeverity.Medium && developer.Evidence.Contains("Dev context:") && developer.Evidence.Contains($"Signature state: {label}; treated as unsigned for tiering"));
+                var outside = Masquerades(@"C:\Temp\" + name + ".exe", state, "Other Publisher").Single();
+                Require(outside.Severity == LeadSeverity.High && outside.Evidence.Contains($"Signature state: {label}; treated as unsigned for tiering"));
+            }
+        }
         var unknownSigner = Masquerades(@"C:\Temp\svchost.exe", SignatureState.EmbeddedTrusted).Single();
         Require(unknownSigner.Severity == LeadSeverity.High && unknownSigner.Evidence.Contains("signer unknown; treated as not Microsoft-signed"));
         Require(Masquerades(@"C:\Temp\svchost.exe", SignatureState.NotTrusted, "Microsoft Corporation").Single().Severity == LeadSeverity.High);
