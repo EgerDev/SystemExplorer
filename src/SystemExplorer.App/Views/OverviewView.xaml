@@ -42,8 +42,8 @@
                         <Grid x:Name="ConsumerTableHeader" Grid.Row="1" Background="{ThemeResource HeaderSurface}" Padding="10,8,42,8" ColumnSpacing="8">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="106"/><ColumnDefinition Width="62"/></Grid.ColumnDefinitions>
                             <TextBlock Text="Application / process" FontSize="{StaticResource CaptionSize}"/>
-                            <TextBlock Grid.Column="1" Text="Private commit" FontSize="{StaticResource CaptionSize}" HorizontalAlignment="Right"/>
-                            <TextBlock Grid.Column="2" Text="CPU" FontSize="{StaticResource CaptionSize}" HorizontalAlignment="Right"/>
+                            <TextBlock x:Name="ConsumerCommitHeader" Grid.Column="1" Text="Private commit" FontSize="{StaticResource CaptionSize}" HorizontalAlignment="Right"/>
+                            <TextBlock x:Name="ConsumerCpuHeader" Grid.Column="2" Text="CPU" FontSize="{StaticResource CaptionSize}" HorizontalAlignment="Right"/>
                         </Grid>
                         <ListView x:Name="ConsumersList" Grid.Row="2" ItemsSource="{x:Bind Rows}" SelectionMode="Single" MaxHeight="80" KeyDown="ConsumerKeyDown" AutomationProperties.Name="Ranked resource consumers" AutomationProperties.HelpText="Applications and observed process groups, ranked by the selected resource." ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                             <ListView.ItemContainerStyle>

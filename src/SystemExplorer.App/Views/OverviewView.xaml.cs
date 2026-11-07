@@ -16,6 +16,8 @@ public sealed partial class OverviewView : UserControl
     private Func<ProcessSnapshot, string?> descriptionLookup = _ => null;
     private bool ready;
     private bool? compactHeight;
+    private bool? narrowWidth;
+    private bool resizeQueued;
 
     public ObservableCollection<OverviewConsumerRow> Rows { get; } = new();
     public ConsumerRanking Ranking { get; private set; } = ConsumerRanking.PrivateCommit;
@@ -30,6 +32,7 @@ public sealed partial class OverviewView : UserControl
         InitializeComponent();
         NetworkCard.TrendHeight = double.NaN;
         ready = true;
+        UpdateRankingDescription();
         Unloaded += (_, _) => { foreach (var row in Rows) row.Dispose(); };
         Loaded += (_, _) => ReconcileConsumers();
         DashboardScroller.SizeChanged += (_, _) => UpdateDensity();
@@ -112,7 +115,17 @@ public sealed partial class OverviewView : UserControl
     {
         if (!ready) return;
         Ranking = RankingSelector.SelectedIndex == 1 ? ConsumerRanking.Cpu : ConsumerRanking.PrivateCommit;
+        UpdateRankingDescription();
         RankingChanged?.Invoke();
+    }
+
+    private void UpdateRankingDescription()
+    {
+        var note = OverviewData.RankingDescription(Ranking);
+        ConsumerCaption.Text = $"Applications and observed process groups. {note}";
+        AutomationProperties.SetHelpText(ConsumersList, $"Ranked by the selected resource. {note}");
+        ToolTipService.SetToolTip(ConsumerCommitHeader, note);
+        ToolTipService.SetToolTip(ConsumerCpuHeader, note);
     }
 
     private void ExpandClicked(object sender, RoutedEventArgs args)
@@ -172,6 +185,17 @@ public sealed partial class OverviewView : UserControl
 
     private void ResizeConsumerList()
     {
+        if (!ready || resizeQueued) return;
+        resizeQueued = true;
+        if (!DispatcherQueue.TryEnqueue(() =>
+        {
+            resizeQueued = false;
+            ApplyConsumerListSize();
+        })) resizeQueued = false;
+    }
+
+    private void ApplyConsumerListSize()
+    {
         if (!ready || DashboardScroller.ActualHeight <= 0) return;
         var statusHeight = ReadingStatus.Visibility == Visibility.Visible
             ? ReadingStatus.ActualHeight + ReadingStatus.Margin.Top + ReadingStatus.Margin.Bottom : 0;
@@ -181,7 +205,9 @@ public sealed partial class OverviewView : UserControl
             ConsumersLayout.RowSpacing * (ConsumersLayout.RowDefinitions.Count - 1);
         var panelHeight = DashboardScroller.ActualHeight - statusHeight -
             ResourcesGrid.ActualHeight - ResourcesGrid.Margin.Top - ResourcesGrid.Margin.Bottom;
-        InsightsPanel.Height = Dashboard.ActualWidth >= 820 ? Math.Max(180, Math.Floor(panelHeight)) : double.NaN;
+        var insightsHeight = Dashboard.ActualWidth >= 820 ? Math.Max(180, Math.Floor(panelHeight)) : double.NaN;
+        if (double.IsNaN(InsightsPanel.Height) != double.IsNaN(insightsHeight) ||
+            Math.Abs(InsightsPanel.Height - insightsHeight) > 1) InsightsPanel.Height = insightsHeight;
         var height = Math.Max(80, Math.Floor(panelHeight - chromeHeight));
         if (Math.Abs(ConsumersList.MaxHeight - height) > 1) ConsumersList.MaxHeight = height;
     }
@@ -189,6 +215,8 @@ public sealed partial class OverviewView : UserControl
     private void DashboardSizeChanged(object sender, SizeChangedEventArgs args)
     {
         var compact = args.NewSize.Width < 820;
+        if (narrowWidth == compact) return;
+        narrowWidth = compact;
         ResourcesGrid.RowSpacing = compact ? 12 : 0;
         PanelsGrid.RowSpacing = compact ? 16 : 0;
         Grid.SetColumn(MemoryCard, compact ? 2 : 1);

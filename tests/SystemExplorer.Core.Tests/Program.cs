@@ -681,6 +681,80 @@ var tests = new (string Name, Action Run)[]
         Check(seen.Count == 4);
         Check(!ModuleMappingComparer.Instance.Equals(module, null));
         Check(ModuleMappingComparer.Instance.Equals(null, null));
+    }),
+    // Overview hardening (Area B)
+    ("Stable ranking obeys greedy bounds and plain sort without history", () =>
+    {
+        var random = new Random(90421);
+        for (var iteration = 0; iteration < 500; iteration++)
+        {
+            var items = Enumerable.Range(0, random.Next(1, 90))
+                .Select(id => (Id: id, Value: random.Next(6) == 0 ? (double?)null : random.NextDouble() * 20)).ToArray();
+            var previous = items.OrderBy(_ => random.Next()).Take(random.Next(items.Length + 1))
+                .Select((item, rank) => (item.Id, Rank: rank)).ToDictionary(item => item.Id, item => item.Rank);
+            var tie = Comparer<(int Id, double? Value)>.Create((a, b) => a.Id.CompareTo(b.Id));
+            double Tolerance(double value) => Math.Max(0.5, value * 0.1);
+            var ordered = StableRanking.Take(items, item => item.Id, item => item.Value, previous, Tolerance, tie, items.Length);
+            Check(ordered.Select(item => item.Id).Distinct().Count() == items.Length);
+            for (var p = 0; p < ordered.Count; p++)
+            {
+                var maximum = ordered.Skip(p).Max(item => item.Value);
+                Check(maximum is null || ordered[p].Value >= maximum - Tolerance(maximum.Value));
+            }
+            var prefix = StableRanking.Take(items, item => item.Id, item => item.Value, previous, Tolerance, tie, 12);
+            Check(prefix.SequenceEqual(ordered.Take(12)));
+            var plain = StableRanking.Take(items, item => item.Id, item => item.Value, new Dictionary<int, int>(), Tolerance, tie, items.Length);
+            Check(plain.SequenceEqual(items.OrderByDescending(item => item.Value).ThenBy(item => item.Id)));
+        }
+    }),
+    ("Stable ranking holds near equals, moves large changes, and places newcomers and nulls", () =>
+    {
+        var previous = new Dictionary<int, int> { [1] = 0, [2] = 1, [3] = 2 };
+        var tie = Comparer<(int Id, double? Value)>.Create((a, b) => a.Id.CompareTo(b.Id));
+        int[] Order(params (int Id, double? Value)[] items) => StableRanking.Take(items, item => item.Id,
+            item => item.Value, previous, _ => 0.5, tie, 50).Select(item => item.Id).ToArray();
+        Check(Order((1, 10), (2, 10.1)).SequenceEqual(new[] { 1, 2 }));
+        Check(Order((1, 10), (2, 15)).SequenceEqual(new[] { 2, 1 }));
+        Check(Order((1, 10), (2, null), (3, null), (4, 20), (5, 15), (6, null))
+            .SequenceEqual(new[] { 4, 5, 1, 2, 3, 6 }));
+        Check(Order((1, 10), (4, 10.2)).SequenceEqual(new[] { 1, 4 }));
+        Check(Order().Length == 0);
+        Check(StableRanking.Take(new[] { (Id: 1, Value: (double?)1) }, item => item.Id, item => item.Value,
+            previous, _ => 0.5, tie, 0).Count == 0);
+        var rejected = false;
+        try { Order((1, double.NaN)); } catch (ArgumentException) { rejected = true; }
+        Check(rejected);
+        rejected = false;
+        try { StableRanking.Take(new[] { (Id: 1, Value: (double?)1) }, item => item.Id, item => item.Value,
+            previous, _ => -1, tie, 1); } catch (ArgumentException) { rejected = true; }
+        Check(rejected);
+    }),
+    ("Overview CPU hysteresis holds small swaps, allows large swaps, and resets on mode change", () =>
+    {
+        var data = new OverviewData();
+        var a = P(10, 100) with { CpuPercent = 10.1, PrivateBytes = 200UL * 1024 * 1024 };
+        var b = P(20, 200) with { CpuPercent = 10, PrivateBytes = 201UL * 1024 * 1024 };
+        int[] Order(ConsumerRanking ranking) => data.Create(null, new(), ranking)!.Consumers.Select(group => group.Key.Pid).ToArray();
+        data.Observe(Snapshot(0, a, b));
+        Check(Order(ConsumerRanking.Cpu).SequenceEqual(new[] { 10, 20 }));
+        data.Observe(Snapshot(1, a with { CpuPercent = 10 }, b with { CpuPercent = 10.1 }));
+        Check(Order(ConsumerRanking.Cpu).SequenceEqual(new[] { 10, 20 }));
+        Check(Order(ConsumerRanking.PrivateCommit).SequenceEqual(new[] { 20, 10 }));
+        Check(Order(ConsumerRanking.Cpu).SequenceEqual(new[] { 20, 10 }));
+        data.Observe(Snapshot(2, a with { CpuPercent = 15.1 }, b));
+        Check(Order(ConsumerRanking.Cpu).SequenceEqual(new[] { 10, 20 }));
+    }),
+    ("Overview private commit holds near equals and reorders beyond tolerance", () =>
+    {
+        var data = new OverviewData();
+        var a = P(10, 100) with { PrivateBytes = 212UL * 1024 * 1024 };
+        var b = P(20, 200) with { PrivateBytes = 211UL * 1024 * 1024 };
+        data.Observe(Snapshot(0, a, b));
+        Check(data.Create(null, new())!.Consumers[0].Key.Pid == 10);
+        data.Observe(Snapshot(1, a with { PrivateBytes = b.PrivateBytes }, b with { PrivateBytes = a.PrivateBytes }));
+        Check(data.Create(null, new())!.Consumers[0].Key.Pid == 10);
+        data.Observe(Snapshot(2, a, b with { PrivateBytes = 230UL * 1024 * 1024 }));
+        Check(data.Create(null, new())!.Consumers[0].Key.Pid == 20);
     })
 };
 var failures = 0;
