@@ -290,7 +290,7 @@ public sealed partial class TraceView : UserControl
         if (result is not { } captured || sender is not Button { Tag: string format } || querying || filterFailed || exporting) return;
         try
         {
-            string? path = TraceSaveDialog.Choose(owner, format);
+            string? path = NativeFileDialogs.ChooseSave(owner, format, "Export filtered activity trace", $"SystemExplorer-trace-{DateTime.Now:yyyyMMdd-HHmmss}");
             if (path is null) return;
             exporting = true; UpdateControls(); var filter = appliedFilter;
             Notice.Text = "Exporting the current filtered view…";

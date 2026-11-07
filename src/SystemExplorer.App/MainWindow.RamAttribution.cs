@@ -5,7 +5,6 @@ using Microsoft.UI.Xaml.Controls;
 using SystemExplorer.App.Views;
 using SystemExplorer.Core;
 using SystemExplorer.Windows;
-using Windows.Storage.Pickers;
 
 namespace SystemExplorer.App;
 
@@ -50,13 +49,11 @@ public sealed partial class MainWindow
 
     private async Task<string?> ExportRamAsync(RamExportDocument document, string format)
     {
-        var picker = new FileSavePicker { SuggestedFileName = "SystemExplorer-RAM-" + document.Tab.Replace(' ', '-') };
-        picker.FileTypeChoices.Add(format == "csv" ? "CSV" : "JSON", new List<string> { "." + format });
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-        var file = await picker.PickSaveFileAsync();
-        if (file is null) return null;
+        var path = NativeFileDialogs.ChooseSave(WinRT.Interop.WindowNative.GetWindowHandle(this), format,
+            "Export RAM investigation", "SystemExplorer-RAM-" + document.Tab.Replace(' ', '-'));
+        if (path is null) return null;
         var text = format == "csv" ? RamAttributionPresentation.Csv(document) : RamAttributionPresentation.Json(document);
-        await File.WriteAllTextAsync(file.Path, text, shutdown.Token);
-        return file.Path;
+        await File.WriteAllTextAsync(path, text, shutdown.Token);
+        return path;
     }
 }

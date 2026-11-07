@@ -7,7 +7,6 @@ using Microsoft.UI.Xaml.Media;
 using SystemExplorer.Core;
 using SystemExplorer.Windows;
 using Windows.ApplicationModel.DataTransfer;
-using Windows.Storage.Pickers;
 using VirtualKey = Windows.System.VirtualKey;
 using Windows.UI.ViewManagement;
 
@@ -105,15 +104,13 @@ public sealed partial class StorageView : UserControl, IDisposable
     {
         if (RootPicker.SelectedItem is StorageRootChoice v) { root = v.Root; RootCaption.Text = root; }
     }
-    private async void ChooseFolderClicked(object sender, RoutedEventArgs e)
+    private void ChooseFolderClicked(object sender, RoutedEventArgs e)
     {
         try
         {
-            var picker = new FolderPicker(); picker.FileTypeFilter.Add("*");
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, OwnerHandle);
-            var chosen = await picker.PickSingleFolderAsync();
+            var chosen = NativeFileDialogs.ChooseFolder(OwnerHandle, "Select a folder to analyze");
             if (chosen is null || disposed) return;
-            root = chosen.Path; SelectRoot(); RootCaption.Text = root;
+            root = chosen; SelectRoot(); RootCaption.Text = root;
         }
         catch (Exception ex) { Notify("Folder picker unavailable: " + ex.Message); }
     }
@@ -295,15 +292,12 @@ public sealed partial class StorageView : UserControl, IDisposable
         if (result is not { } scan || sender is not FrameworkElement { Tag: string format }) return;
         try
         {
-            var picker = new FileSavePicker { SuggestedFileName = "SystemExplorer-storage" };
-            picker.FileTypeChoices.Add(format.ToUpperInvariant(), ["." + format]);
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, OwnerHandle);
-            var file = await picker.PickSaveFileAsync();
-            if (file == null || disposed) return;
+            var path = NativeFileDialogs.ChooseSave(OwnerHandle, format, "Export storage analysis", "SystemExplorer-storage");
+            if (path == null || disposed) return;
             var bloat = report;
             var text = await Task.Run(() => format == "csv" ? StorageExport.ToCsv(scan, bloat) : StorageExport.ToJson(scan, bloat));
-            await System.IO.File.WriteAllTextAsync(file.Path, text);
-            Notify("Export saved to " + file.Path);
+            await System.IO.File.WriteAllTextAsync(path, text);
+            Notify("Export saved to " + path);
         }
         catch (Exception ex) { if (!disposed) Notify("Export unavailable: " + ex.Message); }
     }

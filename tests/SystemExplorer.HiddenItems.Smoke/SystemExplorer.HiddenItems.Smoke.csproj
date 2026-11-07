@@ -4,6 +4,7 @@
     <TargetFramework>net10.0-windows</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/SystemExplorer.App/NativeFileDialogs.cs" Link="NativeFileDialogs.cs" />
     <ProjectReference Include="../../src/SystemExplorer.Windows/SystemExplorer.Windows.csproj" />
     <ProjectReference Include="../../src/SystemExplorer.Relationships/SystemExplorer.Relationships.csproj" />
   </ItemGroup>

@@ -4,7 +4,6 @@ using SystemExplorer.App.Views;
 using SystemExplorer.Core;
 using SystemExplorer.Relationships;
 using SystemExplorer.Windows;
-using Windows.Storage.Pickers;
 
 namespace SystemExplorer.App;
 
@@ -54,7 +53,7 @@ public sealed partial class MainWindow
             else notice = "Folder selection cancelled — previous result retained.";
         }
         catch (OperationCanceledException) { notice = "Cancelled — previous result retained."; }
-        catch (Exception ex) { notice = $"Scan unavailable — {ex.GetType().Name} (HRESULT 0x{ex.HResult:X8}). Previous result retained; no absence or compromise claim is made."; }
+        catch (Exception ex) { notice = $"Scan unavailable — {ex.GetType().Name} (HRESULT 0x{ex.HResult:X8}): {ex.Message} Source: {ex.Source ?? "unknown"}. Previous result retained; no absence or compromise claim is made."; }
         finally
         {
             hiddenCancellation = null;
@@ -152,14 +151,11 @@ public sealed partial class MainWindow
 
     private async Task<HiddenScanResult?> ScanHiddenAds(CancellationToken token)
     {
-        var picker = new FolderPicker();
-        picker.FileTypeFilter.Add("*");
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-        var folder = await picker.PickSingleFolderAsync();
+        string? folder = NativeFileDialogs.ChooseFolder(WinRT.Interop.WindowNative.GetWindowHandle(this), "Select a folder to scan for alternate data streams");
         token.ThrowIfCancellationRequested();
         if (folder is null) return null;
         var watch = Stopwatch.StartNew();
-        var snapshot = await hiddenAds.ScanAsync(new(folder.Path), token);
+        var snapshot = await hiddenAds.ScanAsync(new(folder), token);
         var leads = snapshot.Streams.Items.Select(stream => new SuspiciousLead(LeadCategory.AlternateDataStream, stream.Severity,
             Path.GetFileName(stream.Path) + stream.StreamName.Replace(":$DATA", "", StringComparison.OrdinalIgnoreCase), $"{MetricFormatting.Bytes(stream.SizeBytes >= 0 ? (ulong)stream.SizeBytes : null)} · contents not read",
             $"{stream.Path} · {stream.StreamName} · {stream.SizeBytes} bytes", stream.IsDownloadMarker ? "Zone.Identifier is a normally benign download-origin marker."

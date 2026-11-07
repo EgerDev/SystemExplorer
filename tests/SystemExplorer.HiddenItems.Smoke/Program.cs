@@ -11,6 +11,20 @@ static void Require(bool condition, string detail)
 }
 
 HiddenExportTests.Run();
+NativeDialogTests.Run();
+if (args.Length > 1 && args[0] == "--ads-folder")
+{
+    foreach (var folder in args.Skip(1))
+    {
+        var observation = await new WindowsAdsScanProvider().ScanAsync(new(folder), CancellationToken.None);
+        Console.WriteLine($"ADS direct: {folder}; {observation.Status}; objects={observation.FilesVisited}; streams={observation.Streams.Items.Count}; {observation.Detail}");
+        foreach (var stream in observation.Streams.Items)
+            Console.WriteLine($"Stream: {stream.StreamName}; bytes={stream.SizeBytes}; downloadMarker={stream.IsDownloadMarker}");
+        Require(observation.Status == InspectionStatus.Available && observation.Streams.Items.Any(s => s.IsDownloadMarker), "Fixture must yield an available Zone.Identifier observation.");
+    }
+    Console.WriteLine("PASS direct ADS fixture scans (no picker; metadata only)");
+    return;
+}
 using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 var token = timeout.Token;
 var provider = new WindowsHiddenProcessProvider();
