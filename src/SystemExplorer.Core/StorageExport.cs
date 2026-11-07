@@ -19,12 +19,16 @@ public static class StorageExport
         void Record(string kind, params (string Column, object? Value)[] cells)
         {
             var values = cells.ToDictionary(c => c.Column, c => c.Value);
-            values["RecordType"] = kind; values["Root"] = scan.Root; values["Method"] = scan.Method; values["State"] = scan.State;
-            values["Completeness"] = scan.IsPartial ? "Partial" : "Complete"; values["StartedAt"] = scan.StartedAt.ToString("O"); values["Elapsed"] = scan.Elapsed;
-            values["DeniedTotal"] = scan.DeniedTotal;
+            values["RecordType"] = kind;
+            if (kind == "Capture")
+            {
+                values["Root"] = scan.Root; values["Method"] = scan.Method; values["State"] = scan.State;
+                values["Completeness"] = scan.IsPartial ? "Partial" : "Complete"; values["StartedAt"] = scan.StartedAt.ToString("O"); values["Elapsed"] = scan.Elapsed;
+                values["DeniedTotal"] = scan.DeniedTotal;
+            }
             Row(columns.Select(c => values.GetValueOrDefault(c)).ToArray());
         }
-        Record("Metadata");
+        Record("Capture");
         foreach (var x in bloat?.Items ?? []) Record("Bloat items", ("Category", x.Category), ("Tool", x.Tool), ("Path", x.Path), ("AllocatedBytes", x.AllocatedBytes), ("ReclaimableBytes (blank=unknown)", x.ReclaimableBytes), ("LatestWrite", x.LatestWrite?.ToString("O")), ("Confidence", x.Confidence), ("Reason", x.Reason), ("CleanupCommand (not executed)", x.CleanupCommand), ("Warning", x.CleanupWarning), ("Kind", x.Kind), ("IsLead", x.IsLead));
         foreach (var x in bloat?.Projects ?? []) Record("Projects", ("Path", x.Path), ("Kinds", x.Kinds), ("AllocatedBytes", x.AllocatedBytes), ("RegenerableBytes", x.RegenerableBytes), ("LastActivity", x.LastActivity?.ToString("O")), ("IsStale", x.IsStale), ("HasAIMarkers", x.HasAIMarkers));
         foreach (var x in scan.LargestFiles) Record("Largest files", ("Path", x.Path), ("LogicalBytes", x.LogicalBytes), ("AllocatedBytes", x.AllocatedBytes), ("LastWriteUtc", x.LastWriteUtc.ToString("O")));

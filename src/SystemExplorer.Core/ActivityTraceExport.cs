@@ -19,17 +19,14 @@ public static class TraceExport
         void Row(params string?[] cells) => writer.Write(string.Join(",", cells.Select(Cell)) + "\r\n");
         Row("RecordType", "TraceStatus", "EventsLost", "BufferDropped", "Malformed", "UnresolvedNames", "CapsHit", "FilterProcessIndex", "FilterIncludeDescendants", "FilterCategories", "FilterText", "FilterFromUtc", "FilterToUtc", "Limitations",
             "Sequence", "TimeUtc", "RelativeMs", "Category", "Operation", "PID", "TID", "Process", "ParentPID", "Path", "Bytes", "Detail");
-        void Record(string kind, params string?[] cells) => Row(new string?[] { kind, result.Status.ToString(), Number(result.EventsLost), Number(result.BufferDropped), Number(result.Malformed), Number(result.UnresolvedNames), result.CapsHit.ToString(),
-            filter.ProcessIndex?.ToString(CultureInfo.InvariantCulture), filter.IncludeDescendants.ToString(), filter.Categories.ToString(), filter.Text, filter.FromUtc?.ToString("O"), filter.ToUtc?.ToString("O"), Limitations }.Concat(cells).ToArray());
-        bool any = false;
+        Row(new string?[] { "Capture", result.Status.ToString(), Number(result.EventsLost), Number(result.BufferDropped), Number(result.Malformed), Number(result.UnresolvedNames), result.CapsHit.ToString(),
+            filter.ProcessIndex?.ToString(CultureInfo.InvariantCulture), filter.IncludeDescendants.ToString(), filter.Categories.ToString(), filter.Text, filter.FromUtc?.ToString("O"), filter.ToUtc?.ToString("O"), Limitations }.Concat(new string?[12]).ToArray());
         foreach (int position in filter.Match(result.Events, result.Processes))
         {
-            any = true;
             var e = result.Events[position]; var p = Process(result, e);
-            Record("Event", Number(e.Sequence), new DateTimeOffset(e.TimestampUtc, TimeSpan.Zero).ToString("O"), Number((e.TimestampUtc - result.StartedUtc.UtcTicks) / (double)TimeSpan.TicksPerMillisecond),
-                TraceEvent.Category(e.Operation).ToString(), e.Operation.ToString(), Number(e.Pid), Number(e.Tid), p?.ImageName, p is null ? "" : Number(p.ParentPid), e.Path, Number(e.Bytes), e.Detail);
+            Row(new string?[] { "Event" }.Concat(new string?[13]).Concat(new[] { Number(e.Sequence), new DateTimeOffset(e.TimestampUtc, TimeSpan.Zero).ToString("O"), Number((e.TimestampUtc - result.StartedUtc.UtcTicks) / (double)TimeSpan.TicksPerMillisecond),
+                TraceEvent.Category(e.Operation).ToString(), e.Operation.ToString(), Number(e.Pid), Number(e.Tid), p?.ImageName, p is null ? "" : Number(p.ParentPid), e.Path, Number(e.Bytes), e.Detail }).ToArray());
         }
-        if (!any) Record("Metadata", new string?[12]);
     }
     private static TraceProcess? Process(TraceResult result, TraceEvent e) => e.ProcessIndex >= 0 && e.ProcessIndex < result.Processes.Count ? result.Processes[e.ProcessIndex] : null;
     public static void WriteJson(Stream stream, TraceResult result, TraceFilter? filter = null)

@@ -83,10 +83,11 @@ internal static class CsvExportTests
             var rows = Parse(StorageExport.ToCsv(state, state == storage ? bloat : null));
             Header(rows[0]);
             var restored = rows.Skip(1).Select(row => RoundTrip(rows[0], row)).ToArray();
-            Require(restored.All(row => row["Root"] == state.Root));
+            Require(restored[0]["RecordType"] == "Capture" && restored[0]["Root"] == state.Root);
+            Require(restored.Skip(1).All(row => rows[0].Skip(1).Take(7).All(column => row[column] == "")));
             if (state == storage)
-                Require(new[] { "Metadata", "Bloat items", "Projects", "Largest files", "Extensions", "Denied paths" }.All(section => restored.Any(row => row["RecordType"] == section)));
-            else Require(restored.Length == 1 && restored[0]["RecordType"] == "Metadata");
+                Require(new[] { "Capture", "Bloat items", "Projects", "Largest files", "Extensions", "Denied paths" }.All(section => restored.Any(row => row["RecordType"] == section)));
+            else Require(restored.Length == 1);
         }
         foreach (bool empty in new[] { false, true })
         {
@@ -97,13 +98,49 @@ internal static class CsvExportTests
             TraceExport.WriteCsv(writer, trace);
             var rows = Parse(writer.ToString());
             Header(rows[0]);
-            foreach (var row in rows.Skip(1))
+            var capture = RoundTrip(rows[0], rows[1]);
+            Require(capture["RecordType"] == "Capture" && capture["TraceStatus"] == "Partial" && capture["EventsLost"] == "1");
+            Require(capture["Limitations"] == TraceExport.Limitations && capture["Path"] == "");
+            Require(rows.Count == (empty ? 2 : 3));
+            foreach (var row in rows.Skip(2))
             {
                 var restored = RoundTrip(rows[0], row);
-                Require(restored["TraceStatus"] == "Partial" && restored["EventsLost"] == "1");
-                Require(restored["RecordType"] == (empty ? "Metadata" : "Event"));
-                Require(restored["Path"] == (empty ? "" : "path,\"quoted\"\r\nline"));
+                Require(rows[0].Skip(1).Take(13).All(column => restored[column] == ""));
+                Require(restored["RecordType"] == "Event" && restored["Path"] == "path,\"quoted\"\r\nline");
             }
         }
+    }
+
+    internal static void MetadataSize()
+    {
+        var at = DateTimeOffset.UnixEpoch;
+        var trace = new TraceRecorderState(new(ExcludeSelf: false), at).Complete(at, eventsLost: 1);
+        string Csv(int count)
+        {
+            using var writer = new StringWriter();
+            TraceExport.WriteCsv(writer, trace with { Events = Enumerable.Repeat(new TraceEvent(1, at.UtcTicks, 1, 2, -1, TraceOperation.FileRead, "path,\"quoted\"\r\nline", 3), count).ToArray() });
+            return writer.ToString();
+        }
+        var sizes = new[] { 0, 10, 20 }.Select(n =>
+        {
+            string csv = Csv(n);
+            Require(csv.Split(TraceExport.Limitations, StringSplitOptions.None).Length == 2);
+            var rows = Parse(csv);
+            Require(rows.Count == n + 2);
+            foreach (var row in rows.Skip(1)) RoundTrip(rows[0], row);
+            return System.Text.Encoding.UTF8.GetByteCount(csv);
+        }).ToArray();
+        Require(sizes[2] - sizes[1] == sizes[1] - sizes[0] && sizes[1] - sizes[0] < 2000);
+        var scan = new StorageScanAggregator("C:/fixture", new(), false).Complete(StorageScanState.Completed, TimeSpan.Zero, "unique capture method", []);
+        var storageSizes = new[] { 0, 10, 20 }.Select(n =>
+        {
+            string csv = StorageExport.ToCsv(scan with { LargestFiles = Enumerable.Repeat(new StorageFile("file", 1, 1, DateTime.UnixEpoch), n).ToArray() });
+            Require(csv.Split("unique capture method", StringSplitOptions.None).Length == 2);
+            var rows = Parse(csv);
+            Require(rows.Count == n + 2);
+            foreach (var row in rows.Skip(1)) RoundTrip(rows[0], row);
+            return System.Text.Encoding.UTF8.GetByteCount(csv);
+        }).ToArray();
+        Require(storageSizes[2] - storageSizes[1] == storageSizes[1] - storageSizes[0]);
     }
 }
