@@ -16,6 +16,7 @@ public sealed partial class MainWindow
     private async void ShowExtraInventory(string kind)
     {
         if (kind == "History") { HistoryClicked(this, new RoutedEventArgs()); return; }
+        if (kind == "RamAttribution") { ShowRamAttribution(); return; }
         if (kind == "Timeline") { ShowLifecycleTimeline(); return; }
         if (kind is "Disk" or "FileUsers" or "Adapters" or "IoAttribution" or "Cores" or "Gpu" or "DllUsers" or "MemoryLists" or "PoolTags" or "Drivers" or "Persistence") { ShowSystemDepth(kind); return; }
         if (kind == "Tasks")

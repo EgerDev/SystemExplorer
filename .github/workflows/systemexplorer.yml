@@ -34,12 +34,16 @@ jobs:
         run: dotnet run --project tests/SystemExplorer.Relationships.Smoke -c Release
       - name: Pagefile inventory checks
         run: dotnet run --project tests/SystemExplorer.Pagefiles.Smoke -c Release
+      - name: Read-only storage inventory and allocation checks
+        run: dotnet run --project tests/SystemExplorer.Storage.Smoke -c Release
       - name: Service configuration and startup checks
         run: dotnet run --project tests/SystemExplorer.ServiceInspection.Smoke -c Release
       - name: Thread timing, wait-chain and lifetime checks
         run: dotnet run --project tests/SystemExplorer.Threads.Smoke -c Release
       - name: Read-only scheduled task checks
         run: dotnet run --project tests/SystemExplorer.ScheduledTasks.Smoke -c Release
+      - name: Read-only hidden items cross-view and ADS checks
+        run: dotnet run --project tests/SystemExplorer.HiddenItems.Smoke -c Release
       - name: Read-only system counter checks
         run: dotnet run --project tests/SystemExplorer.SystemCounters.Smoke -c Release
       - name: Read-only object inventory checks
@@ -50,6 +54,10 @@ jobs:
         run: dotnet run --project tests/SystemExplorer.Persistence.Smoke -c Release
       - name: Opt-in I/O attribution checks
         run: dotnet run --project tests/SystemExplorer.IoAttribution.Smoke -c Release
+      - name: Read-only RAM attribution checks
+        run: dotnet run --project tests/SystemExplorer.RamAttribution.Smoke -c Release
+      - name: Opt-in activity trace checks
+        run: dotnet run --project tests/SystemExplorer.ActivityTrace.Smoke -c Release
       - name: Acceptance preflight predicate tests
         shell: pwsh
         run: ./tools/tests/Windows11-Acceptance-Preflight.Tests.ps1
