@@ -14,18 +14,21 @@ public static class StorageExport
     {
         var output = new StringBuilder();
         void Row(params object?[] cells) => output.AppendLine(string.Join(",", cells.Select(c => Cell(c is IFormattable f ? f.ToString(null, CultureInfo.InvariantCulture) ?? "" : c?.ToString() ?? ""))));
-        Row("Metadata", "Root", "Method", "State", "Completeness", "StartedAt", "Elapsed");
-        Row("Metadata", scan.Root, scan.Method, scan.State, scan.IsPartial ? "Partial" : "Complete", scan.StartedAt.ToString("O"), scan.Elapsed);
-        Row("Bloat items", "Category", "Tool", "Path", "AllocatedBytes", "ReclaimableBytes (blank=unknown)", "LatestWrite", "Confidence", "Reason", "CleanupCommand (not executed)", "Warning", "Kind", "IsLead");
-        foreach (var x in bloat?.Items ?? []) Row("Bloat items", x.Category, x.Tool, x.Path, x.AllocatedBytes, x.ReclaimableBytes, x.LatestWrite?.ToString("O"), x.Confidence, x.Reason, x.CleanupCommand, x.CleanupWarning, x.Kind, x.IsLead);
-        Row("Projects", "Path", "Kinds", "AllocatedBytes", "RegenerableBytes", "LastActivity", "IsStale", "HasAIMarkers");
-        foreach (var x in bloat?.Projects ?? []) Row("Projects", x.Path, x.Kinds, x.AllocatedBytes, x.RegenerableBytes, x.LastActivity?.ToString("O"), x.IsStale, x.HasAIMarkers);
-        Row("Largest files", "Path", "LogicalBytes", "AllocatedBytes", "LastWriteUtc");
-        foreach (var x in scan.LargestFiles) Row("Largest files", x.Path, x.LogicalBytes, x.AllocatedBytes, x.LastWriteUtc.ToString("O"));
-        Row("Extensions", "Extension", "Count", "LogicalBytes", "AllocatedBytes");
-        foreach (var x in scan.Extensions) Row("Extensions", x.Name, x.Count, x.LogicalBytes, x.AllocatedBytes);
-        Row("Denied paths", "Path", "Reason");
-        foreach (var x in scan.DeniedPaths) Row("Denied paths", x.Path, x.Reason);
+        var columns = new[] { "RecordType", "Root", "Method", "State", "Completeness", "StartedAt", "Elapsed", "Category", "Tool", "Path", "AllocatedBytes", "ReclaimableBytes (blank=unknown)", "LatestWrite", "Confidence", "Reason", "CleanupCommand (not executed)", "Warning", "Kind", "IsLead", "Kinds", "RegenerableBytes", "LastActivity", "IsStale", "HasAIMarkers", "LogicalBytes", "LastWriteUtc", "Extension", "Count" };
+        Row(columns.Cast<object?>().ToArray());
+        void Record(string kind, params (string Column, object? Value)[] cells)
+        {
+            var values = cells.ToDictionary(c => c.Column, c => c.Value);
+            values["RecordType"] = kind; values["Root"] = scan.Root; values["Method"] = scan.Method; values["State"] = scan.State;
+            values["Completeness"] = scan.IsPartial ? "Partial" : "Complete"; values["StartedAt"] = scan.StartedAt.ToString("O"); values["Elapsed"] = scan.Elapsed;
+            Row(columns.Select(c => values.GetValueOrDefault(c)).ToArray());
+        }
+        Record("Metadata");
+        foreach (var x in bloat?.Items ?? []) Record("Bloat items", ("Category", x.Category), ("Tool", x.Tool), ("Path", x.Path), ("AllocatedBytes", x.AllocatedBytes), ("ReclaimableBytes (blank=unknown)", x.ReclaimableBytes), ("LatestWrite", x.LatestWrite?.ToString("O")), ("Confidence", x.Confidence), ("Reason", x.Reason), ("CleanupCommand (not executed)", x.CleanupCommand), ("Warning", x.CleanupWarning), ("Kind", x.Kind), ("IsLead", x.IsLead));
+        foreach (var x in bloat?.Projects ?? []) Record("Projects", ("Path", x.Path), ("Kinds", x.Kinds), ("AllocatedBytes", x.AllocatedBytes), ("RegenerableBytes", x.RegenerableBytes), ("LastActivity", x.LastActivity?.ToString("O")), ("IsStale", x.IsStale), ("HasAIMarkers", x.HasAIMarkers));
+        foreach (var x in scan.LargestFiles) Record("Largest files", ("Path", x.Path), ("LogicalBytes", x.LogicalBytes), ("AllocatedBytes", x.AllocatedBytes), ("LastWriteUtc", x.LastWriteUtc.ToString("O")));
+        foreach (var x in scan.Extensions) Record("Extensions", ("Extension", x.Name), ("Count", x.Count), ("LogicalBytes", x.LogicalBytes), ("AllocatedBytes", x.AllocatedBytes));
+        foreach (var x in scan.DeniedPaths) Record("Denied paths", ("Path", x.Path), ("Reason", x.Reason));
         return output.ToString();
     }
     private static string Cell(string value)

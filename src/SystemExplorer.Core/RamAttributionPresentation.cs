@@ -59,7 +59,15 @@ public static class RamAttributionPresentation
     {
         static string Escape(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";
         var columns = document.Rows.SelectMany(r => r.Values.Keys).Distinct(StringComparer.Ordinal).ToArray();
-        var lines = new List<string> { string.Join(",", new[] { "CapturedAt", "Tab", "Section", "Status", "Detail" }.Concat(columns).Select(Escape)) };
+        var metadata = new[] { "CapturedAt", "Tab", "Section", "RowStatus", "RowDetail" };
+        var names = new HashSet<string>(metadata, StringComparer.OrdinalIgnoreCase);
+        var headers = columns.Select(column =>
+        {
+            string name = column;
+            for (int suffix = 2; !names.Add(name); suffix++) name = column + " (" + suffix.ToString(CultureInfo.InvariantCulture) + ")";
+            return name;
+        }).ToArray();
+        var lines = new List<string> { string.Join(",", metadata.Concat(headers).Select(Escape)) };
         foreach (var row in document.Rows)
             lines.Add(string.Join(",", new[] { document.CapturedAt.ToString("O", CultureInfo.InvariantCulture), document.Tab, row.Section, row.Status, row.Detail }
                 .Concat(columns.Select(c => row.Values.GetValueOrDefault(c, ""))).Select(Escape)));
