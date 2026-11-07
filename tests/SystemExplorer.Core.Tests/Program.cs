@@ -1271,3 +1271,132 @@ static class AreaCDiagnosticsTests
         Require(ProcessHistoryStatus.Build(history with { Points = [missing, observed with { At = at.AddSeconds(2) }] }) == baseline);
     }
 }
+
+static class RamAttributionTests
+{
+    [System.Runtime.CompilerServices.ModuleInitializer]
+    internal static void Run()
+    {
+        var tests = new (string Name, Action Run)[]
+        {
+            ("RAM working-set attributes and proportional bound", WorkingSet),
+            ("RAM reconciliation exact, overlap, missing and compression", Reconcile),
+            ("RAM pool tag string leads, protected bit and cap", Tags),
+            ("RAM PFN and memory-list x64 decoding", Physical)
+        };
+        foreach (var (name, run) in tests)
+        {
+            try { run(); Console.WriteLine($"PASS {name}"); }
+            catch (Exception ex) { throw new InvalidOperationException($"FAIL {name}: {ex.Message}", ex); }
+        }
+        Console.WriteLine($"{tests.Length}/{tests.Length} RAM attribution passed");
+    }
+
+    private static void Require(bool value) { if (!value) throw new InvalidOperationException("Assertion failed"); }
+    private static void Throws<T>(Action action) where T : Exception
+    { try { action(); } catch (T) { return; } throw new InvalidOperationException("Expected " + typeof(T).Name); }
+
+    private static void WorkingSet()
+    {
+        var result = RamAttribution.AggregateWorkingSet(new(1, 2), "test", [0x12345000, 256, 256 | 32, 256 | 64, 256 | 224], 4096, true);
+        Require(result.PagesScanned == 5 && result.PrivateResidentBytes == 4096 && result.ShareableResidentBytes == 16384);
+        Require(result.ActuallySharedBytes == 8192 && result.ShareableSoleBytes == 8192);
+        Require(Math.Abs(result.ProportionalEstimateBytes - (4096 * 3 + 2048 + 4096d / 7)) < .001);
+        Require(result.Truncated && result.Status == RamReadingStatus.Truncated && result.Detail.Contains("lower bounds") && result.Detail.Contains("saturates"));
+        var empty = RamAttribution.AggregateWorkingSet(default, "empty", [], 4096);
+        Require(empty.PagesScanned == 0 && empty.PrivateResidentBytes == 0 && empty.ProportionalEstimateBytes == 0);
+        Throws<ArgumentOutOfRangeException>(() => RamAttribution.AggregateWorkingSet(default, "", [], 0));
+        Throws<OperationCanceledException>(() => RamAttribution.AggregateWorkingSet(default, "", [0], 4096, false, new CancellationToken(true)));
+    }
+
+    private static void Reconcile()
+    {
+        ProcessSnapshot P(string name, ulong bytes) => new() { Identity = new(1, 2), Name = name, PrivateWorkingSetBytes = bytes, WorkingSetBytes = bytes };
+        var input = new RamMachineInputs(120, 100, 10, [5, 5, 0, 0, 0, 0, 0, 0], 10, 5, 5, 5, 5, 5, [P("app", 20), P("Memory Compression", 10)]);
+        var result = RamAttribution.Reconcile(input);
+        Require(result.HardwareReservedBytes == 20 && result.Categories.Sum(r => r.Bytes) == 100);
+        Require(result.Categories[0].Bytes == 20 && result.Categories[1].Bytes == 10 && result.Categories.Last().Bytes == 15);
+        var overlap = RamAttribution.Reconcile(input with { UsableBytes = 50 });
+        Require(overlap.Categories.Last().Bytes == -35 && overlap.Categories.Last().Name.StartsWith("Overlap"));
+        var missing = RamAttribution.Reconcile(input with { NonPagedPoolBytes = null });
+        Require(missing.Categories.Last().Bytes is null && missing.Categories.Last().Status == RamReadingStatus.Unavailable);
+        var empty = RamAttribution.Reconcile(input with { Processes = [] });
+        Require(empty.Categories[0].Bytes == 0 && empty.Categories[1].Bytes == 0 && empty.Categories[1].Detail.Contains("Off") && empty.Categories.Last().Bytes == 45);
+        Require(RamAttribution.Reconcile(input with { InstalledBytes = null }).Categories.Sum(c => c.Bytes) == 100);
+    }
+
+    private static void Tags()
+    {
+        const uint tag = 0x64636261;
+        Require(PoolTagDriverMatcher.Match([0, 97, 98, 99, 100, 0], new HashSet<uint> { tag }).Contains(tag));
+        Require(PoolTagDriverMatcher.Match([97, 98, 99, 228], new HashSet<uint> { tag }).Contains(tag));
+        Require(PoolTagDriverMatcher.Match([97, 98, 99, 100], new HashSet<uint> { tag | 0x80000000 }).Contains(tag | 0x80000000));
+        Require(PoolTagDriverMatcher.Match([], new HashSet<uint> { tag }).Count == 0);
+        Require(PoolTagDriverMatcher.Lead(tag, []).Detail.Contains("Unknown"));
+        var capped = PoolTagDriverMatcher.Lead(tag, Enumerable.Range(0, 12).Select(i => $"{i}.sys"));
+        Require(capped.TotalMatches == 12 && capped.CandidateFiles.Count == 8 && capped.Detail.Contains("not proof"));
+        Throws<ArgumentOutOfRangeException>(() => PoolTagDriverMatcher.Lead(tag, [], -1));
+    }
+
+    private static void Physical()
+    {
+        var bytes = new byte[24];
+        void Write(int offset, ulong value) => System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(offset), value);
+        Write(0, 8 | (2UL << 4) | 128 | 256 | (5UL << 57) | (1UL << 60)); Write(8, 123); Write(16, 456);
+        var p = PhysicalMemoryParser.ParseIdentity(bytes);
+        Require(p.Use == PhysicalPageUse.Metafile && p.List == PhysicalPageList.Standby && p.Priority == 5 && p.Cold && p.Pinned && p.NonTradeable && p.PageFrameIndex == 123 && p.FileObject == 456);
+        var accumulator = new PhysicalMemoryAccumulator(); accumulator.Add(bytes);
+        var result = accumulator.Build(RamReadingStatus.Available, "test", null);
+        Require(result.PagesScanned == 1 && result.Counts.Single().Pages == 1 && result.FileObjects.Single().PagesByList[2] == 1 && result.Detail.Contains("unavailable"));
+        for (var i = 0; i < 260; i++) { Write(16, (ulong)i); accumulator.Add(bytes); }
+        result = accumulator.Build(RamReadingStatus.Truncated, "", null);
+        Require(result.FileObjects.Count == 257 && result.FileObjects.Sum(r => (long)r.PagesByList.Sum(v => (decimal)v)) == 261);
+        var lists = new byte[176];
+        for (var i = 0; i < 22; i++) System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(lists.AsSpan(i * 8), (ulong)i);
+        var parsed = PhysicalMemoryParser.ParseMemoryLists(lists);
+        Require(parsed.Zero == 0 && parsed.Free == 1 && parsed.Modified == 2 && parsed.ModifiedNoWrite == 3 && parsed.Bad == 4 && parsed.StandbyByPriority[0] == 5 && parsed.StandbyByPriority[7] == 12 && parsed.RepurposedByPriority[7] == 20 && parsed.ModifiedPageFile == 21);
+        Require(PhysicalMemoryParser.NotAdministrator().Status == RamReadingStatus.RequiresAdministrator && PhysicalMemoryParser.NotAdministrator().PagesScanned == 0);
+        Require(new PhysicalMemoryAccumulator().Build(RamReadingStatus.Available, "", null).Counts.Count == 0);
+        Throws<ArgumentException>(() => PhysicalMemoryParser.ParseIdentity(new byte[23]));
+        Throws<ArgumentException>(() => PhysicalMemoryParser.ParseMemoryLists(new byte[175]));
+        Throws<ArgumentException>(() => accumulator.Add(new byte[25]));
+        foreach (var list in new[] { PhysicalPageList.Zero, PhysicalPageList.Free, PhysicalPageList.Bad })
+        {
+            var unused = new PhysicalMemoryAccumulator(); Write(0, 8 | ((ulong)list << 4)); unused.Add(bytes);
+            var row = unused.Build(RamReadingStatus.Available, "", null);
+            Require(row.Counts.Single().Use == PhysicalPageUse.Unused && row.Counts.Single().List == list && row.FileObjects.Count == 0);
+        }
+    }
+}
+
+static class RamPresentationTests
+{
+    [System.Runtime.CompilerServices.ModuleInitializer]
+    internal static void Run()
+    {
+        static void Require(bool value) { if (!value) throw new InvalidOperationException("RAM presentation assertion failed"); }
+        Require(RamAttributionPresentation.PoolTag(0x6c66744e) == "Ntfl" && RamAttributionPresentation.PoolTag(0x7f002041) == "A \\x00\\x7F");
+        Require(RamAttributionPresentation.UseName(PhysicalPageUse.Unknown12) == "Use 12 (undocumented)");
+        Require(RamAttributionPresentation.StatusName(RamReadingStatus.IdentityMismatch) == "Exited / PID reused");
+        Require(RamAttributionPresentation.StatusName(RamReadingStatus.RequiresAdministrator) == "Requires administrator");
+        Require(RamAttributionPresentation.StatusName(RamReadingStatus.TimedOut) == "Timed out");
+        Require(RamAttributionPresentation.StatusName(RamReadingStatus.Available) == "Available");
+        var paletteNames = new[] { "Process private working sets (excluding compression)", "Compression store", "System cache resident", "Paged pool resident", "Nonpaged pool", "Driver images resident", "Kernel code resident", "Modified (including no-write)", "Free / zero", "Other in-use" }
+            .Concat(Enumerable.Range(0, 8).Select(i => $"Standby priority {i}"));
+        Require(paletteNames.Select(RamAttributionPresentation.CategoryColor).Distinct().Count() == 18);
+        Require(RamAttributionPresentation.CategoryColor("") == RamAttributionPresentation.CategoryColor("Other in-use"));
+        var category = new RamCategory("a", 25, "source", RamReadingStatus.Available, "", RamCategoryKind.Measured);
+        var breakdown = new RamBreakdown(null, 100, null, [category, category with { Name = "b", Bytes = 75 }]);
+        Require(RamAttributionPresentation.BarSegments(breakdown).Select(s => s.Fraction).SequenceEqual(new[] { .25, .75 }));
+        Require(RamAttributionPresentation.BarSegments(breakdown with { Categories = [category with { Bytes = -1 }] }).Count == 0);
+        Require(RamAttributionPresentation.BarSegments(breakdown with { Categories = [category with { Bytes = null }] }).Count == 0);
+        Require(RamAttributionPresentation.BarSegments(breakdown with { UsableBytes = 0, Categories = [] }).Count == 0);
+        var document = new RamExportDocument(DateTimeOffset.UnixEpoch, "Overview", [new("machine", "Available", "a,\"b\"\r\nc", new Dictionary<string, string> { ["Size"] = "25" })]);
+        var csv = RamAttributionPresentation.Csv(document);
+        Require(csv.Contains("\"a,\"\"b\"\"\r\nc\"") && csv.Contains("1970-01-01") && csv.Contains("\"Size\""));
+        using var json = System.Text.Json.JsonDocument.Parse(RamAttributionPresentation.Json(document));
+        Require(json.RootElement.GetProperty("Tab").GetString() == "Overview" && json.RootElement.GetProperty("Rows")[0].GetProperty("Values").GetProperty("Size").GetString() == "25");
+        Require(RamAttributionPresentation.Csv(document with { Rows = [] }).Split("\r\n").Length == 2);
+        Console.WriteLine("PASS RAM presentation: unused/unknown labels, pool text, bar proportions, CSV escaping and JSON shape");
+    }
+}
