@@ -3,7 +3,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     SizeChanged="ViewSizeChanged">
     <Grid RowSpacing="6">
-        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition x:Name="ResultsRow" Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <Grid x:Name="Actions" ColumnSpacing="6" RowSpacing="6">
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -43,7 +43,7 @@
                 </Expander>
                 <Border Style="{StaticResource Card}" Padding="10,4">
                     <StackPanel Spacing="4">
-                        <TextBlock x:Name="CaptureStatus" Text="NotStarted · ready for an opt-in recording" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="CaptureStatus" Text="Not started · ready for an opt-in recording" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"/>
                         <TextBlock x:Name="Counters" Text="Elapsed 0:00 · Events 0 · Processes started 0 · Lost 0 · Dropped 0" FontSize="12" TextWrapping="Wrap" Style="{StaticResource Muted}"/>
                     </StackPanel>
                 </Border>
@@ -87,16 +87,16 @@
                     </Grid>
                     <ListView x:Name="Timeline" Grid.Row="2" SelectionChanged="EventSelected" ScrollViewer.HorizontalScrollMode="Disabled" AutomationProperties.Name="Activity trace timeline">
                         <ListView.ItemTemplate><DataTemplate>
-                            <Grid Padding="10,5" Height="54" ToolTipService.ToolTip="{Binding Description}">
+                            <Grid Padding="10,4" MinHeight="32" ToolTipService.ToolTip="{Binding Description}">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="80"/><ColumnDefinition Width="140"/><ColumnDefinition Width="116"/><ColumnDefinition/><ColumnDefinition Width="70"/></Grid.ColumnDefinitions>
                                 <TextBlock Text="{Binding Time}" FontSize="11" VerticalAlignment="Center"/>
                                 <TextBlock Grid.Column="1" Text="{Binding Process}" TextTrimming="CharacterEllipsis" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"/>
                                 <TextBlock Grid.Column="2" Text="{Binding Operation}" TextTrimming="CharacterEllipsis" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                <StackPanel Grid.Column="3" VerticalAlignment="Center" Margin="0,0,6,0"><TextBlock Text="{Binding Path}" TextTrimming="CharacterEllipsis" FontSize="12"/><TextBlock Text="{Binding Detail}" TextTrimming="CharacterEllipsis" FontSize="11" Style="{StaticResource Muted}"/></StackPanel>
+                                <StackPanel Grid.Column="3" VerticalAlignment="Center" Margin="0,0,6,0"><TextBlock Text="{Binding Path}" TextTrimming="CharacterEllipsis" FontSize="12"/><TextBlock Text="{Binding Detail}" Visibility="{Binding DetailVisibility}" TextTrimming="CharacterEllipsis" FontSize="11" Style="{StaticResource Muted}"/></StackPanel>
                                 <TextBlock Grid.Column="4" Text="{Binding Bytes}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                             </Grid>
                         </DataTemplate></ListView.ItemTemplate>
-                        <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="MinHeight" Value="54"/></Style></ListView.ItemContainerStyle>
+                        <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="Padding" Value="0"/><Setter Property="MinHeight" Value="32"/></Style></ListView.ItemContainerStyle>
                     </ListView>
                     <Grid x:Name="TreeHeader" Grid.Row="1" Padding="10,6" Background="{ThemeResource HeaderSurface}" Visibility="Collapsed">
                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="110"/><ColumnDefinition Width="130"/></Grid.ColumnDefinitions>
@@ -129,7 +129,7 @@
                 </ScrollViewer>
             </Expander>
         </Grid>
-        <Expander Grid.Row="3" Header="Read-only · limitations and capture details" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+        <Expander x:Name="LimitsPanel" Grid.Row="3" Header="Read-only · limitations and capture details" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
             <ScrollViewer MaxHeight="100" VerticalScrollBarVisibility="Auto"><TextBlock x:Name="Limitations" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True"/></ScrollViewer>
         </Expander>
     </Grid>

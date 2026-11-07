@@ -87,10 +87,10 @@ public sealed partial class TraceView : UserControl
             if (completed.BufferDropped > 0) reasons.Add("ring buffer dropped oldest events");
             if (completed.CapsHit) reasons.Add("bounded map, process, string or summary cap hit");
             if (completed.Malformed > 0) reasons.Add("malformed events skipped");
-            CaptureStatus.Text = completed.Status + (reasons.Count > 0 ? " · " + string.Join(" · ", reasons) : "");
+            CaptureStatus.Text = StatusLabel(completed.Status) + (reasons.Count > 0 ? " · " + string.Join(" · ", reasons) : "");
             if (completed.Status is TraceStatus.Failed or TraceStatus.RequiresAdministrator) CaptureStatus.Text += " · " + completed.Detail;
             Counters.Text = CounterText(completed.StoppedUtc - completed.StartedUtc, completed.EventsSeen, completed.Events.Count, completed.ProcessesStarted, completed.EventsLost, completed.BufferDropped, completed.UnresolvedNames);
-            Limitations.Text = $"{completed.Status}: {completed.Detail}\nMalformed skipped: {completed.Malformed:N0} · Excluded own events: {completed.ExcludedSelf:N0} · Caps hit: {completed.CapsHit}\n" + TraceExport.Limitations;
+            Limitations.Text = $"{StatusLabel(completed.Status)}: {completed.Detail}\nMalformed skipped: {completed.Malformed:N0} · Excluded own events: {completed.ExcludedSelf:N0} · Caps hit: {completed.CapsHit}\n" + TraceExport.Limitations;
             Notice.Text = string.IsNullOrWhiteSpace(completed.Detail) ? "Frozen recording. Select an event or process for its retained-event summary." : completed.Detail;
             rebuilding = true;
             ProcessPicker.ItemsSource = new[] { "All processes" }.Concat(completed.Processes.Select(p => $"{p.ImageName ?? "(name unavailable)"} ({p.Pid}) · #{p.Index}")).ToArray();
@@ -122,11 +122,24 @@ public sealed partial class TraceView : UserControl
     private static string CounterText(TimeSpan elapsed, long seen, int stored, long processes, long lost, long dropped, long unresolved)
         => $"Elapsed {elapsed:mm\\:ss} · Events {stored:N0} retained / {seen:N0} seen · Processes started {processes:N0} · Lost {lost:N0} · Dropped {dropped:N0} · Unresolved {unresolved:N0}";
 
+    private static string StatusLabel(TraceStatus status) => status switch
+    {
+        TraceStatus.NotStarted => "Not started",
+        TraceStatus.Running => "Recording",
+        TraceStatus.Completed => "Completed",
+        TraceStatus.Partial => "Partial",
+        TraceStatus.Cancelled => "Cancelled",
+        TraceStatus.Failed => "Failed",
+        TraceStatus.RequiresAdministrator => "Requires administrator",
+        TraceStatus.SessionUnavailable => "Session unavailable",
+        _ => "Unknown status"
+    };
+
     private void RefreshLive()
     {
         if (recorder is null || closing) return;
         var live = recorder.Live();
-        CaptureStatus.Text = "Running · private, read-only ETW recording";
+        CaptureStatus.Text = StatusLabel(recorder.Status) + " · private, read-only ETW recording";
         Counters.Text = CounterText(live.Elapsed, live.EventsSeen, live.Stored, live.ProcessesStarted, 0, live.BufferDropped, live.UnresolvedNames);
         Notice.Text = "Live tail only (last 100 events). Full timeline, process tree and filters appear after stop. ETW lost count is finalized on stop.";
         Timeline.ItemsSource = new TraceTimelineItems(live.Tail, [], null);
@@ -141,6 +154,7 @@ public sealed partial class TraceView : UserControl
         result = null; appliedFilter = new(); selectedProcess = -1; querying = filterFailed = false;
         Timeline.ItemsSource = ProcessTree.ItemsSource = null;
         Filters.Visibility = ViewTabs.Visibility = Summary.Visibility = Visibility.Collapsed;
+        TopScroll.ChangeView(null, 0, null, true);
         rebuilding = true; Search.Text = From.Text = To.Text = ""; CategoryPicker.SelectedIndex = 0; ProcessPicker.ItemsSource = null; rebuilding = false;
         SummaryTitle.Text = "Select an event or process"; SummaryText.Text = TopText.Text = ""; InspectButton.IsEnabled = false;
         Empty.Text = "Your recorded activity will appear here."; Empty.Visibility = Visibility.Visible;
@@ -149,7 +163,7 @@ public sealed partial class TraceView : UserControl
     private void ClearClicked(object sender, RoutedEventArgs args)
     {
         timer.Stop(); recorder?.Dispose(); recorder = null; starting = null; ResetView();
-        CaptureStatus.Text = "NotStarted · ready for an opt-in recording";
+        CaptureStatus.Text = StatusLabel(TraceStatus.NotStarted) + " · ready for an opt-in recording";
         Counters.Text = CounterText(TimeSpan.Zero, 0, 0, 0, 0, 0, 0);
         ViewCount.Text = "No recording"; Notice.Text = "Recording cleared from memory. Exported files, if any, are unchanged.";
         Limitations.Text = TraceExport.Limitations; Setup.IsExpanded = true; UpdateControls();
@@ -302,12 +316,16 @@ public sealed partial class TraceView : UserControl
     {
         double width = ActualWidth;
         bool compact = width < 1050;
-        TopScroll.MaxHeight = Math.Max(140, ActualHeight * (result is not null && compact ? .4 : result is null && !busy ? .75 : .52));
+        bool setup = result is null && !busy;
+        ResultsLayout.Visibility = setup ? Visibility.Collapsed : Visibility.Visible;
+        ResultsRow.Height = setup ? GridLength.Auto : new GridLength(1, GridUnitType.Star);
+        TopScroll.MaxHeight = setup ? Math.Max(140, ActualHeight - Actions.ActualHeight - Math.Max(48, LimitsPanel.ActualHeight) - 18)
+            : Math.Max(140, ActualHeight * (result is not null && compact ? .4 : .52));
         Setup.Visibility = busy || result is not null ? Visibility.Collapsed : Visibility.Visible;
         Notice.Visibility = result is not null && compact ? Visibility.Collapsed : Visibility.Visible;
         bool narrow = width < 760;
         var checks = new[] { Processes, Threads, Images, Files, Registry, Network };
-        int columns = narrow ? 3 : 6;
+        int columns = compact ? 3 : 6;
         for (int i = 0; i < checks.Length; i++) { Grid.SetColumn(checks[i], i % columns); Grid.SetRow(checks[i], i / columns); }
         for (int i = 0; i < CategorySetup.ColumnDefinitions.Count; i++) CategorySetup.ColumnDefinitions[i].Width = i < columns ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         Grid.SetRow(ExcludeSelf, narrow ? 1 : 0); Grid.SetColumn(ExcludeSelf, narrow ? 0 : 2); Grid.SetColumnSpan(ExcludeSelf, narrow ? 3 : 1);
@@ -329,6 +347,7 @@ public sealed class TraceTimelineRow
     public string Operation { get; }
     public string Path { get; }
     public string Detail { get; }
+    public Visibility DetailVisibility => string.IsNullOrEmpty(Detail) ? Visibility.Collapsed : Visibility.Visible;
     public string Bytes { get; }
     public string Description => $"{Time} · {Process} · {Operation}\n{Path}\n{Detail} · {Bytes} bytes";
     internal TraceTimelineRow(SystemExplorer.Core.TraceEvent item, IReadOnlyList<TraceProcess> processes, object source, int position)
