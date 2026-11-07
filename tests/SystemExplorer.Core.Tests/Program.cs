@@ -1111,6 +1111,164 @@ var tests = new (string Name, Action Run)[]
         for (var i = 0; i < 10000; i++) comparer.Compare(left, right);
         Check(GC.GetAllocatedBytesForCurrentThread() == allocated);
     })
+    ,("Storage bounded aggregation, partial results and metadata", () =>
+    {
+        var now = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        StorageEntry File(string name, long logical = 100, long allocated = 10, long id = 0, int days = 0) => new(name, false, logical, allocated, 0, 0, id, now.UtcDateTime.AddDays(-days), now.UtcDateTime);
+        StorageEntry Dir(string name, uint tag = 0, FileAttributes attrs = 0) => new(name, true, 0, 0, attrs, tag, 0, default, default);
+        var a = new StorageScanAggregator("C:/", new(DirectoryNodes: 2, HardLinkIds: 1, LargestFiles: 2, Extensions: 1, Problems: 1), true, now);
+        var sub = a.AddListing(0, "C:/", [Dir("kept"), Dir("rolled"), Dir("junction", 0xA0000003, FileAttributes.ReparsePoint), Dir("link", 0xA000000C, FileAttributes.ReparsePoint), Dir("cloud", 0x9000001A, FileAttributes.ReparsePoint), Dir("offline", 0, FileAttributes.ReparsePoint | FileAttributes.Offline), Dir("."), File("one.txt", id: 1), File("duplicate.txt", id: 1), File("two.bin", id: 2, days: 50), File("three.zz", days: 100), File("four.zz", days: 500), File("five.zz", days: 900), new("unknown", false, 100, 0, 0, 0, 0, default, default)]);
+        Check(sub.Count == 4 && sub[0].Node == 1 && sub[1].Node == 0);
+        foreach (var (node, path) in sub) a.AddListing(node, path, [File("sparse", 1000, 0)]);
+        a.AddDenied(0, "C:/private", "denied"); a.AddDenied(1, "C:/private2", "denied");
+        Check(a.Progress.Files == 10 && a.Progress.Denied == 2);
+        var r = a.Complete(StorageScanState.Cancelled, TimeSpan.FromSeconds(1), "synthetic", []);
+        Check(r.IsPartial && r.DirectoryCapReached && r.HardLinkCapReached && r.HardLinkIdsTracked == 1);
+        Check(r.HardLinkDuplicates == 1 && r.HardLinkLogicalBytes == 100 && r.HardLinkAllocatedBytes == 10);
+        Check(r.ReparseTotal == 2 && r.ReparsePoints.Count == 1 && r.ReparsePoints[0].Reason.Contains("junction"));
+        Check(r.DeniedTotal == 2 && r.DeniedPaths.Count == 1 && r.Nodes.Sum(n => n.Denied) == 2);
+        Check(r.Totals.Files == 10 && r.Totals.Directories == 4 && r.Totals.LogicalBytes == 4600 && r.Totals.AllocatedBytes == 50);
+        Check(r.Nodes[1].LogicalBytes == 1000 && r.FullPath(1) == @"C:\kept");
+        Check(r.LargestFiles.Count == 2 && r.Extensions.Count == 2 && r.Extensions.Any(e => e.Name == "(other)"));
+        Check(r.AgeBuckets.Select(b => b.Count).SequenceEqual(new long[] { 5, 1, 1, 1, 1, 1 }));
+        var threw = false; try { a.AddListing(0, "C:/", []); } catch (InvalidOperationException) { threw = true; } Check(threw);
+        Check(StorageBusTypes.Name(17) == "NVMe" && StorageBusTypes.Name(100) == "Unknown (100)");
+        Check(StorageBusTypes.Media(null, 17).Value == "SSD" && StorageBusTypes.Media(true, 11).Value == "HDD" && StorageBusTypes.Media(null, null).Display.Contains("Unavailable"));
+        Check(StorageBusTypes.Media(false, 14).Value!.Contains("Virtual disk"));
+        var empty = new StorageScanAggregator("C:/", new(), false, now).Complete(StorageScanState.Completed, TimeSpan.Zero, "empty", []);
+        Check(empty.Totals.Files == 0 && !empty.IsPartial);
+        Check(StorageFileSystems.HasStableFileIds("ntfs") && StorageFileSystems.HasStableFileIds("ReFS"));
+        Check(new string?[] { "FAT", "FAT32", "exFAT", "other", null }.All(fs => !StorageFileSystems.HasStableFileIds(fs)));
+        var reading = new StorageReading(null, "not reported");
+        var volume = new StorageVolume("C:/", "disk", "NTFS", "Fixed", 100, 25, 20, 4096, reading, reading, reading, reading, reading, null);
+        Check(volume.UsedBytes == 75 && volume.UsedFraction == 0.75);
+        Check((volume with { TotalBytes = null }).UsedBytes == null && (volume with { FreeBytes = 200 }).UsedFraction == null);
+        Check((volume with { TotalBytes = 0, FreeBytes = 0 }).UsedFraction == null);
+    }),
+    ("Storage developer artifacts, projects, catalogs and AI leads", () =>
+    {
+        var now = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var a = new StorageScanAggregator("C:/", new(), false, now);
+        StorageEntry F(string name, int days = 0) => new(name, false, 100, 10, 0, 0, 0, now.UtcDateTime.AddDays(-days), now.UtcDateTime.AddMinutes(-2));
+        StorageEntry D(string name) => new(name, true, 0, 0, 0, 0, 0, default, default);
+        int Add(int parent, string path, string name, params StorageEntry[] files)
+        {
+            var child = a.AddListing(parent, path, [D(name)]).Single();
+            a.AddListing(child.Node, child.Path, files); return child.Node;
+        }
+        var repo = Add(0, "C:/", "repo", D(".git"), F("package.json"), F("app.csproj"), F("Cargo.toml"), F("AGENTS.md"));
+        var pkg = Add(repo, "C:/repo", "pkg", F("package.json"));
+        var nm = Add(pkg, "C:/repo/pkg", "node_modules", F("data"));
+        Add(nm, "C:/repo/pkg/node_modules", "node_modules", F("nested"));
+        Add(repo, "C:/repo", "bin", F("assembly")); Add(repo, "C:/repo", "obj", F("obj")); Add(repo, "C:/repo", "target", F("target"));
+        Add(repo, "C:/repo", ".venv", F("pyvenv.cfg")); Add(repo, "C:/repo", "venv", F("notvenv"));
+        Add(0, "C:/", "bin", F("unrelated")); Add(0, "C:/", "target", F("unrelated"));
+        Add(0, "C:/", "old", F("go.mod", 500));
+        var bulk = Add(repo, "C:/repo", "bulk"); a.AddListing(bulk, "C:/repo/bulk", Enumerable.Range(0, 200).Select(i => F(i + ".cs")).ToArray());
+        Add(repo, "C:/repo", "worktrees", F(".git"));
+        var local = Add(0, "C:/", "local"); var packages = Add(local, "C:/local", "Packages"); var ubuntu = Add(packages, "C:/local/Packages", "FooCanonicalUbuntu"); Add(ubuntu, "C:/local/Packages/FooCanonicalUbuntu", "LocalState", F("disk.vhdx"));
+        var otherUbuntu = Add(packages, "C:/local/Packages", "OtherCanonicalUbuntu"); Add(otherUbuntu, "C:/local/Packages/OtherCanonicalUbuntu", "LocalState", F("disk.vhdx"));
+        var home = Add(0, "C:/", "home"); var codex = Add(home, "C:/home", ".codex", F("config")); Add(codex, "C:/home/.codex", "sessions", F("chat"));
+        Add(0, "C:/", "custom-nuget", F("package"));
+        var nuget = Add(local, "C:/local", "NuGet"); Add(nuget, "C:/local/NuGet", "v3-cache", F("http-cache"));
+        Add(0, "C:/", "temp", F("in-use"));
+        var scan = a.Complete(StorageScanState.Completed, TimeSpan.Zero, "names only", []);
+        var ctx = new DeveloperLocationContext("C:/home", "C:/local", "D:/roaming", "D:/programdata", "C:/temp", new Dictionary<string, string> { ["NUGET_PACKAGES"] = "C:/custom-nuget" });
+        var report = DeveloperBloatAnalyzer.Analyze(scan, ctx, now, TimeSpan.FromDays(90));
+        var project = report.Projects.Single(p => p.Path == @"C:\repo");
+        Check(!report.Projects.Any(p => p.Path == @"C:\repo\pkg") && project.RegenerableBytes == 60 && project.Artifacts.Count == 5);
+        Check(!report.Items.Any(i => i.Path == @"C:\bin" || i.Path == @"C:\target" || i.Path == @"C:\repo\venv"));
+        Check(report.Projects.Single(p => p.Path == @"C:\old").IsStale && !project.IsStale);
+        Check(report.Items.Where(i => i.Tool.StartsWith("WSL — ") && i.Path.EndsWith("LocalState") && i.ReclaimableBytes == null).Select(i => i.Tool).Distinct().Count() == 2);
+        Check(report.Items.Any(i => i.Tool == "NuGet packages" && i.Path == @"C:\custom-nuget"));
+        Check(report.Items.Any(i => i.Tool == "NuGet HTTP cache" && i.Path == @"C:\local\NuGet\v3-cache"));
+        Check(report.Items.Single(i => i.Tool == "User temp") is { Confidence: BloatConfidence.Medium, ReclaimableBytes: 10, Reason: "files may be in use by running programs; delete only items not in use" });
+        Check(report.NotScanned.Any(i => i.Reason == "Not scanned (outside scanned folder)") && report.AbsentCatalogEntries > 0);
+        Check(report.Items.Any(i => i.IsLead && i.Tool == "Bulk creation") && report.Items.Any(i => i.IsLead && i.Tool == "Git worktree" && i.Confidence == BloatConfidence.Medium));
+        Check(report.Items.Where(i => i.IsLead).All(i => i.Reason.StartsWith("Lead:")));
+        Check(report.CategoryTotals.Single(c => c.Category == "AI tools and models").AllocatedBytes == 20);
+        Check(report.Items.Where(i => i.Kind == "AI tool data").All(i => i.ReclaimableBytes == 0));
+        Check(DeveloperBloatAnalyzer.Analyze(new StorageScanAggregator("Z:/", new(), false).Complete(StorageScanState.Failed, TimeSpan.Zero, "failed", []), ctx, now, TimeSpan.Zero).Projects.Count == 0);
+    }),
+    ("Storage category known sums and unknown counts share global path de-duplication", () =>
+    {
+        BloatItem Item(string category, string path, long allocated, long? reclaim, bool lead = false) =>
+            new(category, "fixture", path, allocated, reclaim, null, BloatConfidence.High, "metadata", null, null, "Cache", lead);
+        BloatItem[] items = [
+            Item("Global caches", @"C:\cache", 100, 100),
+            Item("Global caches", @"C:\global-unknown", 40, null),
+            Item("Global caches", @"C:\cache\unknown", 10, null),
+            Item("Artifacts", "c:/CACHE", 100, 100),
+            Item("Artifacts", @"C:\cache\nested", 25, 25),
+            Item("Artifacts", @"C:\project\bin", 60, 60),
+            Item("Artifacts", @"C:\artifact-unknown", 20, null),
+            Item("AI", @"C:\disk", 500, null),
+            Item("AI", @"C:\disk\model", 80, 80),
+            Item("Settings", @"C:\settings", 10, 0),
+            Item("Leads", @"C:\lead", 200, null, true)
+        ];
+        var totals = DeveloperBloatAnalyzer.Summarize(items);
+        var global = totals.Single(x => x.Category == "Global caches");
+        var artifacts = totals.Single(x => x.Category == "Artifacts");
+        var ai = totals.Single(x => x.Category == "AI");
+        var settings = totals.Single(x => x.Category == "Settings");
+        Check(global is { AllocatedBytes: 140, ReclaimableBytes: 100, UnknownItems: 1 });
+        Check(artifacts is { AllocatedBytes: 80, ReclaimableBytes: 60, UnknownItems: 1 });
+        Check(ai is { AllocatedBytes: 500, ReclaimableBytes: null, UnknownItems: 1 });
+        Check(settings is { ReclaimableBytes: 0, UnknownItems: 0 } && totals.Count == 4);
+        var report = new DeveloperBloatReport(items, [], totals, [], 0);
+        Check(report.KnownReclaimableBytes == 160 && report.KnownReclaimableBytes == totals.Sum(x => x.ReclaimableBytes ?? 0) && report.UnknownItems == 3);
+        var empty = new DeveloperBloatReport([], [], DeveloperBloatAnalyzer.Summarize([]), [], 0);
+        Check(empty.CategoryTotals.Count == 0 && empty.KnownReclaimableBytes == 0 && empty.UnknownItems == 0);
+        var scan = new StorageScanAggregator(@"C:\", new(), false).Complete(StorageScanState.Completed, TimeSpan.Zero, "metadata", []);
+        using var json = System.Text.Json.JsonDocument.Parse(StorageExport.ToJson(scan, report));
+        var exported = json.RootElement.GetProperty("Bloat");
+        Check(exported.GetProperty("KnownReclaimableBytes").GetInt64() == 160 && exported.GetProperty("UnknownItems").GetInt32() == 3);
+        var exportedGlobal = exported.GetProperty("CategoryTotals").EnumerateArray().Single(x => x.GetProperty("Category").GetString() == "Global caches");
+        Check(exportedGlobal.GetProperty("ReclaimableBytes").GetInt64() == 100 && exportedGlobal.GetProperty("UnknownItems").GetInt32() == 1);
+    }),
+    ("Storage exports escape CSV cells and JSON metadata", () =>
+    {
+        var a = new StorageScanAggregator("=root,\"quoted\"\nline", new(), false);
+        foreach (var text in new[] { "=formula", "+plus", "-minus", "@function", "\ttab", "\rreturn" }) a.AddDenied(0, text, "quote\"comma,\nline");
+        var scan = a.Complete(StorageScanState.Cancelled, TimeSpan.Zero, "test", []);
+        var csv = StorageExport.ToCsv(scan);
+        Check(csv.Contains("\"'=root,\"\"quoted\"\"\nline\"") && csv.Contains("\"Partial\"") && csv.Contains("quote\"\"comma,\nline"));
+        foreach (var text in new[] { "=formula", "+plus", "-minus", "@function", "\ttab", "\rreturn" }) Check(csv.Contains("\"'" + text + "\""));
+        using var json = System.Text.Json.JsonDocument.Parse(StorageExport.ToJson(scan));
+        Check(json.RootElement.GetProperty("Scan").GetProperty("IsPartial").GetBoolean());
+        Check(json.RootElement.GetProperty("Scan").GetProperty("Root").GetString() == scan.Root);
+        var native = new StorageScanAggregator("C:/fixture", new(), false);
+        var child = native.AddListing(0, "C:/fixture", [new("folder", true, 0, 0, 0, 0, 0, default, default)]).Single();
+        native.AddListing(child.Node, child.Path, [new("package.json", false, 1, 1, 0, 0, 0, default, default)]);
+        native.AddDenied(child.Node, "C:/fixture/folder/denied", "Access denied");
+        var nativeScan = native.Complete(StorageScanState.Completed, TimeSpan.Zero, "metadata", []);
+        var nativeReport = DeveloperBloatAnalyzer.Analyze(nativeScan, new("C:/fixture", "D:/local", "D:/roaming", "D:/data", "D:/temp"), DateTimeOffset.UtcNow, TimeSpan.FromDays(90));
+        Check(child.Path == @"C:\fixture\folder" && nativeScan.Root == @"C:\fixture" && nativeScan.FullPath(child.Node) == child.Path);
+        Check(nativeScan.LargestFiles.Single().Path == @"C:\fixture\folder\package.json" && nativeScan.DeniedPaths.Single().Path == @"C:\fixture\folder\denied");
+        Check(nativeReport.Projects.Single().Path == child.Path && nativeReport.NotScanned.All(p => !p.Path.Contains('/')));
+        Check(StoragePaths.Join("//server/share", "folder/file") == @"\\server\share\folder\file");
+        Check(StoragePaths.Native("") == "" && StoragePaths.Native(@"C:\") == @"C:\");
+        var nativeCsv = StorageExport.ToCsv(nativeScan, nativeReport);
+        Check(nativeCsv.Contains(@"C:\fixture\folder\package.json") && !nativeCsv.Contains("C:/"));
+        using var nativeJson = System.Text.Json.JsonDocument.Parse(StorageExport.ToJson(nativeScan, nativeReport));
+        Check(nativeJson.RootElement.GetProperty("Bloat").GetProperty("Projects")[0].GetProperty("Path").GetString() == child.Path);
+    }),
+    ("Storage million-file bounded-memory performance sanity", () =>
+    {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var a = new StorageScanAggregator("C:/", new(LargestFiles: 10, Extensions: 10), false);
+        var entries = Enumerable.Range(0, 20).Select(i => new StorageEntry(i + ".bin", false, 100, 10, 0, 0, 0, DateTime.UnixEpoch, DateTime.UnixEpoch)).ToArray();
+        Parallel.For(0, 50_000, new ParallelOptions { MaxDegreeOfParallelism = 4 }, i =>
+        {
+            var d = a.AddListing(0, "C:/", [new(i.ToString(), true, 0, 0, 0, 0, 0, default, default)]).Single();
+            a.AddListing(d.Node, d.Path, entries);
+        });
+        var r = a.Complete(StorageScanState.Completed, timer.Elapsed, "synthetic", []);
+        Console.WriteLine($"Storage perf: 1,000,000 files / 50,000 dirs in {timer.Elapsed}; retained {r.Nodes.Count} nodes, {r.LargestFiles.Count} files");
+        Check(r.Totals.Files == 1_000_000 && r.Nodes.Count == 50_001 && r.LargestFiles.Count == 10 && r.Totals.AllocatedBytes == 10_000_000);
+        Check(timer.Elapsed < TimeSpan.FromMinutes(2));
+    })
 };
 var failures = 0;
 foreach (var (name, run) in tests)
