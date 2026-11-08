@@ -47,13 +47,13 @@ public sealed partial class MainWindow
         }
     }
 
-    private async Task<string?> ExportRamAsync(RamExportDocument document, string format)
+    private async Task<string?> ExportRamAsync(RamExportDocument document, string format, CancellationToken token)
     {
         var path = NativeFileDialogs.ChooseSave(WinRT.Interop.WindowNative.GetWindowHandle(this), format,
             "Export RAM investigation", "SystemExplorer-RAM-" + document.Tab.Replace(' ', '-'));
         if (path is null) return null;
         var text = format == "csv" ? RamAttributionPresentation.Csv(document) : RamAttributionPresentation.Json(document);
-        await File.WriteAllTextAsync(path, text, shutdown.Token);
+        await File.WriteAllTextAsync(path, text, token);
         return path;
     }
 }

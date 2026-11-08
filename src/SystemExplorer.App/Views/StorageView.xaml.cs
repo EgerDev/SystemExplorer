@@ -20,13 +20,15 @@ public sealed record StorageRow(string Name, string Detail, string Size, double 
     public string Badge => Item is { IsLead: true } ? "Lead" : Item?.Confidence.ToString() ?? "";
     public Visibility BadgeVisibility => Item is null ? Visibility.Collapsed : Visibility.Visible;
 }
-public sealed record StorageDriveProperty(string Label, string Value)
+public sealed record StorageDriveProperty(string Label, string Value, bool IsAvailable)
 {
-    public Visibility ValueVisibility => Value.StartsWith("Unavailable") ? Visibility.Collapsed : Visibility.Visible;
-    public Visibility UnavailableVisibility => Value.StartsWith("Unavailable") ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility ValueVisibility => IsAvailable ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility UnavailableVisibility => IsAvailable ? Visibility.Collapsed : Visibility.Visible;
 }
 public sealed record StorageRootChoice(string Root, string Label);
 public sealed record StorageDriveCard(string Root, string Title, string Capacity, double UsedPercent, Brush CapacityBrush, IReadOnlyList<StorageDriveProperty> Properties);
+public enum StorageInventoryPhase { NotLoaded, Loading, Ready, Failed }
+public enum StorageOperationKind { Scan, Export }
 
 public sealed partial class StorageView : UserControl, IDisposable
 {
@@ -34,7 +36,10 @@ public sealed partial class StorageView : UserControl, IDisposable
     private readonly CancellationTokenSource lifetime = new();
     private readonly SemaphoreSlim analysisGate = new(1, 1);
     private readonly DispatcherQueueTimer timer;
-    private CancellationTokenSource? scanCancellation;
+    private readonly OperationGate work = new();
+    private readonly OperationGate inventory = new();
+    private StorageOperationKind workKind;
+    private StorageInventoryPhase inventoryPhase;
     private WindowsStorageScan? operation;
     private StorageScanResult? result;
     private DeveloperBloatReport? report;
@@ -43,7 +48,7 @@ public sealed partial class StorageView : UserControl, IDisposable
     private string root = @"C:\";
     private string detailPath = "";
     private int folder, analysisGeneration;
-    private bool ready, loaded, disposed;
+    private bool ready, disposed;
     public nint OwnerHandle { get; set; }
     private bool Logical => SizeMode.SelectedIndex == 1;
 
@@ -56,8 +61,8 @@ public sealed partial class StorageView : UserControl, IDisposable
     }
     public async void OnNavigated()
     {
-        if (loaded || disposed) return;
-        loaded = true; await RefreshAsync();
+        if (inventoryPhase is StorageInventoryPhase.Ready or StorageInventoryPhase.Loading || disposed) return;
+        await RefreshAsync();
     }
     private void Notify(string text) { Message.Text = text; Message.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible; }
     private static string Bytes(long? value) => value is { } n ? MetricFormatting.Bytes((ulong)Math.Max(0, n)) : "Unavailable";
@@ -80,24 +85,27 @@ public sealed partial class StorageView : UserControl, IDisposable
     private static double Percent(long size, long total) => total <= 0 ? 0 : Math.Clamp(100d * size / total, 0, 100);
     private async Task RefreshAsync()
     {
+        if (disposed || !inventory.TryBegin(out var ticket, lifetime.Token)) return;
+        inventoryPhase = StorageInventoryPhase.Loading;
         RefreshButton.IsEnabled = false;
         try
         {
-            volumes = await provider.GetVolumesAsync(lifetime.Token);
-            if (disposed) return;
+            volumes = await provider.GetVolumesAsync(ticket.CancellationToken);
+            if (disposed || !inventory.IsCurrent(ticket)) return;
             var accent = new SolidColorBrush(new UISettings().GetColorValue(UIColorType.Accent));
-            StorageDriveProperty Property(string label, string value) => new(label, value);
+            StorageDriveProperty Property(string label, string value, bool available) => new(label, value, available);
             DriveCards.ItemsSource = volumes.Select(v => new StorageDriveCard(v.Root, $"{v.Root}  {v.Label}",
                 v.UsedBytes is { } used ? $"{Bytes(used)} used of {Bytes(v.TotalBytes)} · {Bytes(v.FreeBytes)} free" : "Unavailable — " + (v.Error ?? "capacity not reported"),
                 100 * (v.UsedFraction ?? 0), v.FreeBytes is { } free && v.TotalBytes is > 0 && (double)free / v.TotalBytes < .1
                     ? (Brush)Application.Current.Resources["SystemFillColorCriticalBrush"] : accent,
-                [Property("File system", string.IsNullOrEmpty(v.FileSystem) ? "Unavailable — " + v.Error : v.FileSystem), Property("Media type", Reading(v.Media)), Property("Bus", Reading(v.Bus)), Property("Device", Reading(v.Product)), Property("BitLocker", Reading(v.BitLocker)), Property("Compression", Reading(v.Compression)), Property("Cluster size", v.ClusterBytes is null ? "Unavailable — " + (v.Error ?? "not reported") : Bytes(v.ClusterBytes))])).ToArray();
+                [Property("File system", string.IsNullOrEmpty(v.FileSystem) ? "Unavailable — " + v.Error : v.FileSystem, !string.IsNullOrEmpty(v.FileSystem)), Property("Media type", Reading(v.Media), v.Media.Value is not null), Property("Bus", Reading(v.Bus), v.Bus.Value is not null), Property("Device", Reading(v.Product), v.Product.Value is not null), Property("BitLocker", Reading(v.BitLocker), v.BitLocker.Value is not null), Property("Compression", Reading(v.Compression), v.Compression.Value is not null), Property("Cluster size", v.ClusterBytes is null ? "Unavailable — " + (v.Error ?? "not reported") : Bytes(v.ClusterBytes), v.ClusterBytes is not null)])).ToArray();
             SelectRoot();
             Notify(volumes.Count == 0 ? "No fixed or removable drive letters were returned." : "");
+            inventoryPhase = StorageInventoryPhase.Ready;
         }
-        catch (OperationCanceledException) { }
-        catch (Exception ex) { Notify("Volume inventory unavailable: " + ex.Message); }
-        finally { if (!disposed) RefreshButton.IsEnabled = true; }
+        catch (OperationCanceledException) { inventoryPhase = StorageInventoryPhase.Failed; }
+        catch (Exception ex) { inventoryPhase = StorageInventoryPhase.Failed; if (!disposed) Notify("Volume inventory unavailable: " + ex.Message); }
+        finally { if (inventory.Complete(ticket) && !disposed) RefreshButton.IsEnabled = true; }
     }
     private async void RefreshClicked(object sender, RoutedEventArgs e) => await RefreshAsync();
     private void RootChanged(object sender, SelectionChangedEventArgs e)
@@ -119,7 +127,7 @@ public sealed partial class StorageView : UserControl, IDisposable
         if (sender is FrameworkElement { Tag: string path }) { root = path; SelectRoot(); RootCaption.Text = path; await ScanAsync(false); }
     }
     private async void ScanClicked(object sender, RoutedEventArgs e) => await ScanAsync(false);
-    private void CancelClicked(object sender, RoutedEventArgs e) => scanCancellation?.Cancel();
+    private void CancelClicked(object sender, RoutedEventArgs e) { work.RequestCancel(); UpdateOperationControls(); }
     private async void ProfileClicked(object sender, RoutedEventArgs e)
     {
         root = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile); SelectRoot(); RootCaption.Text = root;
@@ -127,30 +135,36 @@ public sealed partial class StorageView : UserControl, IDisposable
     }
     private async Task ScanAsync(bool developer)
     {
-        if (scanCancellation != null || disposed) { Notify("A scan is already running. Cancel it before starting another."); return; }
+        if (disposed || !work.TryBegin(out var ticket, lifetime.Token)) { Notify("An operation is already running. Wait for it before starting another."); return; }
+        workKind = StorageOperationKind.Scan;
         analysisGeneration++; result = null; report = null; folder = 0;
         ClearLists(); ExportButton.IsEnabled = UseScanButton.IsEnabled = false;
-        ScanButton.IsEnabled = ProfileButton.IsEnabled = false; CancelButton.IsEnabled = true;
+        UpdateOperationControls();
         ProgressPanel.Visibility = Visibility.Visible; ResultTitle.Text = "Scanning metadata…"; ResultDetail.Text = root;
         ResultNotes.Text = ""; Notify(""); Tabs.SelectedIndex = 1;
-        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); scanCancellation = cancellation;
         elapsed.Restart(); timer.Start();
         try
         {
-            operation = provider.StartScan(root, cancellation.Token);
+            operation = provider.StartScan(root, ticket.CancellationToken);
             result = await operation.Completion;
-            if (disposed) return;
+            if (disposed || !work.IsCurrent(ticket)) return;
             RenderScan();
-            UseScanButton.IsEnabled = ExportButton.IsEnabled = true;
+            UseScanButton.IsEnabled = true;
             ProfileButton.Visibility = StoragePaths.Contains(result.Root, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)) ? Visibility.Collapsed : Visibility.Visible;
             if (developer) { Tabs.SelectedIndex = 2; await AnalyzeAsync(); }
         }
         catch (Exception ex) { if (!disposed) { ResultTitle.Text = "Failed — " + ex.Message; Notify("Scan unavailable: " + ex.Message); } }
         finally
         {
-            timer.Stop(); elapsed.Stop(); operation = null; scanCancellation = null; cancellation.Dispose();
-            if (!disposed) { ProgressPanel.Visibility = Visibility.Collapsed; ScanButton.IsEnabled = ProfileButton.IsEnabled = true; CancelButton.IsEnabled = false; }
+            timer.Stop(); elapsed.Stop(); operation = null;
+            if (work.Complete(ticket) && !disposed) { ProgressPanel.Visibility = Visibility.Collapsed; UpdateOperationControls(); }
         }
+    }
+    private void UpdateOperationControls()
+    {
+        ScanButton.IsEnabled = ProfileButton.IsEnabled = !work.IsBusy;
+        CancelButton.IsEnabled = workKind == StorageOperationKind.Scan && work.Phase == OperationPhase.Running;
+        ExportButton.IsEnabled = !work.IsBusy && result is not null;
     }
     private void PollProgress()
     {
@@ -211,7 +225,7 @@ public sealed partial class StorageView : UserControl, IDisposable
     private async void UseScanClicked(object sender, RoutedEventArgs e) => await AnalyzeAsync();
     private async void TabChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (ready && Tabs.SelectedIndex == 2 && report == null && result != null && scanCancellation == null) await AnalyzeAsync();
+        if (ready && Tabs.SelectedIndex == 2 && report == null && result != null && !work.IsBusy) await AnalyzeAsync();
     }
     private async void StaleChanged(object sender, SelectionChangedEventArgs e) { if (ready && report != null) await AnalyzeAsync(); }
     private void StaleFilterChanged(object sender, RoutedEventArgs e) { if (ready) RenderDeveloper(); }
@@ -289,17 +303,21 @@ public sealed partial class StorageView : UserControl, IDisposable
     private void CopyDetailClicked(object sender, RoutedEventArgs e) => Copy(detailPath);
     private async void ExportClicked(object sender, RoutedEventArgs e)
     {
-        if (result is not { } scan || sender is not FrameworkElement { Tag: string format }) return;
+        if (disposed || result is not { } scan || sender is not FrameworkElement { Tag: string format } || !work.TryBegin(out var ticket, lifetime.Token)) return;
+        workKind = StorageOperationKind.Export;
+        UpdateOperationControls();
         try
         {
             var path = NativeFileDialogs.ChooseSave(OwnerHandle, format, "Export storage analysis", "SystemExplorer-storage");
             if (path == null || disposed) return;
             var bloat = report;
             var text = await Task.Run(() => format == "csv" ? StorageExport.ToCsv(scan, bloat) : StorageExport.ToJson(scan, bloat));
-            await System.IO.File.WriteAllTextAsync(path, text);
-            Notify("Export saved to " + path);
+            await System.IO.File.WriteAllTextAsync(path, text, ticket.CancellationToken);
+            if (work.IsCurrent(ticket) && !disposed) Notify("Export saved to " + path);
         }
-        catch (Exception ex) { if (!disposed) Notify("Export unavailable: " + ex.Message); }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { if (!disposed && work.IsCurrent(ticket)) Notify("Export unavailable: " + ex.Message); }
+        finally { if (work.Complete(ticket) && !disposed) UpdateOperationControls(); }
     }
     private void LayoutChanged(object sender, SizeChangedEventArgs e)
     {
@@ -314,7 +332,7 @@ public sealed partial class StorageView : UserControl, IDisposable
     public void Dispose()
     {
         if (disposed) return;
-        disposed = true; analysisGeneration++; timer.Stop(); scanCancellation?.Cancel(); lifetime.Cancel(); lifetime.Dispose();
+        disposed = true; analysisGeneration++; timer.Stop(); work.RequestCancel(); inventory.RequestCancel(); lifetime.Cancel(); lifetime.Dispose();
         result = null; report = null; ClearLists();
     }
 }
