@@ -17,11 +17,11 @@ public sealed partial class RamAttributionView : UserControl
     private readonly IPoolTagProvider poolProvider;
     private readonly IPoolTagDriverProvider driverProvider;
     private readonly IPhysicalMemoryProvider physicalProvider;
-    private readonly Func<RamExportDocument, string, Task<string?>> export;
+    private readonly Func<RamExportDocument, string, CancellationToken, Task<string?>> export;
     private readonly CancellationToken lifetime;
-    private CancellationTokenSource? operation;
+    private readonly OperationGate operation = new();
     private Task active = Task.CompletedTask;
-    private bool busy;
+    private RamOperationKind operationKind;
     private readonly Dictionary<int, List<RamExportRow>> exports = [];
     private readonly Dictionary<int, DateTimeOffset> captured = [];
     private PoolTagInventory? pool;
@@ -30,7 +30,7 @@ public sealed partial class RamAttributionView : UserControl
 
     public RamAttributionView(MonitorSnapshot snapshot, IRamBreakdownProvider machineProvider, IProcessResidentProvider processProvider,
         IPoolTagProvider poolProvider, IPoolTagDriverProvider driverProvider, IPhysicalMemoryProvider physicalProvider,
-        bool administrator, Func<RamExportDocument, string, Task<string?>> export, CancellationToken lifetime)
+        bool administrator, Func<RamExportDocument, string, CancellationToken, Task<string?>> export, CancellationToken lifetime)
     {
         InitializeComponent();
         this.snapshot = snapshot;
@@ -45,8 +45,9 @@ public sealed partial class RamAttributionView : UserControl
         captured[1] = snapshot.CapturedAt;
     }
 
-    public Task InitializeAsync() => Start(async token =>
+    public Task InitializeAsync() => Start(RamOperationKind.Initialize, async ticket =>
     {
+        var token = ticket.CancellationToken;
         var machine = await machineProvider.CaptureAsync(snapshot, token);
         token.ThrowIfCancellationRequested();
         ShowMachine(machine);
@@ -58,38 +59,50 @@ public sealed partial class RamAttributionView : UserControl
 
     public async Task StopAsync()
     {
-        operation?.Cancel();
+        operation.RequestCancel();
         await active;
     }
 
-    private Task Start(Func<CancellationToken, Task> work)
+    private Task Start(RamOperationKind kind, Func<OperationTicket, Task> work)
     {
-        if (busy || lifetime.IsCancellationRequested) return Task.CompletedTask;
-        active = Run(work);
+        if (lifetime.IsCancellationRequested || !operation.TryBegin(out var ticket, lifetime)) return Task.CompletedTask;
+        operationKind = kind;
+        active = Run(ticket, kind, work);
         return active;
     }
 
-    private async Task Run(Func<CancellationToken, Task> work)
+    private async Task Run(OperationTicket ticket, RamOperationKind kind, Func<OperationTicket, Task> work)
     {
-        busy = true;
-        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
-        operation = cancellation;
-        SetBusy(true);
-        try { await work(cancellation.Token); }
-        catch (OperationCanceledException) { Message.Text = "Cancelled. No new observation published; previous captures, if any, are retained."; }
-        catch (Exception ex) { Message.Text = "Unavailable: " + ex.Message; }
-        finally { operation = null; busy = false; SetBusy(false); }
+        UpdateOperationControls();
+        try { await work(ticket); }
+        catch (OperationCanceledException)
+        {
+            if (operation.IsCurrent(ticket)) { FinishPanel(kind, true); Message.Text = InvestigationOperationStatus.CancellationNotice; }
+        }
+        catch (Exception ex)
+        {
+            if (operation.IsCurrent(ticket)) { FinishPanel(kind, false); Message.Text = (kind == RamOperationKind.Export ? "Export failed: " : "Unavailable: ") + ex.Message; }
+        }
+        finally { if (operation.Complete(ticket)) UpdateOperationControls(); }
     }
 
-    private void SetBusy(bool value)
+    private void FinishPanel(RamOperationKind kind, bool cancelled)
     {
-        ProcessScan.IsEnabled = PhysicalScan.IsEnabled = !value;
-        FindDrivers.IsEnabled = !value && pool is not null;
-        ProcessCancel.IsEnabled = PoolCancel.IsEnabled = PhysicalCancel.IsEnabled = value;
-        ExportButton.IsEnabled = !value;
+        var status = InvestigationOperationStatus.TerminalScanStatus(cancelled);
+        if (kind == RamOperationKind.Processes) { ProcessStatus.Text = status; ProcessProgress.Value = 0; }
+        if (kind == RamOperationKind.Physical) { PhysicalStatus.Text = status; PhysicalProgress.Value = 0; }
+        if (kind == RamOperationKind.Drivers) { PoolStatus.Text = status; PoolProgress.Value = 0; }
     }
 
-    private void CancelClicked(object sender, RoutedEventArgs args) => operation?.Cancel();
+    private void UpdateOperationControls()
+    {
+        ProcessScan.IsEnabled = PhysicalScan.IsEnabled = !operation.IsBusy;
+        FindDrivers.IsEnabled = !operation.IsBusy && pool is not null;
+        ProcessCancel.IsEnabled = PoolCancel.IsEnabled = PhysicalCancel.IsEnabled = operation.Phase == OperationPhase.Running && operationKind != RamOperationKind.Export;
+        ExportButton.IsEnabled = !operation.IsBusy;
+    }
+
+    private void CancelClicked(object sender, RoutedEventArgs args) { operation.RequestCancel(); UpdateOperationControls(); }
     private void PhysicalTableChanged(object sender, SelectionChangedEventArgs args)
     {
         if (UseTable is null || PriorityTable is null || FileTable is null) return;
@@ -143,13 +156,14 @@ public sealed partial class RamAttributionView : UserControl
         }
     }
 
-    private async void ProcessScanClicked(object sender, RoutedEventArgs args) => await Start(async token =>
+    private async void ProcessScanClicked(object sender, RoutedEventArgs args) => await Start(RamOperationKind.Processes, async ticket =>
     {
+        var token = ticket.CancellationToken;
         ProcessStatus.Text = $"Scanning 0 / {snapshot.Processes.Count}; identities from {snapshot.CapturedAt:g}";
         ProcessProgress.Value = 0; ProcessProgress.Maximum = Math.Max(1, snapshot.Processes.Count);
         var progress = new Progress<(int Done, int Total)>(p =>
         {
-            if (token.IsCancellationRequested) return;
+            if (token.IsCancellationRequested || !operation.IsCurrent(ticket)) return;
             ProcessProgress.Maximum = Math.Max(1, p.Total); ProcessProgress.Value = p.Done;
             ProcessStatus.Text = $"Scanning {p.Done} / {p.Total}";
         });
@@ -195,12 +209,13 @@ public sealed partial class RamAttributionView : UserControl
         PoolStatus.Text = $"Tags captured {pool.CapturedAt:g} · {pool.Status} · {pool.Tags.Count} tags\n" + (drivers is null ? pool.Detail : $"Driver scan {driverCaptured:g} · {drivers.Status} · {drivers.Detail}");
     }
 
-    private async void FindDriversClicked(object sender, RoutedEventArgs args) => await Start(async token =>
+    private async void FindDriversClicked(object sender, RoutedEventArgs args) => await Start(RamOperationKind.Drivers, async ticket =>
     {
+        var token = ticket.CancellationToken;
         if (pool is null) return;
         var progress = new Progress<(int Done, int Total)>(p =>
         {
-            if (token.IsCancellationRequested) return;
+            if (token.IsCancellationRequested || !operation.IsCurrent(ticket)) return;
             PoolProgress.Maximum = Math.Max(1, p.Total); PoolProgress.Value = p.Done; PoolStatus.Text = $"Finding driver string leads: {p.Done} / {p.Total} files";
         });
         var result = await driverProvider.CaptureAsync(pool.Tags.Select(t => t.RawTag).ToArray(), progress, token);
@@ -208,11 +223,12 @@ public sealed partial class RamAttributionView : UserControl
         Message.Text = "Driver scan complete. Candidates are leads only, not allocation ownership.";
     });
 
-    private async void PhysicalScanClicked(object sender, RoutedEventArgs args) => await Start(async token =>
+    private async void PhysicalScanClicked(object sender, RoutedEventArgs args) => await Start(RamOperationKind.Physical, async ticket =>
     {
+        var token = ticket.CancellationToken;
         var progress = new Progress<(ulong Done, ulong Total)>(p =>
         {
-            if (token.IsCancellationRequested) return;
+            if (token.IsCancellationRequested || !operation.IsCurrent(ticket)) return;
             PhysicalProgress.Maximum = Math.Max(1, p.Total); PhysicalProgress.Value = p.Done;
             PhysicalStatus.Text = $"Scanning {p.Done:N0} / {p.Total:N0} PFNs";
         });
@@ -289,18 +305,17 @@ public sealed partial class RamAttributionView : UserControl
 
     private async void ExportClicked(object sender, RoutedEventArgs args)
     {
-        if (busy || sender is not MenuFlyoutItem { Tag: string format }) return;
+        if (operation.IsBusy || sender is not MenuFlyoutItem { Tag: string format }) return;
         var tab = Tabs.SelectedIndex;
         if (!exports.TryGetValue(tab, out var rows)) { Message.Text = "No capture available on this tab."; return; }
         var names = new[] { "Overview", "Processes", "Pool tags", "Physical memory" };
-        ExportButton.IsEnabled = false;
-        try
+        await Start(RamOperationKind.Export, async ticket =>
         {
-            var path = await export(new(captured[tab], names[tab], rows.ToArray()), format);
+            var token = ticket.CancellationToken;
+            var path = await export(new(captured[tab], names[tab], rows.ToArray()), format, token);
+            token.ThrowIfCancellationRequested();
             Message.Text = path is null ? "Export cancelled; nothing saved." : "Exported to " + path;
-        }
-        catch (Exception ex) { Message.Text = "Export failed: " + ex.Message; }
-        finally { ExportButton.IsEnabled = !busy; }
+        });
     }
 }
 

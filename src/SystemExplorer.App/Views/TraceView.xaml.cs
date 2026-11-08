@@ -23,7 +23,11 @@ public sealed partial class TraceView : UserControl
     private CancellationTokenSource? filterCancellation;
     private int queryGeneration, summaryGeneration;
     private int selectedProcess = -1;
-    private bool initialized, busy, querying, filterFailed, exporting, closing, rebuilding, treeMode;
+    private readonly OperationGate capture = new();
+    private readonly OperationGate export = new();
+    private bool busy => capture.IsBusy;
+    private bool exporting => export.IsBusy;
+    private bool initialized, querying, filterFailed, closing, rebuilding, treeMode;
     private ContentDialog? summaryDialog;
 
     public TraceView()
@@ -43,7 +47,7 @@ public sealed partial class TraceView : UserControl
 
     public void Shutdown()
     {
-        closing = true; timer.Stop(); filterCancellation?.Cancel();
+        closing = true; timer.Stop(); filterCancellation?.Cancel(); capture.RequestCancel(); export.RequestCancel();
         var active = recorder ?? starting?.GetAwaiter().GetResult();
         active?.Dispose();
     }
@@ -51,7 +55,7 @@ public sealed partial class TraceView : UserControl
     private void UpdateControls()
     {
         StartButton.IsEnabled = administrator && !busy && !exporting;
-        StopButton.IsEnabled = busy && recorder is not null;
+        StopButton.IsEnabled = capture.Phase == OperationPhase.Running && recorder is not null;
         ClearButton.IsEnabled = !busy && !exporting;
         Setup.IsEnabled = !busy;
         CsvButton.IsEnabled = JsonButton.IsEnabled = result is not null && !busy && !querying && !filterFailed && !exporting;
@@ -61,7 +65,7 @@ public sealed partial class TraceView : UserControl
 
     private async void StartClicked(object sender, RoutedEventArgs args)
     {
-        if (busy || !administrator) return;
+        if (busy || exporting || closing || !administrator) return;
         TraceCategories categories = TraceCategories.None;
         var checks = new[] { Processes, Threads, Images, Files, Registry, Network };
         var flags = new[] { TraceCategories.Process, TraceCategories.Thread, TraceCategories.Image, TraceCategories.File, TraceCategories.Registry, TraceCategories.Network };
@@ -69,11 +73,12 @@ public sealed partial class TraceView : UserControl
         if (categories == TraceCategories.None) { Notice.Text = "Choose at least one activity category."; return; }
         var options = new TraceOptions(categories, TimeSpan.FromSeconds(new[] { 30, 60, 120, 300, 600 }[Duration.SelectedIndex]), new[] { 100000, 200000, 500000 }[EventCap.SelectedIndex], ExcludeSelf.IsOn);
         var seed = seeds();
-        recorder?.Dispose(); recorder = null; starting = null;
-        ResetView(); busy = true; Setup.IsExpanded = false; UpdateControls();
-        CaptureStatus.Text = "Starting private ETW recording…";
+        if (!capture.TryBegin(out var ticket)) return;
         try
         {
+            recorder?.Dispose(); recorder = null; starting = null;
+            ResetView(); Setup.IsExpanded = false; UpdateControls();
+            CaptureStatus.Text = "Starting private ETW recording…";
             starting = Task.Run(() => WindowsActivityTraceRecorder.StartAsync(options, seed));
             recorder = await starting;
             if (closing) return;
@@ -81,7 +86,7 @@ public sealed partial class TraceView : UserControl
             var completed = await recorder.Completion;
             timer.Stop();
             if (closing) return;
-            result = completed; busy = false;
+            result = completed;
             var reasons = new List<string>();
             if (completed.EventsLost > 0) reasons.Add("ETW events lost");
             if (completed.BufferDropped > 0) reasons.Add("ring buffer dropped oldest events");
@@ -104,20 +109,25 @@ public sealed partial class TraceView : UserControl
                 foreach (var item in completed.Events) counts[item.ProcessIndex] = counts.GetValueOrDefault(item.ProcessIndex) + 1;
                 return TraceTree.Build(completed.Processes).Select(row => new TraceProcessRow(row, counts.GetValueOrDefault(row.Process.Index))).ToArray();
             });
-            if (closing || !ReferenceEquals(result, completed)) return;
+            if (closing || !ReferenceEquals(result, completed) || !capture.IsCurrent(ticket)) return;
             ProcessTree.ItemsSource = rows;
+            if (!capture.Complete(ticket)) return;
             ShowMode(false); timer.Start(); UpdateControls();
         }
         catch (Exception ex)
         {
-            timer.Stop(); busy = false;
-            if (!closing) { CaptureStatus.Text = "Failed"; Notice.Text = $"Recording unavailable: {ex.GetType().Name}. No activity is saved automatically."; UpdateControls(); }
-            recorder?.Dispose();
+            if (capture.Complete(ticket))
+            {
+                timer.Stop();
+                if (!closing) { CaptureStatus.Text = "Failed"; Notice.Text = $"Recording unavailable: {ex.GetType().Name}. No activity is saved automatically."; UpdateControls(); }
+                recorder?.Dispose();
+            }
         }
+        finally { if (capture.Complete(ticket) && !closing) UpdateControls(); }
     }
 
     private async void StopClicked(object sender, RoutedEventArgs args)
-    { StopButton.IsEnabled = false; if (recorder is not null) await recorder.StopAsync(); }
+    { capture.RequestCancel(); UpdateControls(); if (recorder is not null) await recorder.StopAsync(); }
 
     private static string CounterText(TimeSpan elapsed, long seen, int stored, long processes, long lost, long dropped, long unresolved)
         => $"Elapsed {elapsed:mm\\:ss} · Events {stored:N0} retained / {seen:N0} seen · Processes started {processes:N0} · Lost {lost:N0} · Dropped {dropped:N0} · Unresolved {unresolved:N0}";
@@ -236,13 +246,23 @@ public sealed partial class TraceView : UserControl
         int generation = ++summaryGeneration; selectedProcess = index; var p = captured.Processes[index];
         SummaryTitle.Text = $"{p.ImageName ?? "(name unavailable)"} ({p.Pid})";
         SummaryText.Text = "Calculating retained-event summary…"; TopText.Text = ""; RefreshInspect();
-        var summary = await Task.Run(() => TraceProcessSummary.Build(captured, index));
-        if (generation != summaryGeneration || !ReferenceEquals(result, captured) || closing) return;
-        string Distinct(TraceDistinctSummary value) => $"{value.DistinctRetained:N0}" + (value.Capped ? $" (capped; {value.UntrackedObservations:N0} untracked observations)" : "");
-        SummaryText.Text = $"Parent PID {p.ParentPid}: {(p.ParentIndex < 0 ? "parent not observed" : captured.Processes[p.ParentIndex].ImageName ?? "name unavailable")}\nStart: {(p.Seeded ? "before recording (seeded)" : p.StartUtc?.ToLocalTime().ToString("G") ?? "unavailable")}\nExit: {p.ExitUtc?.ToLocalTime().ToString("G") ?? "not observed"} · code {p.ExitCode?.ToString() ?? "unavailable"}\nThreads started / stopped: {p.ThreadsStarted:N0} / {p.ThreadsStopped:N0}\nImages loaded: {summary.ImagesLoaded:N0}\nFile read / write: {Display.Bytes(summary.BytesRead)} / {Display.Bytes(summary.BytesWritten)}\nNetwork sent / received: {Display.Bytes(summary.BytesSent)} / {Display.Bytes(summary.BytesReceived)}\nFiles: {Distinct(summary.Files)}\nRegistry keys: {Distinct(summary.RegistryKeys)}\nEndpoints: {Distinct(summary.Endpoints)}\n" + string.Join(" · ", summary.CategoryCounts.Select(pair => $"{pair.Key}: {pair.Value:N0}"));
-        static string Top(string title, TraceDistinctSummary value) => title + "\n" + (value.Top.Count == 0 ? "No retained observations" : string.Join("\n", value.Top.Select(item => $"{item.Count:N0} × {item.Name}")));
-        TopText.Text = Top("Top files", summary.Files) + "\n\n" + Top("Top registry keys", summary.RegistryKeys) + "\n\n" + Top("Top endpoints", summary.Endpoints);
-        RefreshInspect();
+        try
+        {
+            var summary = await Task.Run(() => TraceProcessSummary.Build(captured, index));
+            if (generation != summaryGeneration || !ReferenceEquals(result, captured) || closing) return;
+            string Distinct(TraceDistinctSummary value) => $"{value.DistinctRetained:N0}" + (value.Capped ? $" (capped; {value.UntrackedObservations:N0} untracked observations)" : "");
+            SummaryText.Text = $"Parent PID {p.ParentPid}: {(p.ParentIndex < 0 ? "parent not observed" : captured.Processes[p.ParentIndex].ImageName ?? "name unavailable")}\nStart: {(p.Seeded ? "before recording (seeded)" : p.StartUtc?.ToLocalTime().ToString("G") ?? "unavailable")}\nExit: {p.ExitUtc?.ToLocalTime().ToString("G") ?? "not observed"} · code {p.ExitCode?.ToString() ?? "unavailable"}\nThreads started / stopped: {p.ThreadsStarted:N0} / {p.ThreadsStopped:N0}\nImages loaded: {summary.ImagesLoaded:N0}\nFile read / write: {Display.Bytes(summary.BytesRead)} / {Display.Bytes(summary.BytesWritten)}\nNetwork sent / received: {Display.Bytes(summary.BytesSent)} / {Display.Bytes(summary.BytesReceived)}\nFiles: {Distinct(summary.Files)}\nRegistry keys: {Distinct(summary.RegistryKeys)}\nEndpoints: {Distinct(summary.Endpoints)}\n" + string.Join(" · ", summary.CategoryCounts.Select(pair => $"{pair.Key}: {pair.Value:N0}"));
+            static string Top(string title, TraceDistinctSummary value) => title + "\n" + (value.Top.Count == 0 ? "No retained observations" : string.Join("\n", value.Top.Select(item => $"{item.Count:N0} × {item.Name}")));
+            TopText.Text = Top("Top files", summary.Files) + "\n\n" + Top("Top registry keys", summary.RegistryKeys) + "\n\n" + Top("Top endpoints", summary.Endpoints);
+            RefreshInspect();
+        }
+        catch (Exception ex)
+        {
+            if (generation != summaryGeneration || !ReferenceEquals(result, captured) || closing) return;
+            SummaryText.Text = "Summary unavailable: " + ex.Message;
+            TopText.Text = "";
+            RefreshInspect();
+        }
     }
     private void RefreshInspect()
     {
@@ -287,22 +307,23 @@ public sealed partial class TraceView : UserControl
 
     private async void ExportClicked(object sender, RoutedEventArgs args)
     {
-        if (result is not { } captured || sender is not Button { Tag: string format } || querying || filterFailed || exporting) return;
+        if (result is not { } captured || sender is not Button { Tag: string format } || querying || filterFailed || busy || closing || !export.TryBegin(out var ticket)) return;
+        UpdateControls();
         try
         {
             string? path = NativeFileDialogs.ChooseSave(owner, format, "Export filtered activity trace", $"SystemExplorer-trace-{DateTime.Now:yyyyMMdd-HHmmss}");
             if (path is null) return;
-            exporting = true; UpdateControls(); var filter = appliedFilter;
+            var filter = appliedFilter;
             Notice.Text = "Exporting the current filtered view…";
             await Task.Run(() =>
             {
                 if (format == "csv") { using var writer = new StreamWriter(path, false, new System.Text.UTF8Encoding(true)); TraceExport.WriteCsv(writer, captured, filter); }
                 else { using var stream = File.Create(path); TraceExport.WriteJson(stream, captured, filter); }
             });
-            if (!closing) Notice.Text = $"Exported filtered {format.ToUpperInvariant()} to {path}";
+            if (!closing && export.IsCurrent(ticket)) Notice.Text = $"Exported filtered {format.ToUpperInvariant()} to {path}";
         }
-        catch (Exception ex) { if (!closing) Notice.Text = $"Export failed: {ex.Message}"; }
-        finally { exporting = false; if (!closing) UpdateControls(); }
+        catch (Exception ex) { if (!closing && export.IsCurrent(ticket)) Notice.Text = $"Export failed: {ex.Message}"; }
+        finally { if (export.Complete(ticket) && !closing) UpdateControls(); }
     }
 
     private void ViewSizeChanged(object sender, SizeChangedEventArgs args)
