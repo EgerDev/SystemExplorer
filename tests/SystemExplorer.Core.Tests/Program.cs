@@ -4,6 +4,8 @@ using SystemExplorer.App;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Operation gate owns generations, cancellation and current-only completion", OperationGateTests.Run),
+    ("Investigation completion rejects stale selection and terminal scan status never says scanning", OperationGateTests.Presentation),
     ("CSV exports have unique headers and round-trip RAM tabs, Hidden, Storage and Trace", CsvExportTests.Run),
     ("Trace and Storage CSV capture metadata occurs once with event-only linear growth", CsvExportTests.MetadataSize),
     ("Filtered Trace JSON includes only referenced process lifetimes and ancestors with valid remapped indices", TraceJsonExportTests.Run),
