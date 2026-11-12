@@ -30,6 +30,8 @@ public sealed partial class HiddenItemsView : UserControl
     private void HiddenSizeChanged(object sender, SizeChangedEventArgs args)
     {
         if (InventoryCard is null || PageScroll is null || LayoutRoot.ActualHeight == 0) return;
+        InventoryCard.MinHeight = Explanation.IsExpanded ? 240 : 0;
+        HeaderScroll.MaxHeight = Explanation.IsExpanded ? Math.Max(80, PageScroll.ActualHeight - InventoryCard.MinHeight - 8) : double.PositiveInfinity;
         double height = InventoryCard.ActualHeight;
         bool compact = PageScroll.ActualHeight < 500;
         if (Inventory.Content is Grid layout) layout.RowSpacing = compact ? 4 : 8;

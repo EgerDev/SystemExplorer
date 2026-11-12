@@ -5,8 +5,10 @@
     xmlns:controls="using:SystemExplorer.App.Controls">
     <UserControl.Resources><x:Double x:Key="ExpanderHeaderMinHeight">32</x:Double></UserControl.Resources>
     <Grid x:Name="PageScroll" SizeChanged="HiddenSizeChanged" AutomationProperties.Name="Hidden items page">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <ScrollViewer x:Name="HeaderScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,8">
     <Grid x:Name="LayoutRoot" RowSpacing="8" SizeChanged="HiddenSizeChanged">
-        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <Grid ColumnSpacing="10">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" MaxWidth="420"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <ComboBox x:Name="Selector" SelectedIndex="0" SelectionChanged="ScanChanged" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Hidden items scan">
@@ -25,15 +27,16 @@
             <controls:SummaryCard x:Name="Info" Grid.Column="3" Label="Info" Value="0" Glyph="&#xE946;"/>
         </Grid>
         <TextBlock x:Name="CaptureStatus" Grid.Row="2" Text="Not run yet — click Run" Style="{StaticResource InvestigationStatus}" MaxLines="1" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
-        <Expander Grid.Row="3" Header="How this scan works" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+        <Expander x:Name="Explanation" Grid.Row="3" Header="How this scan works" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
             <ScrollViewer MaxHeight="120"><StackPanel Spacing="8">
                 <TextBlock x:Name="Elevation" Style="{StaticResource Muted}"/>
                 <TextBlock x:Name="Sources" Text="Read-only, local observations. Leads are not proof of compromise." Style="{StaticResource Muted}" IsTextSelectionEnabled="True"/>
             </StackPanel></ScrollViewer>
         </Expander>
-        <Border x:Name="InventoryCard" Grid.Row="4" Style="{StaticResource Card}" Padding="12">
+    </Grid>
+    </ScrollViewer>
+        <Border x:Name="InventoryCard" Grid.Row="1" Style="{StaticResource Card}" Padding="12">
             <views:InventoryView x:Name="Inventory"/>
         </Border>
-    </Grid>
     </Grid>
 </UserControl>
