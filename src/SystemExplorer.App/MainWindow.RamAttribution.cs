@@ -33,7 +33,7 @@ public sealed partial class MainWindow
         void ScaleChanged(XamlRoot sender, XamlRootChangedEventArgs args) => Resize();
         Resize();
         var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, RequestedTheme = Root.ActualTheme, Title = "What's eating RAM",
-            Content = view, CloseButtonText = "Close / cancel", DefaultButton = ContentDialogButton.Close };
+            Content = view, CloseButtonText = "Close", DefaultButton = ContentDialogButton.None };
         dialog.Resources["ContentDialogMaxWidth"] = 1200d;
         dialog.Closing += (_, _) => cancellation.Cancel();
         Root.SizeChanged += Resized; Root.XamlRoot.Changed += ScaleChanged;

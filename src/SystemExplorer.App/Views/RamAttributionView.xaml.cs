@@ -96,6 +96,7 @@ public sealed partial class RamAttributionView : UserControl
 
     private void UpdateOperationControls()
     {
+        ProcessEmpty.Visibility = ProcessTable.Content is null && !operation.IsBusy ? Visibility.Visible : Visibility.Collapsed;
         ProcessScan.IsEnabled = PhysicalScan.IsEnabled = !operation.IsBusy;
         FindDrivers.IsEnabled = !operation.IsBusy && pool is not null;
         ProcessCancel.IsEnabled = PoolCancel.IsEnabled = PhysicalCancel.IsEnabled = operation.Phase == OperationPhase.Running && operationKind != RamOperationKind.Export;
@@ -147,10 +148,10 @@ public sealed partial class RamAttributionView : UserControl
             var block = new Border { Background = brush }; Grid.SetColumn(block, i);
             ToolTipService.SetToolTip(block, $"{segment.Name}: {segment.Fraction:P1}"); Composition.Children.Add(block);
             var legend = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            legend.Children.Add(new Border { Width = 10, Height = 10, Background = brush, VerticalAlignment = VerticalAlignment.Center });
+            legend.Children.Add(new Border { Width = 16, Height = 16, Background = brush, CornerRadius = new CornerRadius(2), VerticalAlignment = VerticalAlignment.Center });
             var size = machine.Categories.First(c => c.Name == segment.Name).Bytes;
             var label = segment.Name.StartsWith("Other in-use", StringComparison.Ordinal) ? "Other in-use (remainder)" : segment.Name;
-            legend.Children.Add(new TextBlock { Text = $"{label}\n{SignedBytes(size)} · {segment.Fraction:P1}", FontSize = 12, Width = 224, TextWrapping = TextWrapping.Wrap });
+            legend.Children.Add(new TextBlock { Text = $"{label}\n{SignedBytes(size)} · {segment.Fraction:P1}", Style = (Style)Application.Current.Resources["Muted"], Width = 290, TextWrapping = TextWrapping.Wrap });
             ToolTipService.SetToolTip(legend, segment.Name);
             Legend.Items.Add(legend);
         }
@@ -159,6 +160,7 @@ public sealed partial class RamAttributionView : UserControl
     private async void ProcessScanClicked(object sender, RoutedEventArgs args) => await Start(RamOperationKind.Processes, async ticket =>
     {
         var token = ticket.CancellationToken;
+        ProcessEmpty.Visibility = Visibility.Collapsed;
         ProcessStatus.Text = $"Scanning 0 / {snapshot.Processes.Count}; identities from {snapshot.CapturedAt:g}";
         ProcessProgress.Value = 0; ProcessProgress.Maximum = Math.Max(1, snapshot.Processes.Count);
         var progress = new Progress<(int Done, int Total)>(p =>
@@ -283,13 +285,13 @@ public sealed partial class RamAttributionView : UserControl
             header.ColumnDefinitions.Add(new() { Width = new GridLength(widths[i]) });
             template.Append($"<ColumnDefinition Width='{widths[i]}'/>");
             var index = i;
-            var button = new Button { Content = headers[i] + (sort == i ? descending ? " ↓" : " ↑" : ""), Style = (Style)Application.Current.Resources["ColumnHeader"], FontSize = 12 };
+            var button = new Button { Content = headers[i] + (sort == i ? descending ? " ↓" : " ↑" : ""), Style = (Style)Application.Current.Resources["ColumnHeader"] };
             ToolTipService.SetToolTip(button, "Sort by " + headers[i]); Grid.SetColumn(button, i); header.Children.Add(button);
             button.HorizontalContentAlignment = numeric[i] ? HorizontalAlignment.Right : HorizontalAlignment.Left;
             button.Click += (_, _) => Table(host, headers, widths, numeric, rows, index, index == sort ? !descending : numeric[index]);
         }
         template.Append("</Grid.ColumnDefinitions>");
-        for (var i = 0; i < headers.Length; i++) template.Append("<TextBlock Grid.Column='" + i + "' Text='{Binding C" + i + "}' Style='{StaticResource " + (numeric[i] ? "NumericCell" : "DataCell") + "}' FontSize='12' TextWrapping='Wrap' MaxLines='3'/>");
+        for (var i = 0; i < headers.Length; i++) template.Append("<TextBlock Grid.Column='" + i + "' Text='{Binding C" + i + "}' Style='{StaticResource " + (numeric[i] ? "NumericCell" : "DataCell") + "}' TextWrapping='Wrap' MaxLines='3'/>");
         template.Append("</Grid></DataTemplate>");
         IEnumerable<RamTableRow> ordered = numeric[sort]
             ? descending ? rows.OrderBy(r => r.Numbers[sort] is null).ThenByDescending(r => r.Numbers[sort]) : rows.OrderBy(r => r.Numbers[sort] is null).ThenBy(r => r.Numbers[sort])

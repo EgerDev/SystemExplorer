@@ -58,6 +58,7 @@ public sealed partial class StorageView : UserControl, IDisposable
         timer = DispatcherQueue.CreateTimer(); timer.Interval = TimeSpan.FromMilliseconds(250);
         timer.Tick += (_, _) => PollProgress();
         ready = true;
+        UpdatePresentation();
     }
     public async void OnNavigated()
     {
@@ -163,6 +164,8 @@ public sealed partial class StorageView : UserControl, IDisposable
     private void UpdateOperationControls()
     {
         ScanButton.IsEnabled = ProfileButton.IsEnabled = !work.IsBusy;
+        EmptyScanButton.IsEnabled = !work.IsBusy;
+        UpdatePresentation();
         CancelButton.IsEnabled = workKind == StorageOperationKind.Scan && work.Phase == OperationPhase.Running;
         ExportButton.IsEnabled = !work.IsBusy && result is not null;
     }
@@ -176,6 +179,7 @@ public sealed partial class StorageView : UserControl, IDisposable
     }
     private void ClearLists()
     {
+        UpdatePresentation();
         foreach (var list in new[] { ChildrenList, LargestList, TypesList, AgeList, SkippedList, CategoriesList, BloatList, ProjectsList, AIList, LeadsList }) list.ItemsSource = null;
         Breadcrumb.ItemsSource = null; DetailPath.Text = detailPath = ""; CleanupPanel.Visibility = Visibility.Collapsed;
         OpenDetail.IsEnabled = CopyDetail.IsEnabled = false;
@@ -184,6 +188,7 @@ public sealed partial class StorageView : UserControl, IDisposable
     }
     private void RenderScan()
     {
+        UpdatePresentation();
         if (result is not { } scan) return;
         ResultTitle.Text = scan.State switch { StorageScanState.Completed => "Complete", StorageScanState.Partial => $"Partial — {scan.DeniedTotal:N0} access denial / enumeration error(s)", StorageScanState.Cancelled => "Partial – cancelled", _ => "Failed — " + (scan.DeniedPaths.FirstOrDefault()?.Reason ?? "scan did not complete") };
         ResultDetail.Text = $"{scan.Method}\n{Count(scan.Totals.Files, "file")} · {Count(scan.Totals.Directories, "folder")} · {Bytes(scan.Totals.LogicalBytes)} logical / {Bytes(scan.Totals.AllocatedBytes)} allocated · {Count(scan.HardLinkDuplicates, "hard-link duplicate")} skipped ({Bytes(scan.HardLinkAllocatedBytes)} allocated)";
@@ -252,6 +257,7 @@ public sealed partial class StorageView : UserControl, IDisposable
     private static long UnionBytes(IEnumerable<BloatItem> source) => DeveloperBloatAnalyzer.Summarize(source).Sum(x => x.AllocatedBytes);
     private void RenderDeveloper()
     {
+        UpdatePresentation();
         if (report is not { } r || result is not { } scan) return;
         var footprint = UnionBytes(r.Items.Concat(r.Projects.Select(p => new BloatItem("Projects", "Project", p.Path, p.AllocatedBytes, 0, p.LastActivity, BloatConfidence.High, "", null, null, "Project"))));
         FootprintCard.Value = Bytes(footprint); ReclaimValue.Text = Bytes(r.KnownReclaimableBytes);
@@ -328,6 +334,16 @@ public sealed partial class StorageView : UserControl, IDisposable
         foreach (var card in new[] { InsightsCard, DetailCard }) { Grid.SetColumn(card, narrow ? 0 : 1); Grid.SetRow(card, narrow ? 1 : 0); Grid.SetColumnSpan(card, narrow ? 2 : 1); }
         var cards = new FrameworkElement[] { FootprintCard, ReclaimContainer, ProjectsCard, AICard };
         for (var i = 0; i < cards.Length; i++) { Grid.SetRow(cards[i], narrow ? i / 2 : 0); Grid.SetColumn(cards[i], narrow ? i % 2 * 2 : i); Grid.SetColumnSpan(cards[i], narrow ? 2 : 1); }
+    }
+    private void UpdatePresentation()
+    {
+        var hasScan = result is not null;
+        SpaceEmpty.Visibility = !hasScan && !work.IsBusy ? Visibility.Visible : Visibility.Collapsed;
+        ScanStatusCard.Visibility = hasScan || work.IsBusy ? Visibility.Visible : Visibility.Collapsed;
+        SpaceColumns.Visibility = hasScan ? Visibility.Visible : Visibility.Collapsed;
+        ScanButton.Visibility = hasScan || work.IsBusy ? Visibility.Visible : Visibility.Collapsed;
+        var developer = report is not null ? Visibility.Visible : Visibility.Collapsed;
+        SummaryGrid.Visibility = CategoriesList.Visibility = DeveloperColumns.Visibility = CatalogCoverage.Visibility = developer;
     }
     public void Dispose()
     {
