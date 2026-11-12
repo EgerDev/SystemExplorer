@@ -57,6 +57,10 @@
         <Setter Property="FontSize" Value="{StaticResource DataSize}"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
     </Style>
+    <Style x:Key="InvestigationStatus" TargetType="TextBlock" BasedOn="{StaticResource Muted}">
+        <Setter Property="MaxLines" Value="2"/>
+        <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+    </Style>
     <Style x:Key="SectionLabel" TargetType="TextBlock">
         <Setter Property="FontSize" Value="{StaticResource SectionHeadingSize}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>

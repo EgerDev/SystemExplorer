@@ -30,10 +30,11 @@ public sealed partial class HiddenItemsView : UserControl
     private void HiddenSizeChanged(object sender, SizeChangedEventArgs args)
     {
         if (InventoryCard is null || PageScroll is null || LayoutRoot.ActualHeight == 0) return;
-        double headerHeight = LayoutRoot.ActualHeight - InventoryCard.ActualHeight;
-        double height = Math.Max(360, PageScroll.ActualHeight - headerHeight);
-        if (Math.Abs(InventoryCard.Height - height) > 0.5) InventoryCard.Height = height;
-        if (Inventory.FindName("DetailScroll") is ScrollViewer detail) detail.MaxHeight = Math.Clamp(height - 400, 70, 200);
+        double height = InventoryCard.ActualHeight;
+        bool compact = PageScroll.ActualHeight < 500;
+        if (Inventory.Content is Grid layout) layout.RowSpacing = compact ? 4 : 8;
+        if (Inventory.FindName("Status") is TextBlock status) status.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        if (Inventory.FindName("DetailScroll") is ScrollViewer detail) detail.MaxHeight = compact ? 36 : Math.Clamp(height - 400, 70, 200);
     }
     public void OperationChanged(HiddenOperationKind kind)
     {

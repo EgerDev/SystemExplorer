@@ -58,7 +58,7 @@ public sealed partial class TraceView : UserControl
         StopButton.IsEnabled = capture.Phase == OperationPhase.Running && recorder is not null;
         ClearButton.IsEnabled = !busy && !exporting;
         Setup.IsEnabled = !busy;
-        CsvButton.IsEnabled = JsonButton.IsEnabled = result is not null && !busy && !querying && !filterFailed && !exporting;
+        ExportButton.IsEnabled = result is not null && !busy && !querying && !filterFailed && !exporting;
         Timeline.IsEnabled = !querying;
         ConfigureLayout();
     }
@@ -268,7 +268,7 @@ public sealed partial class TraceView : UserControl
     {
         var p = result is { } r && selectedProcess >= 0 && selectedProcess < r.Processes.Count ? r.Processes[selectedProcess] : null;
         InspectButton.IsEnabled = p is not null && p.ExitUtc is null && isCurrent(new(p.Pid, p.CreateTimeFileTime));
-        InspectReason.Text = InspectButton.IsEnabled ? "PID and creation time match the current live snapshot." : "Unavailable: no matching current live PID + creation time. An identical PID alone is not a match.";
+        InspectReason.Text = selectedProcess < 0 ? "Select an event or process to inspect its live identity." : InspectButton.IsEnabled ? "PID and creation time match the current live snapshot." : "Unavailable: no matching current live PID + creation time. An identical PID alone is not a match.";
         if (summaryDialog is { } dialog)
         {
             dialog.IsPrimaryButtonEnabled = InspectButton.IsEnabled;
@@ -292,7 +292,7 @@ public sealed partial class TraceView : UserControl
         RefreshInspect();
         var content = new StackPanel { Spacing = 10 };
         foreach (string text in new[] { InspectReason.Text, SummaryText.Text, TopText.Text })
-            content.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, FontSize = 12 });
+            content.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Style = (Style)Application.Current.Resources["Muted"] });
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot, RequestedTheme = ActualTheme, Title = SummaryTitle.Text,
@@ -307,7 +307,7 @@ public sealed partial class TraceView : UserControl
 
     private async void ExportClicked(object sender, RoutedEventArgs args)
     {
-        if (result is not { } captured || sender is not Button { Tag: string format } || querying || filterFailed || busy || closing || !export.TryBegin(out var ticket)) return;
+        if (result is not { } captured || sender is not MenuFlyoutItem { Tag: string format } || querying || filterFailed || busy || closing || !export.TryBegin(out var ticket)) return;
         UpdateControls();
         try
         {
@@ -343,7 +343,7 @@ public sealed partial class TraceView : UserControl
         TopScroll.MaxHeight = setup ? Math.Max(140, ActualHeight - Actions.ActualHeight - Math.Max(48, LimitsPanel.ActualHeight) - 18)
             : Math.Max(140, ActualHeight * (result is not null && compact ? .4 : .52));
         Setup.Visibility = busy || result is not null ? Visibility.Collapsed : Visibility.Visible;
-        Notice.Visibility = result is not null && compact ? Visibility.Collapsed : Visibility.Visible;
+        Notice.Visibility = Visibility.Visible;
         bool narrow = width < 760;
         var checks = new[] { Processes, Threads, Images, Files, Registry, Network };
         int columns = compact ? 3 : 6;

@@ -2,16 +2,19 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     SizeChanged="ViewSizeChanged">
+    <UserControl.Resources><x:Double x:Key="ExpanderHeaderMinHeight">32</x:Double></UserControl.Resources>
     <Grid RowSpacing="6">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition x:Name="ResultsRow" Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <Grid x:Name="Actions" ColumnSpacing="6" RowSpacing="6">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Button x:Name="StartButton" Content="Start recording" Click="StartClicked" Style="{StaticResource AccentButtonStyle}"/>
             <Button x:Name="StopButton" Grid.Column="1" Content="Stop" Click="StopClicked" IsEnabled="False"/>
-            <Button x:Name="CsvButton" Grid.Column="2" Content="Export CSV" Tag="csv" Click="ExportClicked" IsEnabled="False"/>
-            <Button x:Name="JsonButton" Grid.Column="3" Content="Export JSON" Tag="json" Click="ExportClicked" IsEnabled="False"/>
-            <Button x:Name="ClearButton" Grid.Column="4" Content="Clear" Click="ClearClicked"/>
+            <DropDownButton x:Name="ExportButton" Grid.Column="2" Content="Export" IsEnabled="False">
+                <DropDownButton.Flyout><MenuFlyout><MenuFlyoutItem Text="CSV" Tag="csv" Click="ExportClicked"/><MenuFlyoutItem Text="JSON" Tag="json" Click="ExportClicked"/></MenuFlyout></DropDownButton.Flyout>
+            </DropDownButton>
+            <Button x:Name="ClearButton" Grid.Column="3" Content="Clear" Click="ClearClicked"/>
+            <TextBlock x:Name="CaptureStatus" Grid.Column="4" Text="Not started · ready for an opt-in recording" Style="{StaticResource InvestigationStatus}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="8,0" ToolTipService.ToolTip="{Binding Text, ElementName=Notice}"/>
         </Grid>
         <ScrollViewer x:Name="TopScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Spacing="8">
@@ -41,13 +44,10 @@
                         </Grid>
                     </StackPanel>
                 </Expander>
-                <Border Style="{StaticResource Card}" Padding="10,4">
-                    <StackPanel Spacing="4">
-                        <TextBlock x:Name="CaptureStatus" Text="Not started · ready for an opt-in recording" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                        <TextBlock x:Name="Counters" Text="Elapsed 0:00 · Events 0 · Processes started 0 · Lost 0 · Dropped 0" FontSize="12" TextWrapping="Wrap" Style="{StaticResource Muted}"/>
-                    </StackPanel>
-                </Border>
-                <TextBlock x:Name="Notice" Text="Start a recording to observe local activity. Nothing is saved automatically." FontSize="12" TextWrapping="Wrap" Style="{StaticResource Muted}"/>
+                <Expander Header="Filters and capture details" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <StackPanel Spacing="8">
+                <TextBlock x:Name="Counters" Text="Elapsed 0:00 · Events 0 · Processes started 0 · Lost 0 · Dropped 0" Style="{StaticResource Muted}"/>
+                <TextBlock x:Name="Notice" Text="Start a recording to observe local activity. Nothing is saved automatically." Style="{StaticResource Muted}"/>
                 <StackPanel x:Name="Filters" Spacing="6" Visibility="Collapsed">
                     <Grid x:Name="FilterFirst" ColumnSpacing="8" RowSpacing="6">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="170"/><ColumnDefinition/></Grid.ColumnDefinitions>
@@ -66,6 +66,11 @@
                         <TextBox x:Name="To" Grid.Column="2" PlaceholderText="To (s)" TextChanged="FilterTextChanged" AutomationProperties.Name="Trace range to seconds"/>
                     </Grid>
                 </StackPanel>
+                <Expander x:Name="LimitsPanel" Header="Read-only · limitations" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                    <TextBlock x:Name="Limitations" Style="{StaticResource Muted}" IsTextSelectionEnabled="True"/>
+                </Expander>
+                </StackPanel>
+                </Expander>
             </StackPanel>
         </ScrollViewer>
         <Grid x:Name="ResultsLayout" Grid.Row="2" ColumnSpacing="8" RowSpacing="6" SizeChanged="ResultsSizeChanged">
@@ -80,57 +85,54 @@
                         <Button x:Name="SummaryButton" Content="Summary" Visibility="Collapsed" Click="SummaryClicked"/>
                     </StackPanel>
                     <Grid x:Name="EventHeader" Grid.Row="1" Padding="10,6" Background="{ThemeResource HeaderSurface}">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="80"/><ColumnDefinition Width="140"/><ColumnDefinition Width="116"/><ColumnDefinition/><ColumnDefinition Width="70"/></Grid.ColumnDefinitions>
-                        <TextBlock Text="Time" FontSize="12" FontWeight="SemiBold"/><TextBlock Grid.Column="1" Text="Process (PID)" FontSize="12" FontWeight="SemiBold"/>
-                        <TextBlock Grid.Column="2" Text="Operation" FontSize="12" FontWeight="SemiBold"/><TextBlock Grid.Column="3" Text="Path / target · detail" FontSize="12" FontWeight="SemiBold"/>
-                        <TextBlock Grid.Column="4" Text="Bytes" FontSize="12" FontWeight="SemiBold"/>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="96"/><ColumnDefinition Width="140"/><ColumnDefinition Width="132"/><ColumnDefinition/><ColumnDefinition Width="70"/></Grid.ColumnDefinitions>
+                        <TextBlock Margin="0" Style="{StaticResource DataCell}" Text="Time" FontWeight="SemiBold"/><TextBlock Margin="0" Style="{StaticResource DataCell}" Grid.Column="1" Text="Process (PID)" FontWeight="SemiBold"/>
+                        <TextBlock Margin="0" Style="{StaticResource DataCell}" Grid.Column="2" Text="Operation" FontWeight="SemiBold"/><TextBlock Margin="0" Style="{StaticResource DataCell}" Grid.Column="3" Text="Path / target · detail" FontWeight="SemiBold"/>
+                        <TextBlock Margin="0" Style="{StaticResource DataCell}" Grid.Column="4" Text="Bytes" FontWeight="SemiBold"/>
                     </Grid>
                     <ListView x:Name="Timeline" Grid.Row="2" SelectionChanged="EventSelected" ScrollViewer.HorizontalScrollMode="Disabled" AutomationProperties.Name="Activity trace timeline">
                         <ListView.ItemTemplate><DataTemplate>
-                            <Grid Padding="10,4" MinHeight="32" ToolTipService.ToolTip="{Binding Description}">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="80"/><ColumnDefinition Width="140"/><ColumnDefinition Width="116"/><ColumnDefinition/><ColumnDefinition Width="70"/></Grid.ColumnDefinitions>
-                                <TextBlock Text="{Binding Time}" FontSize="11" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="1" Text="{Binding Process}" TextTrimming="CharacterEllipsis" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                <TextBlock Grid.Column="2" Text="{Binding Operation}" TextTrimming="CharacterEllipsis" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                <StackPanel Grid.Column="3" VerticalAlignment="Center" Margin="0,0,6,0"><TextBlock Text="{Binding Path}" TextTrimming="CharacterEllipsis" FontSize="12"/><TextBlock Text="{Binding Detail}" Visibility="{Binding DetailVisibility}" TextTrimming="CharacterEllipsis" FontSize="11" Style="{StaticResource Muted}"/></StackPanel>
-                                <TextBlock Grid.Column="4" Text="{Binding Bytes}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                            <Grid Padding="10,1" MinHeight="24" ToolTipService.ToolTip="{Binding Description}">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="96"/><ColumnDefinition Width="140"/><ColumnDefinition Width="132"/><ColumnDefinition/><ColumnDefinition Width="70"/></Grid.ColumnDefinitions>
+                                <TextBlock Margin="0" Style="{StaticResource DataCell}" Text="{Binding Time}" VerticalAlignment="Center"/>
+                                <TextBlock Style="{StaticResource DataCell}" Grid.Column="1" Text="{Binding Process}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <TextBlock Style="{StaticResource DataCell}" Grid.Column="2" Text="{Binding Operation}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <TextBlock Grid.Column="3" Text="{Binding Path}" Style="{StaticResource DataCell}" Margin="0,0,6,0" ToolTipService.ToolTip="{Binding Description}"/>
+                                <TextBlock Margin="0" Style="{StaticResource DataCell}" Grid.Column="4" Text="{Binding Bytes}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                             </Grid>
                         </DataTemplate></ListView.ItemTemplate>
-                        <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="Padding" Value="0"/><Setter Property="MinHeight" Value="32"/></Style></ListView.ItemContainerStyle>
+                        <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="Padding" Value="0"/><Setter Property="MinHeight" Value="24"/></Style></ListView.ItemContainerStyle>
                     </ListView>
                     <Grid x:Name="TreeHeader" Grid.Row="1" Padding="10,6" Background="{ThemeResource HeaderSurface}" Visibility="Collapsed">
                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="110"/><ColumnDefinition Width="130"/></Grid.ColumnDefinitions>
-                        <TextBlock Text="Process · parent → child" FontSize="12" FontWeight="SemiBold"/><TextBlock Grid.Column="1" Text="Start" FontSize="12" FontWeight="SemiBold"/><TextBlock Grid.Column="2" Text="Exit / code" FontSize="12" FontWeight="SemiBold"/>
+                        <TextBlock Margin="0" Style="{StaticResource DataCell}" Text="Process · parent → child" FontWeight="SemiBold"/><TextBlock Margin="0" Style="{StaticResource DataCell}" Grid.Column="1" Text="Start" FontWeight="SemiBold"/><TextBlock Margin="0" Style="{StaticResource DataCell}" Grid.Column="2" Text="Exit / code" FontWeight="SemiBold"/>
                     </Grid>
                     <ListView x:Name="ProcessTree" Grid.Row="2" Visibility="Collapsed" SelectionChanged="TreeSelected" AutomationProperties.Name="Recorded process tree">
                         <ListView.ItemTemplate><DataTemplate>
                             <Grid Height="54" Padding="10,5" ToolTipService.ToolTip="{Binding Description}">
                                 <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="110"/><ColumnDefinition Width="130"/></Grid.ColumnDefinitions>
-                                <StackPanel Margin="{Binding Indent}" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Parent}" FontSize="11" TextTrimming="CharacterEllipsis" Style="{StaticResource Muted}"/></StackPanel>
-                                <TextBlock Grid.Column="1" Text="{Binding Start}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="2" Text="{Binding Exit}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                <StackPanel Margin="{Binding Indent}" VerticalAlignment="Center"><TextBlock Margin="0" Style="{StaticResource DataCell}" Text="{Binding Name}" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Parent}" TextTrimming="CharacterEllipsis" Style="{StaticResource Muted}"/></StackPanel>
+                                <TextBlock Margin="0" Style="{StaticResource DataCell}" Grid.Column="1" Text="{Binding Start}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                <TextBlock Margin="0" Style="{StaticResource DataCell}" Grid.Column="2" Text="{Binding Exit}" TextWrapping="Wrap" VerticalAlignment="Center"/>
                             </Grid>
                         </DataTemplate></ListView.ItemTemplate>
                         <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/></Style></ListView.ItemContainerStyle>
                     </ListView>
-                    <TextBlock x:Name="Empty" Grid.Row="2" Text="Your recorded activity will appear here." Margin="16" FontSize="13" TextWrapping="Wrap" IsHitTestVisible="False"/>
-                    <TextBlock x:Name="ViewCount" Grid.Row="3" Margin="10,5" Text="No recording" FontSize="11" Style="{StaticResource Muted}" TextWrapping="Wrap"/>
+                    <TextBlock Style="{StaticResource DataCell}" x:Name="Empty" Grid.Row="2" Text="Your recorded activity will appear here." Margin="16" TextWrapping="Wrap" IsHitTestVisible="False"/>
+                    <TextBlock x:Name="ViewCount" Grid.Row="3" Margin="10,5" Text="No recording" Style="{StaticResource Muted}" TextWrapping="Wrap"/>
                 </Grid>
             </Border>
             <Expander x:Name="Summary" Grid.Column="1" Header="Process summary" IsExpanded="True" HorizontalAlignment="Stretch" VerticalAlignment="Top" HorizontalContentAlignment="Stretch" Visibility="Collapsed">
                 <ScrollViewer x:Name="SummaryScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Spacing="8">
-                        <TextBlock x:Name="SummaryTitle" Text="Select an event or process" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                        <TextBlock Margin="0" Style="{StaticResource DataCell}" x:Name="SummaryTitle" Text="Select an event or process" FontWeight="SemiBold" TextWrapping="Wrap"/>
                         <Button x:Name="InspectButton" Content="Inspect live process" Click="InspectClicked" IsEnabled="False"/>
-                        <TextBlock x:Name="InspectReason" FontSize="11" TextWrapping="Wrap" Style="{StaticResource Muted}"/>
-                        <TextBlock x:Name="SummaryText" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
-                        <TextBlock x:Name="TopText" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+                        <TextBlock x:Name="InspectReason" TextWrapping="Wrap" Style="{StaticResource Muted}"/>
+                        <TextBlock Margin="0" Style="{StaticResource DataCell}" x:Name="SummaryText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+                        <TextBlock Margin="0" Style="{StaticResource DataCell}" x:Name="TopText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
                     </StackPanel>
                 </ScrollViewer>
             </Expander>
         </Grid>
-        <Expander x:Name="LimitsPanel" Grid.Row="3" Header="Read-only · limitations and capture details" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-            <ScrollViewer MaxHeight="100" VerticalScrollBarVisibility="Auto"><TextBlock x:Name="Limitations" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True"/></ScrollViewer>
-        </Expander>
     </Grid>
 </UserControl>
