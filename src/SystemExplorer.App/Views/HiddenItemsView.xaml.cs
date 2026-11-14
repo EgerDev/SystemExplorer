@@ -11,10 +11,8 @@ public sealed record HiddenScanResult(DateTimeOffset CapturedAt, string Summary,
 public sealed partial class HiddenItemsView : UserControl
 {
     private const double MinimumHeaderViewport = 80;
-    private const double MinimumInventoryViewport = 264;
-    private const double CompactInventoryContentHeight = 176;
+    private const double MinimumInventoryViewport = 300;
     private const double CompactDetailsViewport = 64;
-    private const double CompactRowsViewport = 80;
 
     private readonly Dictionary<int, HiddenScanResult> results = new();
     private bool ready;
@@ -44,8 +42,6 @@ public sealed partial class HiddenItemsView : UserControl
         bool compact = PageScroll.ActualHeight < 500;
         if (Inventory.Content is Grid layout) layout.RowSpacing = compact ? 4 : 8;
         if (Inventory.FindName("Status") is TextBlock status) status.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
-        if (Inventory.FindName("Rows") is ListView rows)
-            rows.MinHeight = compact ? Math.Min(CompactRowsViewport, Math.Max(0, InventoryCard.MinHeight - CompactInventoryContentHeight)) : 0;
         if (Inventory.FindName("DetailScroll") is ScrollViewer detail)
             detail.MaxHeight = compact ? CompactDetailsViewport : Math.Clamp(height - 400, 70, 200);
     }
