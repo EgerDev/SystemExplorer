@@ -3,34 +3,40 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:views="using:SystemExplorer.App.Views"
     xmlns:controls="using:SystemExplorer.App.Controls">
-    <ScrollViewer x:Name="PageScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" SizeChanged="HiddenSizeChanged" AutomationProperties.Name="Hidden items page">
-    <Grid x:Name="LayoutRoot" RowSpacing="10" VerticalAlignment="Top" SizeChanged="HiddenSizeChanged">
-        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <UserControl.Resources><x:Double x:Key="ExpanderHeaderMinHeight">32</x:Double></UserControl.Resources>
+    <Grid x:Name="PageScroll" SizeChanged="HiddenSizeChanged" AutomationProperties.Name="Hidden items page">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <ScrollViewer x:Name="HeaderScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,8">
+    <Grid x:Name="LayoutRoot" RowSpacing="8" SizeChanged="HiddenSizeChanged">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <Grid ColumnSpacing="10">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" MaxWidth="420"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <ComboBox x:Name="Selector" SelectedIndex="0" SelectionChanged="ScanChanged" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Hidden items scan">
                 <x:String>Processes cross-view</x:String><x:String>Services cross-view</x:String><x:String>Scheduled tasks cross-view</x:String><x:String>Suspicious leads</x:String><x:String>Alternate data streams</x:String>
             </ComboBox>
             <Button x:Name="RunButton" Grid.Column="1" Content="Run" Click="RunClicked" MinWidth="88" Style="{StaticResource AccentButtonStyle}"/>
-            <Button x:Name="ExportButton" Grid.Column="2" Content="Export" IsEnabled="False">
-                <Button.Flyout><MenuFlyout><MenuFlyoutItem Text="Export CSV" Tag="csv" Click="ExportClicked"/><MenuFlyoutItem Text="Export JSON" Tag="json" Click="ExportClicked"/></MenuFlyout></Button.Flyout>
-            </Button>
+            <DropDownButton x:Name="ExportButton" Grid.Column="2" Content="Export" IsEnabled="False">
+                <DropDownButton.Flyout><MenuFlyout><MenuFlyoutItem Text="CSV" Tag="csv" Click="ExportClicked"/><MenuFlyoutItem Text="JSON" Tag="json" Click="ExportClicked"/></MenuFlyout></DropDownButton.Flyout>
+            </DropDownButton>
         </Grid>
-        <TextBlock x:Name="Elevation" Grid.Row="1" Style="{StaticResource Muted}" TextWrapping="Wrap"/>
-        <Grid Grid.Row="2" ColumnSpacing="8">
+        <Grid Grid.Row="1" ColumnSpacing="8">
             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
             <controls:SummaryCard x:Name="High" Label="High" Value="0" Glyph="&#xE7BA;"/>
             <controls:SummaryCard x:Name="Medium" Grid.Column="1" Label="Medium" Value="0" Glyph="&#xE814;"/>
             <controls:SummaryCard x:Name="Low" Grid.Column="2" Label="Low" Value="0" Glyph="&#xE946;"/>
             <controls:SummaryCard x:Name="Info" Grid.Column="3" Label="Info" Value="0" Glyph="&#xE946;"/>
         </Grid>
-            <StackPanel Grid.Row="3" Spacing="4">
-                <TextBlock x:Name="CaptureStatus" Text="Not run yet — click Run" TextWrapping="Wrap" FontSize="12"/>
-                <TextBlock x:Name="Sources" Text="Read-only, local observations. Leads are not proof of compromise." TextWrapping="Wrap" FontSize="12" Style="{StaticResource Muted}" IsTextSelectionEnabled="True"/>
-            </StackPanel>
-        <Border x:Name="InventoryCard" Grid.Row="4" Height="360" Style="{StaticResource Card}" Padding="12">
+        <TextBlock x:Name="CaptureStatus" Grid.Row="2" Text="Not run yet — click Run" Style="{StaticResource InvestigationStatus}" MaxLines="1" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+        <Expander x:Name="Explanation" Grid.Row="3" Header="How this scan works" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+            <ScrollViewer MaxHeight="120"><StackPanel Spacing="8">
+                <TextBlock x:Name="Elevation" Style="{StaticResource Muted}"/>
+                <TextBlock x:Name="Sources" Text="Read-only, local observations. Leads are not proof of compromise." Style="{StaticResource Muted}" IsTextSelectionEnabled="True"/>
+            </StackPanel></ScrollViewer>
+        </Expander>
+    </Grid>
+    </ScrollViewer>
+        <Border x:Name="InventoryCard" Grid.Row="1" Style="{StaticResource Card}" Padding="12">
             <views:InventoryView x:Name="Inventory"/>
         </Border>
     </Grid>
-    </ScrollViewer>
 </UserControl>

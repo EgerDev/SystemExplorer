@@ -10,5 +10,6 @@
     <Compile Include="../../src/SystemExplorer.App/ApplicationDescriptions.cs" Link="Presentation/ApplicationDescriptions.cs" />
     <Compile Include="../../src/SystemExplorer.App/ProcessDescriptionIndex.cs" Link="Presentation/ProcessDescriptionIndex.cs" />
     <Compile Include="../../src/SystemExplorer.App/DiagnosticData.cs" Link="Presentation/DiagnosticData.cs" />
+    <Compile Include="../../src/SystemExplorer.App/InvestigationOperationStatus.cs" Link="Presentation/InvestigationOperationStatus.cs" />
   </ItemGroup>
 </Project>

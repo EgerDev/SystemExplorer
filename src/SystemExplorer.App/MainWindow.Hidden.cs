@@ -12,7 +12,6 @@ public sealed partial class MainWindow
     private readonly WindowsHiddenProcessProvider hiddenProcesses = new();
     private readonly WindowsHiddenConfigurationProvider hiddenConfiguration = new();
     private readonly WindowsAdsScanProvider hiddenAds = new();
-    private CancellationTokenSource? hiddenCancellation;
     private bool hiddenInitialized;
 
     private void HiddenLoaded(object sender, RoutedEventArgs args)
@@ -23,22 +22,20 @@ public sealed partial class MainWindow
         HiddenPanel.SetElevation(elevation.IsElevated == true ? "Running as administrator · Read-only; local checks only"
             : "Requires administrator for full coverage: some process probes, ETW registrations, TaskCache keys and task files may be denied. " + elevation.Detail);
         HiddenPanel.ScanRequested += RunHiddenScan;
-        HiddenPanel.CancelRequested += () => hiddenCancellation?.Cancel();
+        HiddenPanel.CancelRequested += () => HiddenPanel.Operation.RequestCancel();
         HiddenPanel.InspectRequested += InspectOverviewProcess;
         HiddenPanel.ExportRequested += ExportHiddenAsync;
     }
 
     private async void RunHiddenScan(int scan)
     {
-        if (hiddenCancellation is not null) return;
-        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(shutdown.Token);
-        hiddenCancellation = cancellation;
-        HiddenPanel.SetBusy(true);
+        if (!HiddenPanel.Operation.TryBegin(out var ticket, shutdown.Token)) return;
+        HiddenPanel.OperationChanged(HiddenOperationKind.Scan);
         HiddenPanel.Progress("Collecting bounded, read-only observations…");
         string? notice = null;
         try
         {
-            var token = cancellation.Token;
+            var token = ticket.CancellationToken;
             HiddenScanResult? result = scan switch
             {
                 0 => await ScanHiddenProcesses(token),
@@ -49,17 +46,16 @@ public sealed partial class MainWindow
                 _ => null
             };
             token.ThrowIfCancellationRequested();
-            if (result is not null) HiddenPanel.Complete(scan, result);
+            if (result is not null && HiddenPanel.Operation.IsCurrent(ticket)) HiddenPanel.Complete(scan, result);
             else notice = "Folder selection cancelled — previous result retained.";
         }
         catch (OperationCanceledException) { notice = "Cancelled — previous result retained."; }
         catch (Exception ex) { notice = $"Scan unavailable — {ex.GetType().Name} (HRESULT 0x{ex.HResult:X8}): {ex.Message} Source: {ex.Source ?? "unknown"}. Previous result retained; no absence or compromise claim is made."; }
         finally
         {
-            hiddenCancellation = null;
-            if (!shutdown.IsCancellationRequested)
+            if (HiddenPanel.Operation.Complete(ticket) && !shutdown.IsCancellationRequested)
             {
-                HiddenPanel.SetBusy(false);
+                HiddenPanel.OperationChanged(HiddenOperationKind.Scan);
                 if (notice is not null) HiddenPanel.Progress(notice);
             }
         }

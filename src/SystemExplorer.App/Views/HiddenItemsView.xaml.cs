@@ -10,8 +10,15 @@ public sealed record HiddenScanResult(DateTimeOffset CapturedAt, string Summary,
 
 public sealed partial class HiddenItemsView : UserControl
 {
+    private const double MinimumHeaderViewport = 80;
+    private const double MinimumInventoryViewport = 300;
+    private const double CompactDetailsViewport = 64;
+
     private readonly Dictionary<int, HiddenScanResult> results = new();
-    private bool ready, busy;
+    private bool ready;
+    private HiddenOperationKind operationKind;
+    public OperationGate Operation { get; } = new();
+    public long SelectionVersion { get; private set; }
     public event Action<int>? ScanRequested;
     public event Action? CancelRequested;
     public event Action<ProcessIdentity>? InspectRequested;
@@ -27,27 +34,40 @@ public sealed partial class HiddenItemsView : UserControl
     private void HiddenSizeChanged(object sender, SizeChangedEventArgs args)
     {
         if (InventoryCard is null || PageScroll is null || LayoutRoot.ActualHeight == 0) return;
-        double headerHeight = LayoutRoot.ActualHeight - InventoryCard.ActualHeight;
-        double height = Math.Max(360, PageScroll.ActualHeight - headerHeight);
-        if (Math.Abs(InventoryCard.Height - height) > 0.5) InventoryCard.Height = height;
-        if (Inventory.FindName("DetailScroll") is ScrollViewer detail) detail.MaxHeight = Math.Clamp(height - 400, 70, 200);
+        double availableHeight = Math.Max(0, PageScroll.ActualHeight - HeaderScroll.Margin.Top - HeaderScroll.Margin.Bottom);
+        double minimumHeaderHeight = Math.Min(MinimumHeaderViewport, availableHeight);
+        InventoryCard.MinHeight = Math.Min(MinimumInventoryViewport, Math.Max(0, availableHeight - minimumHeaderHeight));
+        HeaderScroll.MaxHeight = Math.Max(0, availableHeight - InventoryCard.MinHeight);
+        double height = InventoryCard.ActualHeight;
+        bool compact = PageScroll.ActualHeight < 500;
+        if (Inventory.Content is Grid layout) layout.RowSpacing = compact ? 4 : 8;
+        if (Inventory.FindName("Status") is TextBlock status) status.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        if (Inventory.FindName("DetailScroll") is ScrollViewer detail)
+            detail.MaxHeight = compact ? CompactDetailsViewport : Math.Clamp(height - 400, 70, 200);
     }
-    public void SetBusy(bool value)
+    public void OperationChanged(HiddenOperationKind kind)
     {
-        busy = value; Selector.IsEnabled = !value; RunButton.Content = value ? "Cancel" : "Run";
-        ExportButton.IsEnabled = !value && results.ContainsKey(Selector.SelectedIndex);
-        if (!value) ShowSelected();
+        operationKind = kind;
+        var scanning = Operation.IsBusy && kind == HiddenOperationKind.Scan;
+        Selector.IsEnabled = !scanning; RunButton.Content = scanning ? "Cancel" : "Run";
+        RunButton.IsEnabled = !Operation.IsBusy || scanning;
+        ExportButton.IsEnabled = !Operation.IsBusy && results.ContainsKey(Selector.SelectedIndex);
+        if (!Operation.IsBusy) ShowSelected();
     }
     public void Progress(string message) => CaptureStatus.Text = message;
     public void Complete(int scan, HiddenScanResult result) { results[scan] = result with { Elevation = Elevation.Text }; }
     private void ExportClicked(object sender, RoutedEventArgs args)
     {
-        if (busy || !results.TryGetValue(Selector.SelectedIndex, out var result)) return;
+        if (Operation.IsBusy || !results.TryGetValue(Selector.SelectedIndex, out var result)) return;
         var document = HiddenItemsExport.Build((HiddenScanType)Selector.SelectedIndex, result.CapturedAt, result.Elevation, result.Summary, result.Sources, result.Leads, result.Truncated);
         ExportRequested?.Invoke(document, (string)((MenuFlyoutItem)sender).Tag);
     }
-    private void RunClicked(object sender, RoutedEventArgs args) { if (busy) CancelRequested?.Invoke(); else ScanRequested?.Invoke(Selector.SelectedIndex); }
-    private void ScanChanged(object sender, SelectionChangedEventArgs args) { if (ready) ShowSelected(); }
+    private void RunClicked(object sender, RoutedEventArgs args)
+    {
+        if (Operation.IsBusy) { if (operationKind == HiddenOperationKind.Scan) CancelRequested?.Invoke(); }
+        else ScanRequested?.Invoke(Selector.SelectedIndex);
+    }
+    private void ScanChanged(object sender, SelectionChangedEventArgs args) { if (ready) { SelectionVersion++; ShowSelected(); } }
     private static string Readable(string text) => Regex.Replace(text, @"(?<![\\/])\b(?:AccessDenied|TimedOut|IdentityMismatch|StartedDuringScan|ExitedDuringScan|PidReused|ProtectedDenied|StaleOwner|NtSystemInformation|NtGetNextProcess|PidProbe|EtwOwner|TcpOwner|UdpOwner|ServiceOwner|NotTrusted|NotChecked|NoVisibleWindow|UnusualLocation|ParentMismatch|EndpointOwner|AlternateDataStream|Temp|AppData|ProgramDataRoot|RecycleBin|Public)\b", match => match.Value switch
     {
         "AccessDenied" => "Denied",
@@ -89,7 +109,7 @@ public sealed partial class HiddenItemsView : UserControl
     };
     private void ShowSelected()
     {
-        ExportButton.IsEnabled = !busy && results.ContainsKey(Selector.SelectedIndex);
+        ExportButton.IsEnabled = !Operation.IsBusy && results.ContainsKey(Selector.SelectedIndex);
         if (!results.TryGetValue(Selector.SelectedIndex, out var result))
         {
             High.Value = Medium.Value = Low.Value = Info.Value = "0";

@@ -33,7 +33,7 @@ public sealed partial class MainWindow
         void ScaleChanged(XamlRoot sender, XamlRootChangedEventArgs args) => Resize();
         Resize();
         var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, RequestedTheme = Root.ActualTheme, Title = "What's eating RAM",
-            Content = view, CloseButtonText = "Close / cancel", DefaultButton = ContentDialogButton.Close };
+            Content = view, CloseButtonText = "Close", DefaultButton = ContentDialogButton.None };
         dialog.Resources["ContentDialogMaxWidth"] = 1200d;
         dialog.Closing += (_, _) => cancellation.Cancel();
         Root.SizeChanged += Resized; Root.XamlRoot.Changed += ScaleChanged;
@@ -47,13 +47,13 @@ public sealed partial class MainWindow
         }
     }
 
-    private async Task<string?> ExportRamAsync(RamExportDocument document, string format)
+    private async Task<string?> ExportRamAsync(RamExportDocument document, string format, CancellationToken token)
     {
         var path = NativeFileDialogs.ChooseSave(WinRT.Interop.WindowNative.GetWindowHandle(this), format,
             "Export RAM investigation", "SystemExplorer-RAM-" + document.Tab.Replace(' ', '-'));
         if (path is null) return null;
         var text = format == "csv" ? RamAttributionPresentation.Csv(document) : RamAttributionPresentation.Json(document);
-        await File.WriteAllTextAsync(path, text, shutdown.Token);
+        await File.WriteAllTextAsync(path, text, token);
         return path;
     }
 }
