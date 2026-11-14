@@ -10,6 +10,12 @@ public sealed record HiddenScanResult(DateTimeOffset CapturedAt, string Summary,
 
 public sealed partial class HiddenItemsView : UserControl
 {
+    private const double MinimumHeaderViewport = 80;
+    private const double MinimumInventoryViewport = 264;
+    private const double CompactInventoryContentHeight = 176;
+    private const double CompactDetailsViewport = 64;
+    private const double CompactRowsViewport = 80;
+
     private readonly Dictionary<int, HiddenScanResult> results = new();
     private bool ready;
     private HiddenOperationKind operationKind;
@@ -30,13 +36,18 @@ public sealed partial class HiddenItemsView : UserControl
     private void HiddenSizeChanged(object sender, SizeChangedEventArgs args)
     {
         if (InventoryCard is null || PageScroll is null || LayoutRoot.ActualHeight == 0) return;
-        InventoryCard.MinHeight = Explanation.IsExpanded ? 240 : 0;
-        HeaderScroll.MaxHeight = Explanation.IsExpanded ? Math.Max(80, PageScroll.ActualHeight - InventoryCard.MinHeight - 8) : double.PositiveInfinity;
+        double availableHeight = Math.Max(0, PageScroll.ActualHeight - HeaderScroll.Margin.Top - HeaderScroll.Margin.Bottom);
+        double minimumHeaderHeight = Math.Min(MinimumHeaderViewport, availableHeight);
+        InventoryCard.MinHeight = Math.Min(MinimumInventoryViewport, Math.Max(0, availableHeight - minimumHeaderHeight));
+        HeaderScroll.MaxHeight = Math.Max(0, availableHeight - InventoryCard.MinHeight);
         double height = InventoryCard.ActualHeight;
         bool compact = PageScroll.ActualHeight < 500;
         if (Inventory.Content is Grid layout) layout.RowSpacing = compact ? 4 : 8;
         if (Inventory.FindName("Status") is TextBlock status) status.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
-        if (Inventory.FindName("DetailScroll") is ScrollViewer detail) detail.MaxHeight = compact ? 36 : Math.Clamp(height - 400, 70, 200);
+        if (Inventory.FindName("Rows") is ListView rows)
+            rows.MinHeight = compact ? Math.Min(CompactRowsViewport, Math.Max(0, InventoryCard.MinHeight - CompactInventoryContentHeight)) : 0;
+        if (Inventory.FindName("DetailScroll") is ScrollViewer detail)
+            detail.MaxHeight = compact ? CompactDetailsViewport : Math.Clamp(height - 400, 70, 200);
     }
     public void OperationChanged(HiddenOperationKind kind)
     {
