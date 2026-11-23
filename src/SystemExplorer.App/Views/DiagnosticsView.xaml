@@ -12,6 +12,13 @@
         </Grid.RowDefinitions>
         <ScrollViewer x:Name="SummaryScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel x:Name="SummaryPanel" Spacing="8">
+        <Grid x:Name="SectionKpiGrid" ColumnSpacing="12" Visibility="Collapsed">
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <controls:SummaryCard x:Name="SecKpi1" Label="Total" Glyph="&#xE9D9;" Value="—" AccentBrush="{ThemeResource InteractionAccent}"/>
+            <controls:SummaryCard x:Name="SecKpi2" Grid.Column="1" Label="Active" Glyph="&#xE73E;" Value="—" AccentBrush="{ThemeResource StatusLiveBrush}"/>
+            <controls:SummaryCard x:Name="SecKpi3" Grid.Column="2" Label="Secondary" Glyph="&#xE7BA;" Value="—" AccentBrush="{ThemeResource StatusWarnBrush}"/>
+            <controls:SummaryCard x:Name="SecKpi4" Grid.Column="3" Label="Scope" Glyph="&#xE8B7;" Value="—" AccentBrush="{ThemeResource ChartVioletBrush}"/>
+        </Grid>
         <Grid x:Name="MemorySummary" ColumnSpacing="10">
             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
             <controls:SummaryCard x:Name="PhysicalCard" Label="Physical memory in use" Glyph="&#xE964;" AccentBrush="{ThemeResource StatusLiveBrush}"/>

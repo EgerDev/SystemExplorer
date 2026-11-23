@@ -353,6 +353,9 @@
                 <views:StorageView x:Name="StoragePanel" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed"/>
                 <views:TraceView x:Name="TracePanel" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed"/>
                 <views:CpuView x:Name="CpuPanel" Grid.Row="2" Visibility="Collapsed"/>
+                <views:GpuView x:Name="GpuPanel" Grid.Row="2" Visibility="Collapsed"/>
+                <views:DisksView x:Name="DisksPanel" Grid.Row="2" Visibility="Collapsed"/>
+                <views:NetworkView x:Name="NetworkPanel" Grid.Row="2" Visibility="Collapsed"/>
                 <views:DiagnosticsView x:Name="DiagnosticsPanel" Grid.Row="2" Visibility="Collapsed"/>
                 <ScrollViewer x:Name="SettingsPanel" Grid.Row="2" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Spacing="14" MaxWidth="680" HorizontalAlignment="Left">

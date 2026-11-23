@@ -1,0 +1,171 @@
+<UserControl
+    x:Class="SystemExplorer.App.Views.GpuView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:SystemExplorer.App.Controls"
+    xmlns:views="using:SystemExplorer.App.Views">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Spacing="14" Padding="0,0,0,12">
+            <!-- Top action strip -->
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="GpuContextLine" Text="WDDM adapter &amp; engine telemetry · Headline utilization is max across engines (never summed)"
+                           Style="{StaticResource Muted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <Button Content="GPU inventory" Tag="Gpu" Click="ActionClick" Style="{StaticResource AccentButtonStyle}"
+                            ToolTipService.ToolTip="Open full GPU adapter and process engine inventory"/>
+                    <Button Content="Process timeline" Tag="Timeline" Click="ActionClick"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- 4 Semantic KPI Cards -->
+            <Grid x:Name="GpuKpiGrid" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <controls:SummaryCard x:Name="HeadlineUtilCard" Label="Headline GPU" Glyph="&#xE7F4;" Value="—"
+                                      AccentBrush="{ThemeResource ChartVioletBrush}"/>
+                <controls:SummaryCard x:Name="DedicatedVramCard" Grid.Column="1" Label="Dedicated VRAM" Glyph="&#xE964;" Value="—"
+                                      AccentBrush="{ThemeResource InteractionAccent}"/>
+                <controls:SummaryCard x:Name="SharedMemCard" Grid.Column="2" Label="Shared GPU memory" Glyph="&#xE950;" Value="—"
+                                      AccentBrush="{ThemeResource StatusLiveBrush}"/>
+                <controls:SummaryCard x:Name="AdaptersCard" Grid.Column="3" Label="Adapters" Glyph="&#xE7F8;" Value="—"
+                                      AccentBrush="{ThemeResource StatusWarnBrush}"/>
+            </Grid>
+
+            <!-- Main split: Adapters & Engines (1.15*) + Per-process GPU (1*) -->
+            <Grid x:Name="GpuSplitGrid" ColumnSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1.15*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left: Adapters & WDDM Engine utilization bars -->
+                <Border Style="{StaticResource Card}" Padding="16,14">
+                    <StackPanel Spacing="12">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Adapters &amp; WDDM engines" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
+                            <Border Grid.Column="1" Background="{ThemeResource GroupSurface}" BorderBrush="{ThemeResource SubtleBorder}"
+                                    BorderThickness="1" CornerRadius="10" Padding="10,3">
+                                <TextBlock x:Name="GpuStatusBadge" Text="Warming up" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                                           Foreground="{ThemeResource ChartVioletBrush}"/>
+                            </Border>
+                        </Grid>
+
+                        <TextBlock x:Name="GpuStatusDetail" Text="Sampling Windows GPU engine &amp; adapter memory counters…"
+                                   Style="{StaticResource Muted}" TextWrapping="Wrap"/>
+
+                        <ItemsControl x:Name="AdaptersList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="views:GpuAdapterCardItem">
+                                    <Border Background="{ThemeResource GroupSurface}" BorderBrush="{ThemeResource SubtleBorder}"
+                                            BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,8">
+                                        <StackPanel Spacing="6">
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{x:Bind Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Grid.Column="1" Text="{x:Bind HeadlineText}" FontFamily="{StaticResource MonoFont}"
+                                                           FontWeight="SemiBold" Foreground="{ThemeResource ChartVioletBrush}"/>
+                                            </Grid>
+                                            <TextBlock Text="{x:Bind MemorySummary}" Style="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap"/>
+                                            <ItemsControl ItemsSource="{x:Bind Engines}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="views:GpuEngineBarItem">
+                                                        <Grid ColumnSpacing="8" Margin="0,2">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="96"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                                <ColumnDefinition Width="48"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Text="{x:Bind Engine}" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"
+                                                                       TextTrimming="CharacterEllipsis"/>
+                                                            <Border Grid.Column="1" Height="7" CornerRadius="3.5" Background="{ThemeResource CardSurface}" VerticalAlignment="Center">
+                                                                <Border HorizontalAlignment="Left" Height="7" CornerRadius="3.5" Width="{x:Bind BarWidth}" Background="{x:Bind BarBrush}"/>
+                                                            </Border>
+                                                            <TextBlock Grid.Column="2" Text="{x:Bind PercentText}" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                                                                       FontWeight="SemiBold" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <!-- Right: Per-process GPU table -->
+                <Border Grid.Column="1" Style="{StaticResource Card}" Padding="16,14">
+                    <StackPanel Spacing="10">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Processes using GPU" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="GpuProcCount" Grid.Column="1" Text="0 observed" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
+                        </Grid>
+
+                        <Grid ColumnSpacing="8" Padding="4,4" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="0,0,0,1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="64"/>
+                                <ColumnDefinition Width="78"/>
+                                <ColumnDefinition Width="72"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Process" Style="{StaticResource Muted}" FontWeight="SemiBold"/>
+                            <TextBlock Grid.Column="1" Text="Engine %" Style="{StaticResource Muted}" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                            <TextBlock Grid.Column="2" Text="Dedicated" Style="{StaticResource Muted}" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                            <TextBlock Grid.Column="3" Text="" Style="{StaticResource Muted}"/>
+                        </Grid>
+
+                        <ItemsControl x:Name="GpuProcessesList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="views:GpuProcessListItem">
+                                    <Grid ColumnSpacing="8" Padding="4,7" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="0,0,0,1">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="64"/>
+                                            <ColumnDefinition Width="78"/>
+                                            <ColumnDefinition Width="72"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Spacing="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{x:Bind DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{x:Bind EngineDetail}" Style="{StaticResource Muted}" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" Text="{x:Bind UtilText}" FontFamily="{StaticResource MonoFont}" FontWeight="SemiBold"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="2" Text="{x:Bind DedicatedText}" FontFamily="{StaticResource MonoFont}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                        <Button Grid.Column="3" Content="Inspect" Tag="{x:Bind Identity}" Click="InspectClick"
+                                                IsEnabled="{x:Bind CanInspect}" HorizontalAlignment="Right" VerticalAlignment="Center" Padding="8,4"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock x:Name="GpuProcsEmpty" Text="No per-process GPU engine counters reported on this host."
+                                   Style="{StaticResource Muted}" TextWrapping="Wrap" Visibility="Collapsed"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

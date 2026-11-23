@@ -276,6 +276,88 @@ public sealed partial class StorageView : UserControl, IDisposable
         ProjectsList.ItemsSource = r.Projects.Where(p => OnlyStale.IsChecked != true || p.IsStale).OrderByDescending(p => p.AllocatedBytes).Take(500).Select(p => new StorageRow(p.Path,
             $"{(p.IsStale ? "Stale · " : "")}{Bytes(p.RegenerableBytes)} regenerable · {Relative(p.LastActivity)} · {p.Kinds} · AI markers: {(p.HasAIMarkers ? "present (lead only)" : "none observed")}", Bytes(p.AllocatedBytes), Percent(p.AllocatedBytes, footprint), p.Path)).ToArray();
         NotScannedText.Text = r.NotScanned.Count == 0 ? "All catalog paths were within this scan's root (absent paths are not listed)." : string.Join("\n", r.NotScanned.Select(x => x.Path + " — " + x.Reason));
+        DrawBreakdownDonut(r.CategoryTotals, footprint);
+        Motion.AnimateStaggeredChildren(SummaryGrid);
+    }
+    private void DrawBreakdownDonut(IReadOnlyList<BloatCategoryTotal> totals, long footprint)
+    {
+        BreakdownDonut.Children.Clear();
+        DonutLegend.Children.Clear();
+        DonutTotalText.Text = Bytes(footprint);
+
+        var palette = new[]
+        {
+            ResolveDonutBrush("InteractionAccent", Microsoft.UI.Colors.DodgerBlue),
+            ResolveDonutBrush("StatusWarnBrush", Microsoft.UI.Colors.Orange),
+            ResolveDonutBrush("StatusLiveBrush", Microsoft.UI.Colors.MediumSeaGreen),
+            ResolveDonutBrush("ChartVioletBrush", Microsoft.UI.Colors.MediumPurple)
+        };
+
+        var positive = totals.Where(t => t.AllocatedBytes > 0).OrderByDescending(t => t.AllocatedBytes).Take(4).ToArray();
+        var sum = positive.Sum(t => (double)t.AllocatedBytes);
+        const double cx = 54, cy = 54, r = 42;
+
+        // Background track ring
+        BreakdownDonut.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse
+        {
+            Width = r * 2, Height = r * 2,
+            Stroke = ResolveDonutBrush("SubtleBorder", Microsoft.UI.Colors.LightGray),
+            StrokeThickness = 14
+        });
+        Canvas.SetLeft(BreakdownDonut.Children[0], cx - r);
+        Canvas.SetTop(BreakdownDonut.Children[0], cy - r);
+
+        if (sum > 0)
+        {
+            double angle = -Math.PI / 2;
+            for (int i = 0; i < positive.Length; i++)
+            {
+                var cat = positive[i];
+                var sweep = (cat.AllocatedBytes / sum) * (Math.PI * 2);
+                if (sweep >= Math.PI * 2 - 0.001) sweep = Math.PI * 2 - 0.01;
+                var start = new global::Windows.Foundation.Point(cx + r * Math.Cos(angle), cy + r * Math.Sin(angle));
+                var end = new global::Windows.Foundation.Point(cx + r * Math.Cos(angle + sweep), cy + r * Math.Sin(angle + sweep));
+                var seg = new ArcSegment
+                {
+                    Point = end,
+                    Size = new global::Windows.Foundation.Size(r, r),
+                    IsLargeArc = sweep > Math.PI,
+                    SweepDirection = SweepDirection.Clockwise
+                };
+                var fig = new PathFigure { StartPoint = start, IsClosed = false };
+                fig.Segments.Add(seg);
+                var geo = new PathGeometry();
+                geo.Figures.Add(fig);
+                BreakdownDonut.Children.Add(new Microsoft.UI.Xaml.Shapes.Path
+                {
+                    Data = geo,
+                    Stroke = palette[i % palette.Length],
+                    StrokeThickness = 14
+                });
+                angle += sweep;
+
+                var row = new Grid { ColumnSpacing = 8 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var dot = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 8, Height = 8, Fill = palette[i % palette.Length], VerticalAlignment = VerticalAlignment.Center };
+                var lbl = new TextBlock { Text = cat.Category, FontSize = 11.5, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+                var val = new TextBlock { Text = Bytes(cat.AllocatedBytes), FontFamily = (FontFamily)Application.Current.Resources["MonoFont"], FontSize = 11.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
+                Grid.SetColumn(lbl, 1); Grid.SetColumn(val, 2);
+                row.Children.Add(dot); row.Children.Add(lbl); row.Children.Add(val);
+                DonutLegend.Children.Add(row);
+            }
+        }
+    }
+
+    private Brush ResolveDonutBrush(string key, global::Windows.UI.Color fallback)
+    {
+        var themeKey = ActualTheme == ElementTheme.Dark ? "Default" : "Light";
+        foreach (var dict in Application.Current.Resources.MergedDictionaries)
+            if (dict.ThemeDictionaries.TryGetValue(themeKey, out var tObj) && tObj is ResourceDictionary td &&
+                td.TryGetValue(key, out var val) && val is Brush b)
+                return b;
+        return new SolidColorBrush(fallback);
     }
     private void RowSelected(object sender, SelectionChangedEventArgs e)
     {

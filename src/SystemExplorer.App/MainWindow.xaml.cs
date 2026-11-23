@@ -82,6 +82,12 @@ public sealed partial class MainWindow : Window
         DiagnosticsPanel.InventoryRequested += ShowExtraInventory;
         CpuPanel.InspectRequested += InspectOverviewProcess;
         CpuPanel.InventoryRequested += ShowExtraInventory;
+        GpuPanel.InspectRequested += InspectOverviewProcess;
+        GpuPanel.InventoryRequested += ShowExtraInventory;
+        DisksPanel.InspectRequested += InspectOverviewProcess;
+        DisksPanel.InventoryRequested += ShowExtraInventory;
+        NetworkPanel.InspectRequested += InspectOverviewProcess;
+        NetworkPanel.InventoryRequested += ShowExtraInventory;
         var work = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
         ApplyMinimumWindowSize();
         Root.Loaded += (_, _) =>
@@ -256,12 +262,18 @@ public sealed partial class MainWindow : Window
         TracePanel.Visibility = section == "Trace" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPanel.Visibility = section == "Settings" ? Visibility.Visible : Visibility.Collapsed;
         CpuPanel.Visibility = section == "CPU" ? Visibility.Visible : Visibility.Collapsed;
-        DiagnosticsPanel.Visibility = section is "Processes" or "Overview" or "CPU" or "Settings" or "Trace" or "Storage" or "Hidden" ? Visibility.Collapsed : Visibility.Visible;
+        GpuPanel.Visibility = section == "GPU" ? Visibility.Visible : Visibility.Collapsed;
+        DisksPanel.Visibility = section == "Disks" ? Visibility.Visible : Visibility.Collapsed;
+        NetworkPanel.Visibility = section == "Network" ? Visibility.Visible : Visibility.Collapsed;
+        DiagnosticsPanel.Visibility = section is "Processes" or "Overview" or "CPU" or "GPU" or "Disks" or "Network" or "Settings" or "Trace" or "Storage" or "Hidden" ? Visibility.Collapsed : Visibility.Visible;
         UIElement activePanel = section switch
         {
             "Processes" => ProcessesPanel,
             "Overview" => OverviewPanel,
             "CPU" => CpuPanel,
+            "GPU" => GpuPanel,
+            "Disks" => DisksPanel,
+            "Network" => NetworkPanel,
             "Hidden" => HiddenPanel,
             "Storage" => StoragePanel,
             "Trace" => TracePanel,
@@ -274,7 +286,10 @@ public sealed partial class MainWindow : Window
         else if (section == "Overview") OverviewPanel.AnimateEntrance();
         else if (section == "Hidden") HiddenPanel.AnimateEntrance();
         else if (section == "CPU") CpuPanel.AnimateEntrance();
-        else if (section == "Memory") DiagnosticsPanel.AnimateEntrance();
+        else if (section == "GPU") GpuPanel.AnimateEntrance();
+        else if (section == "Disks") DisksPanel.AnimateEntrance();
+        else if (section == "Network") NetworkPanel.AnimateEntrance();
+        else if (section is "Memory" or "Services" or "Startup" or "Insights") DiagnosticsPanel.AnimateEntrance();
         RefreshDiagnostics();
     }
 
@@ -865,6 +880,9 @@ public sealed partial class MainWindow : Window
         if (!ready || section is "Processes" or "Settings") return;
         if (section == "Overview") { RefreshOverview(); return; }
         if (section == "CPU") { RefreshCpu(); return; }
+        if (section == "GPU") { RefreshGpu(); return; }
+        if (section == "Disks") { RefreshDisks(); return; }
+        if (section == "Network") { RefreshNetwork(); return; }
         if (Model.Snapshot is not { } snapshot) return;
         var startupStatus = startupError is not null ? startupError + " Retained entries are stale." :
             startupCapturedAt is { } captured ? $"Last inventory {captured.LocalDateTime:T}; refreshed approximately once per minute." : "Inventory unavailable.";
@@ -872,26 +890,66 @@ public sealed partial class MainWindow : Window
             GlobalSearch.Text ?? "", Model.Descriptions.GetCached, startupStatus, paused, overviewStale);
     }
 
-    private bool cpuCoresLoading;
+    private bool hardwareCountersLoading;
     private void RefreshCpu()
     {
         if (Model.Snapshot is not { } snapshot) return;
         CpuPanel.Update(snapshot, Model.History, GlobalSearch.Text ?? "", Model.Descriptions.GetCached, paused, overviewStale);
-        if (!paused && !cpuCoresLoading)
-            _ = RefreshCpuCoresAsync();
+        TriggerHardwareCountersIfNeeded();
     }
 
-    private async Task RefreshCpuCoresAsync()
+    private void RefreshGpu()
     {
-        cpuCoresLoading = true;
+        if (Model.Snapshot is not { } snapshot) return;
+        GpuPanel.Update(snapshot, GlobalSearch.Text ?? "", Model.Descriptions.GetCached);
+        TriggerHardwareCountersIfNeeded();
+    }
+
+    private void RefreshDisks()
+    {
+        if (Model.Snapshot is not { } snapshot) return;
+        DisksPanel.Update(snapshot, GlobalSearch.Text ?? "", Model.Descriptions.GetCached);
+        TriggerHardwareCountersIfNeeded();
+    }
+
+    private void RefreshNetwork()
+    {
+        if (Model.Snapshot is not { } snapshot) return;
+        NetworkPanel.Update(snapshot, Model.Relationships, GlobalSearch.Text ?? "");
+        TriggerHardwareCountersIfNeeded();
+    }
+
+    private void TriggerHardwareCountersIfNeeded()
+    {
+        if (!paused && !hardwareCountersLoading)
+            _ = RefreshHardwareCountersAsync();
+    }
+
+    private async Task RefreshHardwareCountersAsync()
+    {
+        hardwareCountersLoading = true;
         try
         {
             var result = await CaptureCountersAsync(shutdown.Token);
             if (!shutdown.IsCancellationRequested)
-                DispatcherQueue.TryEnqueue(() => CpuPanel.UpdateCores(result.Cpu));
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    CpuPanel.UpdateCores(result.Cpu);
+                    GpuPanel.UpdateCounters(result.Gpu);
+                    DisksPanel.UpdateCounters(result.Disks);
+                    NetworkPanel.UpdateCounters(result.Network);
+                    if (Model.Snapshot is { } snap)
+                    {
+                        if (section == "GPU") GpuPanel.Update(snap, GlobalSearch.Text ?? "", Model.Descriptions.GetCached);
+                        else if (section == "Disks") DisksPanel.Update(snap, GlobalSearch.Text ?? "", Model.Descriptions.GetCached);
+                        else if (section == "Network") NetworkPanel.Update(snap, Model.Relationships, GlobalSearch.Text ?? "");
+                    }
+                });
+            }
         }
         catch (OperationCanceledException) { }
         catch { }
-        finally { cpuCoresLoading = false; }
+        finally { hardwareCountersLoading = false; }
     }
 }

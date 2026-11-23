@@ -1,0 +1,151 @@
+<UserControl
+    x:Class="SystemExplorer.App.Views.DisksView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:SystemExplorer.App.Controls"
+    xmlns:views="using:SystemExplorer.App.Views">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Spacing="14" Padding="0,0,0,12">
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="DisksContextLine" Text="Physical disk throughput, latency, queue depth, and per-process I/O · Read-only"
+                           Style="{StaticResource Muted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <Button Content="Latency / queue" Tag="Disk" Click="ActionClick" Style="{StaticResource AccentButtonStyle}"/>
+                    <Button Content="File users" Tag="FileUsers" Click="ActionClick"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- 4 Semantic KPI Cards -->
+            <Grid x:Name="DisksKpiGrid" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <controls:SummaryCard x:Name="ReadRateCard" Label="Disk read" Glyph="&#xE896;" Value="—"
+                                      AccentBrush="{ThemeResource InteractionAccent}"/>
+                <controls:SummaryCard x:Name="WriteRateCard" Grid.Column="1" Label="Disk write" Glyph="&#xE898;" Value="—"
+                                      AccentBrush="{ThemeResource StatusWarnBrush}"/>
+                <controls:SummaryCard x:Name="LatencyCard" Grid.Column="2" Label="Avg latency" Glyph="&#xE916;" Value="—"
+                                      AccentBrush="{ThemeResource ChartVioletBrush}"/>
+                <controls:SummaryCard x:Name="QueueCard" Grid.Column="3" Label="Queue depth" Glyph="&#xE8FD;" Value="—"
+                                      AccentBrush="{ThemeResource StatusLiveBrush}"/>
+            </Grid>
+
+            <!-- Split: Physical Disks (1*) + Top Disk I/O Processes (1.35*) -->
+            <Grid ColumnSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="1.35*"/>
+                </Grid.ColumnDefinitions>
+
+                <Border Style="{StaticResource Card}" Padding="16,14">
+                    <StackPanel Spacing="10">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Physical disks" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
+                            <Border Grid.Column="1" Background="{ThemeResource GroupSurface}" BorderBrush="{ThemeResource SubtleBorder}"
+                                    BorderThickness="1" CornerRadius="10" Padding="8,2">
+                                <TextBlock x:Name="DisksStatusBadge" Text="Warming up" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                                           Foreground="{ThemeResource StatusWarnBrush}"/>
+                            </Border>
+                        </Grid>
+
+                        <ItemsControl x:Name="PhysicalDisksList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="views:PhysicalDiskCardItem">
+                                    <Border Background="{ThemeResource GroupSurface}" BorderBrush="{ThemeResource SubtleBorder}"
+                                            BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,8">
+                                        <StackPanel Spacing="5">
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{x:Bind Instance}" FontWeight="SemiBold"/>
+                                                <TextBlock Grid.Column="1" Text="{x:Bind ActiveText}" FontFamily="{StaticResource MonoFont}"
+                                                           FontWeight="SemiBold" Foreground="{ThemeResource StatusWarnBrush}"/>
+                                            </Grid>
+                                            <Border Height="7" CornerRadius="3.5" Background="{ThemeResource CardSurface}">
+                                                <Border HorizontalAlignment="Left" Height="7" CornerRadius="3.5" Width="{x:Bind ActiveBarWidth}" Background="{x:Bind BarBrush}"/>
+                                            </Border>
+                                            <TextBlock Text="{x:Bind ThroughputText}" FontFamily="{StaticResource MonoFont}" FontSize="11"/>
+                                            <TextBlock Text="{x:Bind LatencyText}" Style="{StaticResource Muted}" FontSize="11"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock x:Name="PhysicalDisksEmpty" Text="Warming up physical disk counters…" Style="{StaticResource Muted}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="1" Style="{StaticResource Card}" Padding="16,14">
+                    <StackPanel Spacing="10">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Top disk I/O processes" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="Read + Write / sec" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
+                        </Grid>
+
+                        <Grid ColumnSpacing="10" Padding="4,4" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="0,0,0,1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.6*"/>
+                                <ColumnDefinition Width="82"/>
+                                <ColumnDefinition Width="82"/>
+                                <ColumnDefinition Width="96"/>
+                                <ColumnDefinition Width="70"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Process" Style="{StaticResource Muted}" FontWeight="SemiBold"/>
+                            <TextBlock Grid.Column="1" Text="Read" Style="{StaticResource Muted}" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                            <TextBlock Grid.Column="2" Text="Write" Style="{StaticResource Muted}" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                            <TextBlock Grid.Column="3" Text="Share" Style="{StaticResource Muted}" FontWeight="SemiBold"/>
+                            <TextBlock Grid.Column="4" Text="" Style="{StaticResource Muted}"/>
+                        </Grid>
+
+                        <ItemsControl x:Name="DiskProcessesList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="views:DiskProcessItem">
+                                    <Grid ColumnSpacing="10" Padding="4,7" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="0,0,0,1">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="1.6*"/>
+                                            <ColumnDefinition Width="82"/>
+                                            <ColumnDefinition Width="82"/>
+                                            <ColumnDefinition Width="96"/>
+                                            <ColumnDefinition Width="70"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Spacing="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{x:Bind DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{x:Bind Detail}" Style="{StaticResource Muted}" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" Text="{x:Bind ReadText}" FontFamily="{StaticResource MonoFont}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="2" Text="{x:Bind WriteText}" FontFamily="{StaticResource MonoFont}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                        <Border Grid.Column="3" Height="7" CornerRadius="3.5" Background="{ThemeResource GroupSurface}" VerticalAlignment="Center">
+                                            <Border HorizontalAlignment="Left" Height="7" CornerRadius="3.5" Width="{x:Bind BarWidth}" Background="{x:Bind BarBrush}"/>
+                                        </Border>
+                                        <Button Grid.Column="4" Content="Inspect" Tag="{x:Bind Identity}" Click="InspectClick" HorizontalAlignment="Right" VerticalAlignment="Center" Padding="8,4"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock x:Name="DiskProcsEmpty" Text="No matching processes." Style="{StaticResource Muted}" Visibility="Collapsed"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

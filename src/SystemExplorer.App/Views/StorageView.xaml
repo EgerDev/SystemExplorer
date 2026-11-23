@@ -165,13 +165,29 @@
                                 </Pivot>
                             </Border>
                             <Border x:Name="DetailCard" Grid.Column="1" Style="{StaticResource Card}">
-                                <StackPanel Spacing="10">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Text="Breakdown &amp; safe action" Style="{StaticResource SectionLabel}"/>
+                                    <Grid ColumnSpacing="14">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="108"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid Width="108" Height="108">
+                                            <Canvas x:Name="BreakdownDonut" Width="108" Height="108"/>
+                                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="1">
+                                                <TextBlock x:Name="DonutTotalText" Text="—" FontFamily="{StaticResource MonoFont}" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                <TextBlock Text="Dev &amp; AI" Style="{StaticResource Muted}" FontSize="10" HorizontalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Grid>
+                                        <StackPanel x:Name="DonutLegend" Grid.Column="1" Spacing="5" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource SubtleBorder}"/>
                                     <TextBlock x:Name="DetailTitle" Text="Select an item" Style="{StaticResource SectionLabel}"/>
                                     <TextBlock x:Name="DetailPath" Style="{StaticResource Muted}" IsTextSelectionEnabled="True"/>
                                     <TextBlock x:Name="DetailReason" Text="Only names, sizes, dates and file attributes are inspected." Style="{StaticResource Muted}" IsTextSelectionEnabled="True"/>
                                     <TextBlock x:Name="DetailConfidence" Style="{StaticResource Muted}"/>
                                     <StackPanel x:Name="CleanupPanel" Spacing="8" Visibility="Collapsed">
-                                        <TextBlock x:Name="CleanupText" FontFamily="Consolas" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+                                        <Border Background="{ThemeResource GroupSurface}" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="1" CornerRadius="6" Padding="10,8"><TextBlock x:Name="CleanupText" FontFamily="{StaticResource MonoFont}" FontSize="11.5" TextWrapping="Wrap" IsTextSelectionEnabled="True"/></Border>
                                         <TextBlock Text="SystemExplorer never runs this. Review before running it yourself; it permanently deletes data." Style="{StaticResource Muted}"/>
                                         <TextBlock x:Name="CleanupWarning" Style="{StaticResource Muted}"/>
                                     </StackPanel>

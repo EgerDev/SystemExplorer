@@ -46,6 +46,7 @@ public sealed partial class DiagnosticsView : UserControl
         var headers = DiagnosticData.Headers(section);
         NameHeader.Content = headers[0]; FirstHeader.Content = headers[1]; SecondHeader.Content = headers[2]; ThirdHeader.Content = headers[3];
         MemorySummary.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
+        UpdateSectionKpis(next, relationships, startup);
         PagefilesButton.Visibility = RecentButton.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
         DiskButton.Visibility = section == "Disks" ? Visibility.Visible : Visibility.Collapsed;
         FileUsersButton.Visibility = section == "Disks" ? Visibility.Visible : Visibility.Collapsed;
@@ -209,5 +210,44 @@ public sealed partial class DiagnosticsView : UserControl
         Trend.Update(DiagnosticData.BuildTrend(history, Value, scale), label, bytes: !cpu);
         ChartLegend.Text = history.Count == 0 ? "Waiting for observed history" :
             $"{history[0].At.LocalDateTime:T} — {history[^1].At.LocalDateTime:T} · {history.Count} samples · Axis 0–{(cpu ? "100%" : DiagnosticData.Bytes((ulong)scale))} · Elapsed-time spacing; gaps are not joined";
+    }
+
+    private void UpdateSectionKpis(MonitorSnapshot snap, RelationshipSnapshot? relationships, IReadOnlyList<StartupItem> startup)
+    {
+        if (section == "Services")
+        {
+            var svcs = relationships?.Services ?? Array.Empty<ServiceSnapshot>();
+            var running = svcs.Count(s => string.Equals(s.State, "Running", StringComparison.OrdinalIgnoreCase));
+            var stopped = svcs.Count(s => string.Equals(s.State, "Stopped", StringComparison.OrdinalIgnoreCase));
+            var auto = svcs.Count(s => s.StartType?.Contains("Auto", StringComparison.OrdinalIgnoreCase) == true);
+            SecKpi1.Label = "Total services"; SecKpi1.Value = svcs.Count.ToString("N0");
+            SecKpi2.Label = "Running"; SecKpi2.Value = running.ToString("N0");
+            SecKpi3.Label = "Stopped"; SecKpi3.Value = stopped.ToString("N0");
+            SecKpi4.Label = "Auto-start"; SecKpi4.Value = auto.ToString("N0");
+            SectionKpiGrid.Visibility = Visibility.Visible;
+        }
+        else if (section == "Startup")
+        {
+            var reg = startup.Count(s => s.Source.Contains("Registry", StringComparison.OrdinalIgnoreCase) || s.Source.Contains("Run", StringComparison.OrdinalIgnoreCase));
+            var folder = startup.Count(s => s.Source.Contains("Folder", StringComparison.OrdinalIgnoreCase) || s.Source.Contains("Startup", StringComparison.OrdinalIgnoreCase));
+            var machine = startup.Count(s => s.Scope.Contains("Machine", StringComparison.OrdinalIgnoreCase));
+            SecKpi1.Label = "Observed entries"; SecKpi1.Value = startup.Count.ToString("N0");
+            SecKpi2.Label = "Registry / Run"; SecKpi2.Value = reg.ToString("N0");
+            SecKpi3.Label = "Machine scope"; SecKpi3.Value = machine.ToString("N0");
+            SecKpi4.Label = "Startup folders"; SecKpi4.Value = folder.ToString("N0");
+            SectionKpiGrid.Visibility = Visibility.Visible;
+        }
+        else if (section == "Insights")
+        {
+            SecKpi1.Label = "Active findings"; SecKpi1.Value = items.Count.ToString("N0");
+            SecKpi2.Label = "Processes"; SecKpi2.Value = snap.Processes.Count.ToString("N0");
+            SecKpi3.Label = "System CPU"; SecKpi3.Value = snap.TotalCpuPercent is { } c ? $"{c:0.0}%" : "—";
+            SecKpi4.Label = "Physical RAM"; SecKpi4.Value = DiagnosticData.Bytes(snap.Memory.PhysicalUsedBytes);
+            SectionKpiGrid.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            SectionKpiGrid.Visibility = Visibility.Collapsed;
+        }
     }
 }
