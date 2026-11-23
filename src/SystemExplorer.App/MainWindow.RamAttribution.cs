@@ -53,18 +53,8 @@ public sealed partial class MainWindow
             "Export RAM investigation", "SystemExplorer-RAM-" + document.Tab.Replace(' ', '-'));
         if (path is null) return null;
         var text = format == "csv" ? RamAttributionPresentation.Csv(document) : RamAttributionPresentation.Json(document);
-        var tempPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            await File.WriteAllTextAsync(tempPath, text, token);
-            token.ThrowIfCancellationRequested();
-            File.Move(tempPath, path, overwrite: true);
-            return path;
-        }
-        catch
-        {
-            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
-            throw;
-        }
+        token.ThrowIfCancellationRequested();
+        await File.WriteAllTextAsync(path, text, CancellationToken.None);
+        return path;
     }
 }
