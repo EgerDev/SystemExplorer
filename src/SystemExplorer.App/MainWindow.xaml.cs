@@ -80,6 +80,8 @@ public sealed partial class MainWindow : Window
         DiagnosticsPanel.InspectRequested += InspectOverviewProcess;
         DiagnosticsPanel.ServiceRequested += InspectService;
         DiagnosticsPanel.InventoryRequested += ShowExtraInventory;
+        CpuPanel.InspectRequested += InspectOverviewProcess;
+        CpuPanel.InventoryRequested += ShowExtraInventory;
         var work = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
         ApplyMinimumWindowSize();
         Root.Loaded += (_, _) =>
@@ -253,11 +255,13 @@ public sealed partial class MainWindow : Window
         StoragePanel.Visibility = section == "Storage" ? Visibility.Visible : Visibility.Collapsed; OnStorageNavigated();
         TracePanel.Visibility = section == "Trace" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPanel.Visibility = section == "Settings" ? Visibility.Visible : Visibility.Collapsed;
-        DiagnosticsPanel.Visibility = section is "Processes" or "Overview" or "Settings" or "Trace" or "Storage" or "Hidden" ? Visibility.Collapsed : Visibility.Visible;
+        CpuPanel.Visibility = section == "CPU" ? Visibility.Visible : Visibility.Collapsed;
+        DiagnosticsPanel.Visibility = section is "Processes" or "Overview" or "CPU" or "Settings" or "Trace" or "Storage" or "Hidden" ? Visibility.Collapsed : Visibility.Visible;
         UIElement activePanel = section switch
         {
             "Processes" => ProcessesPanel,
             "Overview" => OverviewPanel,
+            "CPU" => CpuPanel,
             "Hidden" => HiddenPanel,
             "Storage" => StoragePanel,
             "Trace" => TracePanel,
@@ -269,6 +273,7 @@ public sealed partial class MainWindow : Window
         if (section == "Processes") { Motion.AnimateStaggeredChildren(ProcessSummaryGrid); ProcessSearch.Text = GlobalSearch.Text; }
         else if (section == "Overview") OverviewPanel.AnimateEntrance();
         else if (section == "Hidden") HiddenPanel.AnimateEntrance();
+        else if (section == "CPU") CpuPanel.AnimateEntrance();
         else if (section == "Memory") DiagnosticsPanel.AnimateEntrance();
         RefreshDiagnostics();
     }
@@ -859,10 +864,34 @@ public sealed partial class MainWindow : Window
     {
         if (!ready || section is "Processes" or "Settings") return;
         if (section == "Overview") { RefreshOverview(); return; }
+        if (section == "CPU") { RefreshCpu(); return; }
         if (Model.Snapshot is not { } snapshot) return;
         var startupStatus = startupError is not null ? startupError + " Retained entries are stale." :
             startupCapturedAt is { } captured ? $"Last inventory {captured.LocalDateTime:T}; refreshed approximately once per minute." : "Inventory unavailable.";
         DiagnosticsPanel.Update(section, snapshot, Model.Relationships, startup, Model.History,
             GlobalSearch.Text ?? "", Model.Descriptions.GetCached, startupStatus, paused, overviewStale);
+    }
+
+    private bool cpuCoresLoading;
+    private void RefreshCpu()
+    {
+        if (Model.Snapshot is not { } snapshot) return;
+        CpuPanel.Update(snapshot, Model.History, GlobalSearch.Text ?? "", Model.Descriptions.GetCached, paused, overviewStale);
+        if (!paused && !cpuCoresLoading)
+            _ = RefreshCpuCoresAsync();
+    }
+
+    private async Task RefreshCpuCoresAsync()
+    {
+        cpuCoresLoading = true;
+        try
+        {
+            var result = await CaptureCountersAsync(shutdown.Token);
+            if (!shutdown.IsCancellationRequested)
+                DispatcherQueue.TryEnqueue(() => CpuPanel.UpdateCores(result.Cpu));
+        }
+        catch (OperationCanceledException) { }
+        catch { }
+        finally { cpuCoresLoading = false; }
     }
 }

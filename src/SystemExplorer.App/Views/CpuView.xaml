@@ -1,0 +1,210 @@
+<UserControl
+    x:Class="SystemExplorer.App.Views.CpuView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:SystemExplorer.App.Controls"
+    xmlns:views="using:SystemExplorer.App.Views">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Spacing="14" Padding="0,0,0,12">
+            <!-- Quick action bar aligned to Paper Readout Win11 · 04 CPU -->
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="CpuContextLine" Text="Normalized across logical processors · User &amp; kernel activity"
+                           Style="{StaticResource Muted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <Button Content="Cores" Tag="Cores" Click="ActionClick" ToolTipService.ToolTip="Open full per-core logical processor table"/>
+                    <Button Content="DLL users" Tag="FileUsers" Click="ActionClick" ToolTipService.ToolTip="Find processes using a DLL or file"/>
+                    <Button Content="Timeline" Tag="RecentHistory" Click="ActionClick" Style="{StaticResource AccentButtonStyle}"
+                            ToolTipService.ToolTip="Inspect recent CPU, memory, and I/O timeline"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Hero split row: CPU utilization trend (2*) + Live Logical processors matrix (320px) -->
+            <Grid x:Name="HeroGrid" ColumnSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*"/>
+                    <ColumnDefinition Width="320"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left: CPU utilization gradient area chart -->
+                <Border Style="{StaticResource Card}" Padding="16,14">
+                    <Grid RowSpacing="10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="210"/>
+                        </Grid.RowDefinitions>
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="CpuChartHeadline" Text="CPU utilization" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
+                            <Border x:Name="CpuStatsPill" Grid.Column="1"
+                                    Background="{ThemeResource GroupSurface}"
+                                    BorderBrush="{ThemeResource SubtleBorder}"
+                                    BorderThickness="1" CornerRadius="10" Padding="10,3" VerticalAlignment="Center">
+                                <TextBlock x:Name="CpuStatsText" Text="Avg — · Peak —"
+                                           FontFamily="{StaticResource MonoFont}" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource InteractionAccent}"/>
+                            </Border>
+                        </Grid>
+                        <views:ResourceTrendView x:Name="CpuTrend" Grid.Row="1"/>
+                    </Grid>
+                </Border>
+
+                <!-- Right: Live Logical processors per-core bar matrix -->
+                <Border Grid.Column="1" Style="{StaticResource Card}" Padding="14">
+                    <Grid RowSpacing="10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="210"/>
+                        </Grid.RowDefinitions>
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="1">
+                                <TextBlock Text="Logical processors" Style="{StaticResource SectionLabel}"/>
+                                <TextBlock x:Name="CoreCountText" Text="Observing…" Style="{StaticResource Muted}" FontSize="11"/>
+                            </StackPanel>
+                            <Border Grid.Column="1" Background="{ThemeResource GroupSurface}"
+                                    BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="1"
+                                    CornerRadius="10" Padding="8,2" VerticalAlignment="Center">
+                                <TextBlock x:Name="BusiestCoreText" Text="Busiest: —"
+                                           FontFamily="{StaticResource MonoFont}" FontSize="10.5"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            </Border>
+                        </Grid>
+
+                        <Grid Grid.Row="1">
+                            <TextBlock x:Name="CorePlaceholderText" Text="Warming up per-core counters…"
+                                       Style="{StaticResource Muted}" VerticalAlignment="Center" HorizontalAlignment="Center"
+                                       TextAlignment="Center" TextWrapping="Wrap"/>
+                            <ScrollViewer x:Name="CoreMatrixScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Visibility="Collapsed">
+                                <ItemsControl x:Name="CoreMatrixList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="views:CoreBarItem">
+                                            <Grid ColumnSpacing="8" Margin="0,3">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="52"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="42"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{x:Bind Label}" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
+                                                <Border Grid.Column="1" Height="7" CornerRadius="3.5"
+                                                        Background="{ThemeResource GroupSurface}" VerticalAlignment="Center">
+                                                    <Border HorizontalAlignment="Left" Height="7" CornerRadius="3.5"
+                                                            Width="{x:Bind BarWidth}" Background="{x:Bind BarBrush}"/>
+                                                </Border>
+                                                <TextBlock Grid.Column="2" Text="{x:Bind PercentText}"
+                                                           FontFamily="{StaticResource MonoFont}" FontSize="11" FontWeight="SemiBold"
+                                                           HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- 4 KPI Summary Cards row -->
+            <Grid x:Name="CpuKpiGrid" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <controls:SummaryCard x:Name="ThreadsCard" Label="Threads" Glyph="&#xE9D9;" Value="—"
+                                      AccentBrush="{ThemeResource InteractionAccent}"/>
+                <controls:SummaryCard x:Name="HandlesCard" Grid.Column="1" Label="Handles" Glyph="&#xE8B7;" Value="—"
+                                      AccentBrush="{ThemeResource ChartVioletBrush}"/>
+                <controls:SummaryCard x:Name="UptimeCard" Grid.Column="2" Label="Uptime" Glyph="&#xE823;" Value="—"
+                                      AccentBrush="{ThemeResource StatusLiveBrush}"/>
+                <controls:SummaryCard x:Name="BusiestAppCard" Grid.Column="3" Label="Busiest app" Glyph="&#xE950;" Value="—"
+                                      AccentBrush="{ThemeResource StatusWarnBrush}"/>
+            </Grid>
+
+            <!-- Top CPU consumers card with inline Load bars -->
+            <Border Style="{StaticResource Card}" Padding="16,14">
+                <StackPanel Spacing="10">
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="ConsumersHeading" Text="Top CPU consumers" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
+                        <Border Grid.Column="1" Background="{ThemeResource GroupSurface}"
+                                BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="1"
+                                CornerRadius="10" Padding="10,3" VerticalAlignment="Center">
+                            <TextBlock x:Name="SampleWindowText" Text="2.0s sample window"
+                                       FontFamily="{StaticResource MonoFont}" FontSize="11"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        </Border>
+                    </Grid>
+
+                    <!-- Column header -->
+                    <Grid ColumnSpacing="12" Padding="6,4" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="0,0,0,1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*"/>
+                            <ColumnDefinition Width="72"/>
+                            <ColumnDefinition Width="130"/>
+                            <ColumnDefinition Width="76"/>
+                            <ColumnDefinition Width="86"/>
+                            <ColumnDefinition Width="76"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Process" Style="{StaticResource Muted}" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Column="1" Text="CPU %" Style="{StaticResource Muted}" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                        <TextBlock Grid.Column="2" Text="Load" Style="{StaticResource Muted}" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Column="3" Text="Threads" Style="{StaticResource Muted}" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                        <TextBlock Grid.Column="4" Text="Handles" Style="{StaticResource Muted}" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                        <TextBlock Grid.Column="5" Text="" Style="{StaticResource Muted}"/>
+                    </Grid>
+
+                    <ItemsControl x:Name="ConsumersList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="views:CpuConsumerItem">
+                                <Grid ColumnSpacing="12" Padding="6,8" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="0,0,0,1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="2*"/>
+                                        <ColumnDefinition Width="72"/>
+                                        <ColumnDefinition Width="130"/>
+                                        <ColumnDefinition Width="76"/>
+                                        <ColumnDefinition Width="86"/>
+                                        <ColumnDefinition Width="76"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{x:Bind DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{x:Bind Detail}" Style="{StaticResource Muted}" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="{x:Bind CpuText}" FontFamily="{StaticResource MonoFont}"
+                                               FontWeight="SemiBold" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    <Border Grid.Column="2" Height="7" CornerRadius="3.5"
+                                            Background="{ThemeResource GroupSurface}" VerticalAlignment="Center">
+                                        <Border HorizontalAlignment="Left" Height="7" CornerRadius="3.5"
+                                                Width="{x:Bind LoadBarWidth}" Background="{x:Bind LoadBarBrush}"/>
+                                    </Border>
+                                    <TextBlock Grid.Column="3" Text="{x:Bind ThreadsText}" FontFamily="{StaticResource MonoFont}"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="4" Text="{x:Bind HandlesText}" FontFamily="{StaticResource MonoFont}"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    <Button Grid.Column="5" Content="Inspect" Tag="{x:Bind Identity}" Click="InspectClick"
+                                            HorizontalAlignment="Right" VerticalAlignment="Center" Padding="10,4"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock x:Name="ConsumersEmptyText" Text="No matching processes." Style="{StaticResource Muted}" Visibility="Collapsed"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
