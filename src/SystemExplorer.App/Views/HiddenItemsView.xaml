@@ -19,12 +19,12 @@
                 <DropDownButton.Flyout><MenuFlyout><MenuFlyoutItem Text="CSV" Tag="csv" Click="ExportClicked"/><MenuFlyoutItem Text="JSON" Tag="json" Click="ExportClicked"/></MenuFlyout></DropDownButton.Flyout>
             </DropDownButton>
         </Grid>
-        <Grid Grid.Row="1" ColumnSpacing="8">
+        <Grid x:Name="SeverityGrid" Grid.Row="1" ColumnSpacing="8">
             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-            <controls:SummaryCard x:Name="High" Label="High" Value="0" Glyph="&#xE7BA;"/>
-            <controls:SummaryCard x:Name="Medium" Grid.Column="1" Label="Medium" Value="0" Glyph="&#xE814;"/>
-            <controls:SummaryCard x:Name="Low" Grid.Column="2" Label="Low" Value="0" Glyph="&#xE946;"/>
-            <controls:SummaryCard x:Name="Info" Grid.Column="3" Label="Info" Value="0" Glyph="&#xE946;"/>
+            <controls:SummaryCard x:Name="High" Label="High" Value="0" Glyph="&#xE7BA;" AccentBrush="{ThemeResource StatusDangerBrush}"/>
+            <controls:SummaryCard x:Name="Medium" Grid.Column="1" Label="Medium" Value="0" Glyph="&#xE814;" AccentBrush="{ThemeResource StatusWarnBrush}"/>
+            <controls:SummaryCard x:Name="Low" Grid.Column="2" Label="Low" Value="0" Glyph="&#xE946;" AccentBrush="{ThemeResource InteractionAccent}"/>
+            <controls:SummaryCard x:Name="Info" Grid.Column="3" Label="Info" Value="0" Glyph="&#xE946;" AccentBrush="{ThemeResource StatusLiveBrush}"/>
         </Grid>
         <TextBlock x:Name="CaptureStatus" Grid.Row="2" Text="Not run yet — click Run" Style="{StaticResource InvestigationStatus}" MaxLines="1" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
         <Expander x:Name="Explanation" Grid.Row="3" Header="How this scan works" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">

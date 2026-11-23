@@ -86,10 +86,17 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
-                <StackPanel Spacing="2">
-                    <TextBlock x:Name="PageTitle" Text="Processes" Style="{StaticResource PageHeading}"/>
-                    <TextBlock x:Name="PageSubtitle" Text="See what's using your system and explore related processes." Style="{StaticResource Muted}"/>
-                </StackPanel>
+                <Grid x:Name="PageHeader" ColumnSpacing="12">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <Border x:Name="PageAccentBar" Width="4" CornerRadius="2" Background="{ThemeResource InteractionAccent}" Margin="0,4,0,4"/>
+                    <StackPanel Grid.Column="1" Spacing="2">
+                        <TextBlock x:Name="PageTitle" Text="Processes" Style="{StaticResource PageHeading}"/>
+                        <TextBlock x:Name="PageSubtitle" Text="See what's using your system and explore related processes." Style="{StaticResource Muted}"/>
+                    </StackPanel>
+                    <Border x:Name="PageModeBadge" Grid.Column="2" Background="{ThemeResource CardSurface}" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="1" CornerRadius="12" Padding="10,4" VerticalAlignment="Center">
+                        <TextBlock x:Name="PageModeText" Text="Live · Read-only" FontFamily="{StaticResource MonoFont}" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </Border>
+                </Grid>
                 <Grid x:Name="ProcessesPanel" Grid.Row="1" Grid.RowSpan="2" ColumnSpacing="12" SizeChanged="ProcessesSizeChanged">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -102,12 +109,12 @@
                             <RowDefinition Height="*"/>
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
-                        <Grid ColumnSpacing="8">
+                        <Grid x:Name="ProcessSummaryGrid" ColumnSpacing="8">
                             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition x:Name="MemorySummaryColumn"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                            <controls:SummaryCard Label="Processes" Value="{x:Bind Model.ProcessCount, Mode=OneWay}" Glyph="&#xE950;"/>
-                            <controls:SummaryCard Grid.Column="1" Label="Process groups" Value="{x:Bind Model.GroupCount, Mode=OneWay}" Glyph="&#xE8FD;" ToolTipService.ToolTip="Groups use the same executable, owner and observed parent chain; single processes are included."/>
-                            <controls:SummaryCard Grid.Column="2" Label="Memory in use" Value="{x:Bind Model.MemoryUsed, Mode=OneWay}" Glyph="&#xE964;" ToolTipService.ToolTip="Physical memory in use across the system. Not the sum of process private commit."/>
-                            <controls:SummaryCard Grid.Column="3" Label="System CPU" Value="{x:Bind Model.CpuUsed, Mode=OneWay}" Glyph="&#xE9D9;"/>
+                            <controls:SummaryCard Label="Processes" Value="{x:Bind Model.ProcessCount, Mode=OneWay}" Glyph="&#xE950;" AccentBrush="{ThemeResource InteractionAccent}"/>
+                            <controls:SummaryCard Grid.Column="1" Label="Process groups" Value="{x:Bind Model.GroupCount, Mode=OneWay}" Glyph="&#xE8FD;" AccentBrush="{ThemeResource ChartVioletBrush}" ToolTipService.ToolTip="Groups use the same executable, owner and observed parent chain; single processes are included."/>
+                            <controls:SummaryCard Grid.Column="2" Label="Memory in use" Value="{x:Bind Model.MemoryUsed, Mode=OneWay}" Glyph="&#xE964;" AccentBrush="{ThemeResource StatusLiveBrush}" ToolTipService.ToolTip="Physical memory in use across the system. Not the sum of process private commit."/>
+                            <controls:SummaryCard Grid.Column="3" Label="System CPU" Value="{x:Bind Model.CpuUsed, Mode=OneWay}" Glyph="&#xE9D9;" AccentBrush="{ThemeResource StatusWarnBrush}"/>
                         </Grid>
                         <Grid Grid.Row="1" ColumnSpacing="6">
                             <Grid.ColumnDefinitions>
@@ -346,15 +353,38 @@
                 <views:StorageView x:Name="StoragePanel" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed"/>
                 <views:TraceView x:Name="TracePanel" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed"/>
                 <views:DiagnosticsView x:Name="DiagnosticsPanel" Grid.Row="2" Visibility="Collapsed"/>
-                <StackPanel x:Name="SettingsPanel" Grid.Row="2" Visibility="Collapsed" Spacing="16">
-                    <TextBlock Text="Appearance" FontSize="18" FontWeight="SemiBold"/>
-                    <ComboBox x:Name="ThemeSelector" SelectedIndex="0" SelectionChanged="ThemeChanged" AutomationProperties.Name="Color theme">
-                        <x:String>Light</x:String>
-                        <x:String>Dark</x:String>
-                        <x:String>System</x:String>
-                    </ComboBox>
-                    <TextBlock Text="Local and read-only. Process information is never uploaded. Refresh is every two seconds; pause stops new samples. History is bounded to 180 samples and is not saved to disk." TextWrapping="Wrap" MaxWidth="600" HorizontalAlignment="Left"/>
-                </StackPanel>
+                <ScrollViewer x:Name="SettingsPanel" Grid.Row="2" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="14" MaxWidth="680" HorizontalAlignment="Left">
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="Appearance &amp; motion" Style="{StaticResource SectionLabel}"/>
+                                <Grid ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="Color theme" FontWeight="SemiBold"/>
+                                        <TextBlock Text="Matches Windows Light, Dark, or High Contrast theme dictionaries." Style="{StaticResource Muted}"/>
+                                    </StackPanel>
+                                    <ComboBox x:Name="ThemeSelector" Grid.Column="1" SelectedIndex="0" MinWidth="136" VerticalAlignment="Center" SelectionChanged="ThemeChanged" AutomationProperties.Name="Color theme">
+                                        <x:String>Light</x:String>
+                                        <x:String>Dark</x:String>
+                                        <x:String>System</x:String>
+                                    </ComboBox>
+                                </Grid>
+                                <Border Height="1" Background="{ThemeResource SubtleBorder}"/>
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Windows animation effects" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="MotionStatusText" Text="Follows Windows Accessibility → Animation effects." Style="{StaticResource Muted}"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="Privacy &amp; telemetry scope" Style="{StaticResource SectionLabel}"/>
+                                <TextBlock Text="Local and read-only. Process information is never uploaded. Refresh is every two seconds; pause stops new samples. History is bounded to 180 samples and is not saved to disk." Style="{StaticResource Muted}"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
             </Grid>
         </NavigationView>
         <Border Grid.Row="2" Background="{ThemeResource CardSurface}" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="0,1,0,0" Padding="18,0">

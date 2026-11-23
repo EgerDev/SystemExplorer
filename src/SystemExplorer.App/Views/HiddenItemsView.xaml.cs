@@ -23,6 +23,8 @@ public sealed partial class HiddenItemsView : UserControl
     public event Action? CancelRequested;
     public event Action<ProcessIdentity>? InspectRequested;
     public event Action<HiddenExportDocument, string>? ExportRequested;
+    public void AnimateEntrance() => Motion.AnimateStaggeredChildren(SeverityGrid);
+
     public HiddenItemsView()
     {
         InitializeComponent();

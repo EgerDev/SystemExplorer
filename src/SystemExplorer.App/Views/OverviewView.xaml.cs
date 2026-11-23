@@ -27,6 +27,8 @@ public sealed partial class OverviewView : UserControl
     public event Action? RankingChanged;
     public event Action? ViewProcessesRequested;
 
+    public void AnimateEntrance() => Motion.AnimateStaggeredChildren(ResourcesGrid);
+
     public OverviewView()
     {
         InitializeComponent();

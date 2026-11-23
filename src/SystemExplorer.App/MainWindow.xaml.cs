@@ -53,7 +53,7 @@ public sealed partial class MainWindow : Window
         try { SystemBackdrop = new MicaBackdrop(); } catch { /* Unsupported on older Windows/Server builds. */ }
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(WindowTitleBar);
-        Root.ActualThemeChanged += (_, _) => { UpdateCaptionColors(); UpdateLiveStatusIndicator(); };
+        Root.ActualThemeChanged += (_, _) => { UpdateCaptionColors(); UpdateLiveStatusIndicator(); UpdateSectionChrome(section); };
         ProcessList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(ProcessKeyDown), true);
         ProcessList.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(ProcessPointerMoved), true);
         ProcessList.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(ProcessPointerMoved), true);
@@ -86,6 +86,7 @@ public sealed partial class MainWindow : Window
         {
             ApplyMinimumWindowSize();
             UpdateLiveStatusIndicator();
+            UpdateSectionChrome(section);
             Root.XamlRoot.Changed += (_, _) => ApplyMinimumWindowSize();
         };
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(Math.Min(1440, work.Width), Math.Min(920, work.Height)));
@@ -263,8 +264,12 @@ public sealed partial class MainWindow : Window
             "Settings" => SettingsPanel,
             _ => DiagnosticsPanel
         };
+        UpdateSectionChrome(section);
         Motion.AnimateSectionEntrance(activePanel);
-        if (section == "Processes") ProcessSearch.Text = GlobalSearch.Text;
+        if (section == "Processes") { Motion.AnimateStaggeredChildren(ProcessSummaryGrid); ProcessSearch.Text = GlobalSearch.Text; }
+        else if (section == "Overview") OverviewPanel.AnimateEntrance();
+        else if (section == "Hidden") HiddenPanel.AnimateEntrance();
+        else if (section == "Memory") DiagnosticsPanel.AnimateEntrance();
         RefreshDiagnostics();
     }
 
@@ -774,6 +779,31 @@ public sealed partial class MainWindow : Window
                 return b;
         }
         return Application.Current.Resources.TryGetValue(key, out var fallback) && fallback is Brush fb ? fb : null;
+    }
+
+    private void UpdateSectionChrome(string currentSection)
+    {
+        var accentKey = currentSection switch
+        {
+            "Memory" => "StatusLiveBrush",
+            "Disks" or "Storage" => "StatusWarnBrush",
+            "Network" or "GPU" => "ChartVioletBrush",
+            "Hidden" or "Trace" => "StatusDangerBrush",
+            _ => "InteractionAccent"
+        };
+        if (ResolveThemeBrush(accentKey) is { } barBrush) PageAccentBar.Background = barBrush;
+        PageModeText.Text = currentSection switch
+        {
+            "Overview" or "Processes" or "Memory" or "CPU" or "GPU" or "Disks" or "Network" => "Live · 2.0s",
+            "Storage" => "Metadata only",
+            "Hidden" => "Cross-view leads",
+            "Trace" => "Opt-in ETW",
+            "Settings" or "Help" => "Local · Read-only",
+            _ => "Read-only"
+        };
+        MotionStatusText.Text = Motion.IsEnabled
+            ? "Enabled — Fluent section, inspector, and live-beacon animations active."
+            : "Reduced motion active — animations snap instantly to match Windows settings.";
     }
 
     private void UpdateLiveStatusIndicator()

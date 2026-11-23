@@ -14,7 +14,18 @@
                 <DropDownButton.Flyout><MenuFlyout><MenuFlyoutItem Text="CSV" Tag="csv" Click="ExportClicked"/><MenuFlyoutItem Text="JSON" Tag="json" Click="ExportClicked"/></MenuFlyout></DropDownButton.Flyout>
             </DropDownButton>
             <Button x:Name="ClearButton" Grid.Column="3" Content="Clear" Click="ClearClicked"/>
-            <TextBlock x:Name="CaptureStatus" Grid.Column="4" Text="Not started · ready for an opt-in recording" Style="{StaticResource InvestigationStatus}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="8,0" ToolTipService.ToolTip="{Binding Text, ElementName=Notice}"/>
+            <Grid Grid.Column="4" ColumnSpacing="8" VerticalAlignment="Center" Margin="8,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Border x:Name="RecPill" Background="{ThemeResource StatusDangerSurface}" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="1" CornerRadius="10" Padding="8,2" Visibility="Collapsed" VerticalAlignment="Center" AutomationProperties.Name="ETW recording active">
+                    <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                        <Grid Width="12" Height="12" VerticalAlignment="Center">
+                            <Ellipse x:Name="RecHalo" Width="12" Height="12" Fill="{ThemeResource StatusDangerBrush}" Opacity="0.35"/>
+                            <Ellipse Width="7" Height="7" Fill="{ThemeResource StatusDangerBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                        <TextBlock Text="REC" FontFamily="{StaticResource MonoFont}" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource StatusDangerBrush}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
+                <TextBlock x:Name="CaptureStatus" Grid.Column="1" Text="Not started · ready for an opt-in recording" Style="{StaticResource InvestigationStatus}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTipService.ToolTip="{Binding Text, ElementName=Notice}"/>
+            </Grid>
         </Grid>
         <ScrollViewer x:Name="TopScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Spacing="8">

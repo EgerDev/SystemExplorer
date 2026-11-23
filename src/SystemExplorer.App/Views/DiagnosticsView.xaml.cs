@@ -24,6 +24,8 @@ public sealed partial class DiagnosticsView : UserControl
     private bool compact;
     private bool historyExpanded = true;
 
+    public void AnimateEntrance() { if (MemorySummary.Visibility == Visibility.Visible) Motion.AnimateStaggeredChildren(MemorySummary); }
+
     public DiagnosticsView() { InitializeComponent(); ready = true; }
 
     public void Update(string nextSection, MonitorSnapshot next, RelationshipSnapshot? relationships,
@@ -59,6 +61,10 @@ public sealed partial class DiagnosticsView : UserControl
         TimelineButton.Visibility = section == "CPU" ? Visibility.Visible : Visibility.Collapsed;
         TasksButton.Visibility = section == "Startup" ? Visibility.Visible : Visibility.Collapsed;
         ChartCard.Visibility = section is "Memory" or "CPU" ? Visibility.Visible : Visibility.Collapsed;
+        var trendBrushKey = section == "Memory" ? "StatusLiveBrush" : "InteractionAccent";
+        var themeKey = ActualTheme == ElementTheme.Dark ? "Default" : "Light";
+        foreach (var dict in Application.Current.Resources.MergedDictionaries)
+            if (dict.ThemeDictionaries.TryGetValue(themeKey, out var tObj) && tObj is ResourceDictionary td && td.TryGetValue(trendBrushKey, out var tb) && tb is Brush b) { Trend.Foreground = b; break; }
         ChartSeries.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
         var table = DiagnosticData.IsTable(section);
         TablePanel.Visibility = table ? Visibility.Visible : Visibility.Collapsed;

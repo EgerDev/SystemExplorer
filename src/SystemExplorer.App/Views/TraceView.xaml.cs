@@ -60,6 +60,9 @@ public sealed partial class TraceView : UserControl
         Setup.IsEnabled = !busy;
         ExportButton.IsEnabled = result is not null && !busy && !querying && !filterFailed && !exporting;
         Timeline.IsEnabled = !querying;
+        bool recordingActive = capture.Phase == OperationPhase.Running && recorder is not null;
+        RecPill.Visibility = recordingActive ? Visibility.Visible : Visibility.Collapsed;
+        if (recordingActive) Motion.StartLivePulse(RecHalo); else Motion.StopLivePulse(RecHalo);
         ConfigureLayout();
     }
 
@@ -228,6 +231,7 @@ public sealed partial class TraceView : UserControl
         treeMode = tree; EventsTab.IsChecked = !tree; TreeTab.IsChecked = tree;
         Timeline.Visibility = EventHeader.Visibility = tree ? Visibility.Collapsed : Visibility.Visible;
         ProcessTree.Visibility = TreeHeader.Visibility = tree ? Visibility.Visible : Visibility.Collapsed;
+        Motion.AnimateSubViewSwitch(tree ? (UIElement)ProcessTree : Timeline);
         Empty.Visibility = Visibility.Collapsed;
         if (tree)
         {

@@ -1,6 +1,7 @@
 using System.Numerics;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Windows.UI.ViewManagement;
 
@@ -29,6 +30,58 @@ internal static class Motion
         fade.InsertKeyFrame(0f, 0f);
         fade.InsertKeyFrame(1f, 1f, easing);
         fade.Duration = TimeSpan.FromMilliseconds(180);
+
+        visual.StartAnimation("Translation", slide);
+        visual.StartAnimation("Opacity", fade);
+    }
+
+    public static void AnimateStaggeredChildren(Panel container, int stepMs = 42)
+    {
+        if (!IsEnabled) return;
+        for (int i = 0; i < container.Children.Count; i++)
+        {
+            var child = container.Children[i];
+            if (child.Visibility != Visibility.Visible) continue;
+            ElementCompositionPreview.SetIsTranslationEnabled(child, true);
+            var visual = ElementCompositionPreview.GetElementVisual(child);
+            var compositor = visual.Compositor;
+            var easing = compositor.CreateCubicBezierEasingFunction(new Vector2(0.1f, 0.9f), new Vector2(0.2f, 1.0f));
+            var delay = TimeSpan.FromMilliseconds(Math.Min(i, 6) * stepMs);
+
+            var slide = compositor.CreateVector3KeyFrameAnimation();
+            slide.InsertKeyFrame(0f, new Vector3(0f, 10f, 0f));
+            slide.InsertKeyFrame(1f, Vector3.Zero, easing);
+            slide.DelayTime = delay;
+            slide.Duration = TimeSpan.FromMilliseconds(210);
+
+            var fade = compositor.CreateScalarKeyFrameAnimation();
+            fade.InsertKeyFrame(0f, 0f);
+            fade.InsertKeyFrame(1f, 1f, easing);
+            fade.DelayTime = delay;
+            fade.Duration = TimeSpan.FromMilliseconds(170);
+
+            visual.StartAnimation("Translation", slide);
+            visual.StartAnimation("Opacity", fade);
+        }
+    }
+
+    public static void AnimateSubViewSwitch(UIElement element)
+    {
+        if (!IsEnabled || element.Visibility != Visibility.Visible) return;
+        ElementCompositionPreview.SetIsTranslationEnabled(element, true);
+        var visual = ElementCompositionPreview.GetElementVisual(element);
+        var compositor = visual.Compositor;
+        var easing = compositor.CreateCubicBezierEasingFunction(new Vector2(0.1f, 0.9f), new Vector2(0.2f, 1.0f));
+
+        var slide = compositor.CreateVector3KeyFrameAnimation();
+        slide.InsertKeyFrame(0f, new Vector3(10f, 0f, 0f));
+        slide.InsertKeyFrame(1f, Vector3.Zero, easing);
+        slide.Duration = TimeSpan.FromMilliseconds(170);
+
+        var fade = compositor.CreateScalarKeyFrameAnimation();
+        fade.InsertKeyFrame(0f, 0.25f);
+        fade.InsertKeyFrame(1f, 1f, easing);
+        fade.Duration = TimeSpan.FromMilliseconds(150);
 
         visual.StartAnimation("Translation", slide);
         visual.StartAnimation("Opacity", fade);
