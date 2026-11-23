@@ -76,11 +76,15 @@ public sealed partial class CpuView : UserControl
         var scale = Math.Max(100d, validValues.Length > 0 ? validValues.Max() : 0d);
         CpuTrend.Update(DiagnosticData.BuildTrend(history, p => p.CpuPercent, scale), "System CPU");
 
-        // 4 KPI Summary Cards
+        // 4 KPI Summary Cards (never present partial sums as complete totals)
+        var missingThreads = snapshot.Processes.Any(p => p.ThreadCount is null);
+        var missingHandles = snapshot.Processes.Any(p => p.HandleCount is null);
         var totalThreads = snapshot.Processes.Sum(p => (long)Math.Max(0, p.ThreadCount ?? 0));
         var totalHandles = snapshot.Processes.Sum(p => (long)Math.Max(0, p.HandleCount ?? 0));
-        ThreadsCard.Value = totalThreads > 0 ? totalThreads.ToString("N0") : "—";
-        HandlesCard.Value = totalHandles > 0 ? totalHandles.ToString("N0") : "—";
+        ThreadsCard.Label = missingThreads ? "Observed threads" : "Threads";
+        ThreadsCard.Value = totalThreads > 0 ? (missingThreads ? $"{totalThreads:N0} (partial)" : totalThreads.ToString("N0")) : "—";
+        HandlesCard.Label = missingHandles ? "Observed handles" : "Handles";
+        HandlesCard.Value = totalHandles > 0 ? (missingHandles ? $"{totalHandles:N0} (partial)" : totalHandles.ToString("N0")) : "—";
 
         var uptime = TimeSpan.FromMilliseconds(Environment.TickCount64);
         UptimeCard.Value = uptime.Days > 0

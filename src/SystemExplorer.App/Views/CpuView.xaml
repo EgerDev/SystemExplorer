@@ -16,8 +16,8 @@
                            Style="{StaticResource Muted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
                     <Button Content="Cores" Tag="Cores" Click="ActionClick" ToolTipService.ToolTip="Open full per-core logical processor table"/>
-                    <Button Content="DLL users" Tag="FileUsers" Click="ActionClick" ToolTipService.ToolTip="Find processes using a DLL or file"/>
-                    <Button Content="Timeline" Tag="RecentHistory" Click="ActionClick" Style="{StaticResource AccentButtonStyle}"
+                    <Button Content="DLL users" Tag="DllUsers" Click="ActionClick" ToolTipService.ToolTip="Find processes using a DLL or file"/>
+                    <Button Content="Timeline" Tag="Timeline" Click="ActionClick" Style="{StaticResource AccentButtonStyle}"
                             ToolTipService.ToolTip="Inspect recent CPU, memory, and I/O timeline"/>
                 </StackPanel>
             </Grid>

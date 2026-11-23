@@ -52,7 +52,7 @@ public sealed partial class DiagnosticsView : UserControl
         AdaptersButton.Visibility = section == "Network" ? Visibility.Visible : Visibility.Collapsed;
         IoAttributionButton.Visibility = section == "Network" ? Visibility.Visible : Visibility.Collapsed;
         CoresButton.Visibility = section == "CPU" ? Visibility.Visible : Visibility.Collapsed;
-        GpuButton.Visibility = section == "CPU" ? Visibility.Visible : Visibility.Collapsed;
+        GpuButton.Visibility = section is "GPU" or "CPU" ? Visibility.Visible : Visibility.Collapsed;
         DllUsersButton.Visibility = section == "CPU" ? Visibility.Visible : Visibility.Collapsed;
         MemoryListsButton.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
         PoolTagsButton.Visibility = section == "Memory" ? Visibility.Visible : Visibility.Collapsed;
