@@ -7,8 +7,8 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}" FontSize="{StaticResource ContentIconSize}" VerticalAlignment="Top" Margin="0,2,0,0" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.AccessibilityView="Raw"/>
             <StackPanel Grid.Column="1" Spacing="3">
-                <TextBlock Text="{x:Bind Label, Mode=OneWay}" FontSize="{StaticResource CaptionSize}" FontWeight="SemiBold" TextWrapping="Wrap" AutomationProperties.AccessibilityView="Raw"/>
-                <TextBlock Text="{x:Bind Value, Mode=OneWay}" FontSize="{StaticResource SummaryValueSize}" FontWeight="SemiBold" TextWrapping="Wrap" AutomationProperties.Name="{x:Bind AccessibleValue(Label, Value), Mode=OneWay}"/>
+                <TextBlock Text="{x:Bind Label, Mode=OneWay}" FontSize="{StaticResource CaptionSize}" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" AutomationProperties.AccessibilityView="Raw"/>
+                <TextBlock Text="{x:Bind Value, Mode=OneWay}" FontFamily="{StaticResource MonoFont}" FontSize="{StaticResource SummaryValueSize}" FontWeight="SemiBold" TextWrapping="Wrap" AutomationProperties.Name="{x:Bind AccessibleValue(Label, Value), Mode=OneWay}"/>
             </StackPanel>
         </Grid>
     </Border>

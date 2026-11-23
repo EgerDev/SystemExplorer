@@ -30,6 +30,7 @@ public sealed partial class MainWindow : Window
     private bool detailsOpen;
     private string section = "Processes";
     private ProcessIdentity? selectedIdentity;
+    private ProcessIdentity? lastAnimatedInspectorIdentity;
     private DateTimeOffset? selectedCapturedAt;
     private string? selectedRowKey;
     private bool restoringSelection;
@@ -49,9 +50,10 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        try { SystemBackdrop = new MicaBackdrop(); } catch { /* Unsupported on older Windows/Server builds. */ }
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(WindowTitleBar);
-        Root.ActualThemeChanged += (_, _) => UpdateCaptionColors();
+        Root.ActualThemeChanged += (_, _) => { UpdateCaptionColors(); UpdateLiveStatusIndicator(); };
         ProcessList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(ProcessKeyDown), true);
         ProcessList.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(ProcessPointerMoved), true);
         ProcessList.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(ProcessPointerMoved), true);
@@ -83,6 +85,7 @@ public sealed partial class MainWindow : Window
         Root.Loaded += (_, _) =>
         {
             ApplyMinimumWindowSize();
+            UpdateLiveStatusIndicator();
             Root.XamlRoot.Changed += (_, _) => ApplyMinimumWindowSize();
         };
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(Math.Min(1440, work.Width), Math.Min(920, work.Height)));
@@ -250,6 +253,17 @@ public sealed partial class MainWindow : Window
         TracePanel.Visibility = section == "Trace" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPanel.Visibility = section == "Settings" ? Visibility.Visible : Visibility.Collapsed;
         DiagnosticsPanel.Visibility = section is "Processes" or "Overview" or "Settings" or "Trace" or "Storage" or "Hidden" ? Visibility.Collapsed : Visibility.Visible;
+        UIElement activePanel = section switch
+        {
+            "Processes" => ProcessesPanel,
+            "Overview" => OverviewPanel,
+            "Hidden" => HiddenPanel,
+            "Storage" => StoragePanel,
+            "Trace" => TracePanel,
+            "Settings" => SettingsPanel,
+            _ => DiagnosticsPanel
+        };
+        Motion.AnimateSectionEntrance(activePanel);
         if (section == "Processes") ProcessSearch.Text = GlobalSearch.Text;
         RefreshDiagnostics();
     }
@@ -614,6 +628,11 @@ public sealed partial class MainWindow : Window
             OpenLocation.IsEnabled = CopyPath.IsEnabled = CopyPid.IsEnabled = PublisherButton.IsEnabled = false;
             return;
         }
+        if (lastAnimatedInspectorIdentity != process.Identity)
+        {
+            lastAnimatedInspectorIdentity = process.Identity;
+            Motion.AnimateInspectorReveal(Inspector);
+        }
         SelectedName.Text = Model.Descriptions.GetCached(process) ?? process.Name;
         SelectedRawName.Text = process.Name;
         ToolTipService.SetToolTip(SelectedName, $"{process.Name}. Display name may use local file description; this is not verified publisher or application identity.");
@@ -741,7 +760,38 @@ public sealed partial class MainWindow : Window
         if (Model.Snapshot is { } snapshot) tray.Update(snapshot, paused);
         PauseButton.Content = paused ? "Resume" : "Pause";
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(PauseButton, paused ? "Resume live refresh" : "Pause live refresh");
+        UpdateLiveStatusIndicator();
         StatusText.Text = paused ? "Paused · displayed measurements are frozen" : "Resuming live local monitoring…";
+    }
+
+    private Brush? ResolveThemeBrush(string key)
+    {
+        var themeKey = Root.ActualTheme == ElementTheme.Dark ? "Default" : "Light";
+        foreach (var dict in Application.Current.Resources.MergedDictionaries)
+        {
+            if (dict.ThemeDictionaries.TryGetValue(themeKey, out var themeObj) && themeObj is ResourceDictionary themeDict &&
+                themeDict.TryGetValue(key, out var val) && val is Brush b)
+                return b;
+        }
+        return Application.Current.Resources.TryGetValue(key, out var fallback) && fallback is Brush fb ? fb : null;
+    }
+
+    private void UpdateLiveStatusIndicator()
+    {
+        var surfaceKey = paused ? "StatusWarnSurface" : "StatusLiveSurface";
+        var brushKey = paused ? "StatusWarnBrush" : "StatusLiveBrush";
+        if (ResolveThemeBrush(surfaceKey) is { } surfaceBrush)
+            LiveStatusPill.Background = surfaceBrush;
+        if (ResolveThemeBrush(brushKey) is { } accentBrush)
+        {
+            LiveHalo.Fill = accentBrush;
+            LiveDot.Fill = accentBrush;
+            LiveStatusLabel.Foreground = accentBrush;
+            FooterLiveDot.Fill = accentBrush;
+        }
+        LiveStatusLabel.Text = paused ? "Paused" : "Live · 2.0s";
+        if (paused) Motion.StopLivePulse(LiveHalo);
+        else Motion.StartLivePulse(LiveHalo);
     }
     private void ThemeChanged(object sender, SelectionChangedEventArgs args)
     {

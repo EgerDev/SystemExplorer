@@ -3,14 +3,21 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Light">
-            <SolidColorBrush x:Key="PageSurface" Color="#F7F8FA"/>
-            <SolidColorBrush x:Key="GroupSurface" Color="#F0F2F5"/>
-            <SolidColorBrush x:Key="HeaderSurface" Color="#F4F5F8"/>
-            <SolidColorBrush x:Key="CardSurface" Color="#FCFCFD"/>
-            <SolidColorBrush x:Key="SubtleBorder" Color="#DDE1E8"/>
-            <SolidColorBrush x:Key="SelectionSurface" Color="#E2EDFC"/>
-            <SolidColorBrush x:Key="SelectionForeground" Color="#153A67"/>
+            <SolidColorBrush x:Key="PageSurface" Color="#F3F4F6"/>
+            <SolidColorBrush x:Key="GroupSurface" Color="#F9FAFB"/>
+            <SolidColorBrush x:Key="HeaderSurface" Color="#ECEEF2"/>
+            <SolidColorBrush x:Key="CardSurface" Color="#FFFFFF"/>
+            <SolidColorBrush x:Key="SubtleBorder" Color="#E5E7EB"/>
+            <SolidColorBrush x:Key="SelectionSurface" Color="#EFF6FF"/>
+            <SolidColorBrush x:Key="SelectionForeground" Color="#1D4ED8"/>
             <SolidColorBrush x:Key="InteractionAccent" Color="#0067C0"/>
+            <SolidColorBrush x:Key="StatusLiveBrush" Color="#10B981"/>
+            <SolidColorBrush x:Key="StatusLiveSurface" Color="#ECFDF5"/>
+            <SolidColorBrush x:Key="StatusWarnBrush" Color="#D97706"/>
+            <SolidColorBrush x:Key="StatusWarnSurface" Color="#FEF3C7"/>
+            <SolidColorBrush x:Key="StatusDangerBrush" Color="#DC2626"/>
+            <SolidColorBrush x:Key="StatusDangerSurface" Color="#FEF2F2"/>
+            <SolidColorBrush x:Key="ChartVioletBrush" Color="#7C3AED"/>
         </ResourceDictionary>
         <ResourceDictionary x:Key="Default">
             <SolidColorBrush x:Key="PageSurface" Color="#202124"/>
@@ -21,6 +28,13 @@
             <SolidColorBrush x:Key="SelectionSurface" Color="#233D5A"/>
             <SolidColorBrush x:Key="SelectionForeground" Color="#E0EEFF"/>
             <SolidColorBrush x:Key="InteractionAccent" Color="#75B9F5"/>
+            <SolidColorBrush x:Key="StatusLiveBrush" Color="#34D399"/>
+            <SolidColorBrush x:Key="StatusLiveSurface" Color="#14332A"/>
+            <SolidColorBrush x:Key="StatusWarnBrush" Color="#FBBF24"/>
+            <SolidColorBrush x:Key="StatusWarnSurface" Color="#3A2B12"/>
+            <SolidColorBrush x:Key="StatusDangerBrush" Color="#F87171"/>
+            <SolidColorBrush x:Key="StatusDangerSurface" Color="#3B1D20"/>
+            <SolidColorBrush x:Key="ChartVioletBrush" Color="#A78BFA"/>
         </ResourceDictionary>
         <ResourceDictionary x:Key="HighContrast">
             <SolidColorBrush x:Key="PageSurface" Color="{ThemeResource SystemColorWindowColor}"/>
@@ -31,20 +45,28 @@
             <SolidColorBrush x:Key="SelectionSurface" Color="{ThemeResource SystemColorHighlightColor}"/>
             <SolidColorBrush x:Key="SelectionForeground" Color="{ThemeResource SystemColorHighlightTextColor}"/>
             <SolidColorBrush x:Key="InteractionAccent" Color="{ThemeResource SystemColorHotlightColor}"/>
+            <SolidColorBrush x:Key="StatusLiveBrush" Color="{ThemeResource SystemColorHotlightColor}"/>
+            <SolidColorBrush x:Key="StatusLiveSurface" Color="{ThemeResource SystemColorWindowColor}"/>
+            <SolidColorBrush x:Key="StatusWarnBrush" Color="{ThemeResource SystemColorHotlightColor}"/>
+            <SolidColorBrush x:Key="StatusWarnSurface" Color="{ThemeResource SystemColorWindowColor}"/>
+            <SolidColorBrush x:Key="StatusDangerBrush" Color="{ThemeResource SystemColorHotlightColor}"/>
+            <SolidColorBrush x:Key="StatusDangerSurface" Color="{ThemeResource SystemColorWindowColor}"/>
+            <SolidColorBrush x:Key="ChartVioletBrush" Color="{ThemeResource SystemColorHotlightColor}"/>
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
+    <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas</FontFamily>
     <x:Double x:Key="BodySize">14</x:Double>
     <x:Double x:Key="DataSize">14</x:Double>
     <x:Double x:Key="CaptionSize">13</x:Double>
     <x:Double x:Key="SectionHeadingSize">16</x:Double>
-    <x:Double x:Key="PageHeadingSize">28</x:Double>
-    <x:Double x:Key="SummaryValueSize">24</x:Double>
-    <x:Double x:Key="MetricValueSize">28</x:Double>
-    <x:Double x:Key="ContentIconSize">20</x:Double>
-    <CornerRadius x:Key="CardCornerRadius">8</CornerRadius>
+    <x:Double x:Key="PageHeadingSize">26</x:Double>
+    <x:Double x:Key="SummaryValueSize">22</x:Double>
+    <x:Double x:Key="MetricValueSize">26</x:Double>
+    <x:Double x:Key="ContentIconSize">18</x:Double>
+    <CornerRadius x:Key="CardCornerRadius">10</CornerRadius>
     <CornerRadius x:Key="RowCornerRadius">6</CornerRadius>
     <Thickness x:Key="CardPadding">16</Thickness>
-    <Thickness x:Key="SummaryCardPadding">12,10</Thickness>
+    <Thickness x:Key="SummaryCardPadding">14,11</Thickness>
     <Style x:Key="Card" TargetType="Border">
         <Setter Property="Background" Value="{ThemeResource CardSurface}"/>
         <Setter Property="BorderBrush" Value="{ThemeResource SubtleBorder}"/>
@@ -80,6 +102,7 @@
     </Style>
     <Style x:Key="NumericCell" TargetType="TextBlock" BasedOn="{StaticResource DataCell}">
         <Setter Property="HorizontalAlignment" Value="Right"/>
+        <Setter Property="FontFamily" Value="{StaticResource MonoFont}"/>
     </Style>
     <Style x:Key="ColumnHeader" TargetType="Button">
         <Setter Property="FontSize" Value="{StaticResource CaptionSize}"/>

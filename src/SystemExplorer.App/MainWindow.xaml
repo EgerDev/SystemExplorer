@@ -24,10 +24,21 @@
                 <AutoSuggestBox x:Name="GlobalSearch" PlaceholderText="Search this section…  Ctrl+K" QueryIcon="Find" TextChanged="GlobalSearchChanged" AutomationProperties.Name="Search current section" AutomationProperties.AcceleratorKey="Ctrl+K" MaxWidth="600" HorizontalAlignment="Stretch"/>
             </TitleBar.Content>
             <TitleBar.RightHeader>
-                <Button x:Name="PauseButton" Content="Pause" Click="PauseClicked" AutomationProperties.Name="Pause live refresh"/>
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Border x:Name="LiveStatusPill" Background="{ThemeResource StatusLiveSurface}" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="1" CornerRadius="12" Padding="9,3" VerticalAlignment="Center" AutomationProperties.Name="Live monitoring status">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <Grid Width="12" Height="12" VerticalAlignment="Center">
+                                <Ellipse x:Name="LiveHalo" Width="12" Height="12" Fill="{ThemeResource StatusLiveBrush}" Opacity="0.35"/>
+                                <Ellipse x:Name="LiveDot" Width="7" Height="7" Fill="{ThemeResource StatusLiveBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Grid>
+                            <TextBlock x:Name="LiveStatusLabel" Text="Live · 2.0s" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource StatusLiveBrush}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+                    <Button x:Name="PauseButton" Content="Pause" Click="PauseClicked" AutomationProperties.Name="Pause live refresh"/>
+                </StackPanel>
             </TitleBar.RightHeader>
         </TitleBar>
-        <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Auto" ExpandedModeThresholdWidth="900" CompactModeThresholdWidth="640" IsBackButtonVisible="Collapsed" IsSettingsVisible="False" OpenPaneLength="192" CompactPaneLength="48" IsPaneToggleButtonVisible="True" SelectionChanged="NavigationChanged" AlwaysShowHeader="False">
+        <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Top" IsBackButtonVisible="Collapsed" IsSettingsVisible="False" IsPaneToggleButtonVisible="False" SelectionChanged="NavigationChanged" AlwaysShowHeader="False">
             <NavigationView.MenuItems>
                 <NavigationViewItem Content="Overview" Tag="Overview" Icon="Home"/>
                 <NavigationViewItem Content="Processes" Tag="Processes" Icon="AllApps" IsSelected="True"/>
@@ -346,6 +357,13 @@
                 </StackPanel>
             </Grid>
         </NavigationView>
-        <TextBlock x:Name="StatusText" Grid.Row="2" Margin="20,4" Text="Starting local Windows monitoring…" FontSize="11" TextTrimming="CharacterEllipsis"/>
+        <Border Grid.Row="2" Background="{ThemeResource CardSurface}" BorderBrush="{ThemeResource SubtleBorder}" BorderThickness="0,1,0,0" Padding="18,0">
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Ellipse x:Name="FooterLiveDot" Width="7" Height="7" Fill="{ThemeResource StatusLiveBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="StatusText" Grid.Column="1" VerticalAlignment="Center" Text="Starting local Windows monitoring…" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
+                <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="Local · Read-only" FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

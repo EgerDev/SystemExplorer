@@ -10,16 +10,16 @@
             <Grid x:Name="ResourcesGrid" Grid.Row="1" ColumnSpacing="12" Margin="0,0,0,16">
                 <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                <controls:MetricCard x:Name="CpuCard" Label="CPU" Glyph="&#xE9D9;">
-                    <controls:MetricCard.Trend><views:ResourceTrendView x:Name="CpuTrend"/></controls:MetricCard.Trend>
+                <controls:MetricCard x:Name="CpuCard" Label="CPU" Glyph="&#xE9D9;" AccentBrush="{ThemeResource InteractionAccent}">
+                    <controls:MetricCard.Trend><views:ResourceTrendView x:Name="CpuTrend" Foreground="{ThemeResource InteractionAccent}"/></controls:MetricCard.Trend>
                 </controls:MetricCard>
-                <controls:MetricCard x:Name="MemoryCard" Grid.Column="1" Label="Physical memory" Glyph="&#xE964;">
-                    <controls:MetricCard.Trend><views:ResourceTrendView x:Name="MemoryTrend"/></controls:MetricCard.Trend>
+                <controls:MetricCard x:Name="MemoryCard" Grid.Column="1" Label="Physical memory" Glyph="&#xE964;" AccentBrush="{ThemeResource StatusLiveBrush}">
+                    <controls:MetricCard.Trend><views:ResourceTrendView x:Name="MemoryTrend" Foreground="{ThemeResource StatusLiveBrush}"/></controls:MetricCard.Trend>
                 </controls:MetricCard>
-                <controls:MetricCard x:Name="DiskCard" Grid.Column="2" Label="Disk throughput" Glyph="&#xEDA2;">
-                    <controls:MetricCard.Trend><views:ResourceTrendView x:Name="DiskTrend"/></controls:MetricCard.Trend>
+                <controls:MetricCard x:Name="DiskCard" Grid.Column="2" Label="Disk throughput" Glyph="&#xEDA2;" AccentBrush="{ThemeResource StatusWarnBrush}">
+                    <controls:MetricCard.Trend><views:ResourceTrendView x:Name="DiskTrend" Foreground="{ThemeResource StatusWarnBrush}"/></controls:MetricCard.Trend>
                 </controls:MetricCard>
-                <controls:MetricCard x:Name="NetworkCard" Grid.Column="3" Label="Network" Glyph="&#xE701;" Value="Unavailable" Detail="Bandwidth is not measured.">
+                <controls:MetricCard x:Name="NetworkCard" Grid.Column="3" Label="Network" Glyph="&#xE701;" AccentBrush="{ThemeResource ChartVioletBrush}" Value="Unavailable" Detail="Bandwidth is not measured.">
                     <controls:MetricCard.Trend><TextBlock x:Name="NetworkObservation" Style="{StaticResource Muted}" VerticalAlignment="Center"/></controls:MetricCard.Trend>
                 </controls:MetricCard>
             </Grid>
