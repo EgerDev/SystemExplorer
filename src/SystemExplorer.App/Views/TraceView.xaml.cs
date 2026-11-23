@@ -264,7 +264,13 @@ public sealed partial class TraceView : UserControl
     }
     private async void ShowSummary(int index)
     {
-        if (result is not { } captured || index < 0 || index >= captured.Processes.Count) return;
+        if (result is not { } captured || index < 0 || index >= captured.Processes.Count)
+        {
+            ++summaryGeneration; selectedProcess = -1;
+            SummaryTitle.Text = "Process not observed";
+            SummaryText.Text = "No attributed process record for the selected event.";
+            TopText.Text = ""; RefreshInspect(); return;
+        }
         int generation = ++summaryGeneration; selectedProcess = index; var p = captured.Processes[index];
         SummaryTitle.Text = $"{p.ImageName ?? "(name unavailable)"} ({p.Pid})";
         SummaryText.Text = "Calculating retained-event summary…"; TopText.Text = ""; RefreshInspect();
