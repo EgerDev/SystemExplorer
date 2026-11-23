@@ -293,8 +293,14 @@ public sealed partial class StorageView : UserControl, IDisposable
             ResolveDonutBrush("ChartVioletBrush", Microsoft.UI.Colors.MediumPurple)
         };
 
-        var positive = totals.Where(t => t.AllocatedBytes > 0).OrderByDescending(t => t.AllocatedBytes).Take(4).ToArray();
-        var sum = positive.Sum(t => (double)t.AllocatedBytes);
+        var slices = totals.Where(t => t.AllocatedBytes > 0)
+            .Select(t => (Label: t.Category, Bytes: t.AllocatedBytes))
+            .ToList();
+        var covered = slices.Sum(s => s.Bytes);
+        if (footprint > covered)
+            slices.Add(("Projects (other files)", footprint - covered));
+        var positive = slices.OrderByDescending(s => s.Bytes).Take(4).ToArray();
+        var sum = positive.Sum(s => (double)s.Bytes);
         const double cx = 54, cy = 54, r = 42;
 
         // Background track ring
@@ -313,7 +319,7 @@ public sealed partial class StorageView : UserControl, IDisposable
             for (int i = 0; i < positive.Length; i++)
             {
                 var cat = positive[i];
-                var sweep = (cat.AllocatedBytes / sum) * (Math.PI * 2);
+                var sweep = (cat.Bytes / sum) * (Math.PI * 2);
                 if (sweep >= Math.PI * 2 - 0.001) sweep = Math.PI * 2 - 0.01;
                 var start = new global::Windows.Foundation.Point(cx + r * Math.Cos(angle), cy + r * Math.Sin(angle));
                 var end = new global::Windows.Foundation.Point(cx + r * Math.Cos(angle + sweep), cy + r * Math.Sin(angle + sweep));
@@ -341,8 +347,8 @@ public sealed partial class StorageView : UserControl, IDisposable
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 var dot = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 8, Height = 8, Fill = palette[i % palette.Length], VerticalAlignment = VerticalAlignment.Center };
-                var lbl = new TextBlock { Text = cat.Category, FontSize = 11.5, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-                var val = new TextBlock { Text = Bytes(cat.AllocatedBytes), FontFamily = (FontFamily)Application.Current.Resources["MonoFont"], FontSize = 11.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
+                var lbl = new TextBlock { Text = cat.Label, FontSize = 11.5, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+                var val = new TextBlock { Text = Bytes(cat.Bytes), FontFamily = (FontFamily)Application.Current.Resources["MonoFont"], FontSize = 11.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
                 Grid.SetColumn(lbl, 1); Grid.SetColumn(val, 2);
                 row.Children.Add(dot); row.Children.Add(lbl); row.Children.Add(val);
                 DonutLegend.Children.Add(row);

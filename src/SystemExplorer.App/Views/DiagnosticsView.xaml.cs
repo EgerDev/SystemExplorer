@@ -219,11 +219,13 @@ public sealed partial class DiagnosticsView : UserControl
             var svcs = relationships?.Services ?? Array.Empty<ServiceSnapshot>();
             var running = svcs.Count(s => string.Equals(s.State, "Running", StringComparison.OrdinalIgnoreCase));
             var stopped = svcs.Count(s => string.Equals(s.State, "Stopped", StringComparison.OrdinalIgnoreCase));
+            var unreadStart = svcs.Count(s => string.IsNullOrEmpty(s.StartType));
             var auto = svcs.Count(s => s.StartType?.Contains("Auto", StringComparison.OrdinalIgnoreCase) == true);
             SecKpi1.Label = "Total services"; SecKpi1.Value = svcs.Count.ToString("N0");
             SecKpi2.Label = "Running"; SecKpi2.Value = running.ToString("N0");
             SecKpi3.Label = "Stopped"; SecKpi3.Value = stopped.ToString("N0");
-            SecKpi4.Label = "Auto-start"; SecKpi4.Value = auto.ToString("N0");
+            SecKpi4.Label = unreadStart > 0 ? "Auto-start (partial)" : "Auto-start";
+            SecKpi4.Value = unreadStart > 0 ? $"{auto:N0} / {svcs.Count - unreadStart:N0} read" : auto.ToString("N0");
             SectionKpiGrid.Visibility = Visibility.Visible;
         }
         else if (section == "Startup")

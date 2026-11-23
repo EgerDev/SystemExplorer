@@ -107,7 +107,6 @@ public sealed partial class NetworkView : UserControl
                         e.Owner.Contains(query, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(e => string.Equals(e.State, "Established", StringComparison.OrdinalIgnoreCase))
             .ThenBy(e => e.Owner, StringComparer.OrdinalIgnoreCase)
-            .Take(60)
             .ToArray();
 
         EndpointCountText.Text = $"{endpointItems.Length} of {conns.Count}";

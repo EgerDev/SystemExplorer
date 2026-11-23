@@ -53,11 +53,15 @@ public sealed partial class DisksView : UserControl
 
         if (d?.Total is { } tot)
         {
-            var rLat = tot.ReadLatencyMilliseconds.Value;
-            var wLat = tot.WriteLatencyMilliseconds.Value;
-            if (rLat.HasValue || wLat.HasValue)
-                LatencyCard.Value = $"{Math.Max(rLat ?? 0, wLat ?? 0):0.0} ms";
-            else if (tot.ReadLatencyMilliseconds.State == CounterValueState.NoActivityInInterval)
+            var rLat = tot.ReadLatencyMilliseconds;
+            var wLat = tot.WriteLatencyMilliseconds;
+            if (rLat.Value.HasValue && wLat.Value.HasValue)
+                LatencyCard.Value = $"R {rLat.Value.Value:0.0} / W {wLat.Value.Value:0.0} ms";
+            else if (rLat.Value.HasValue)
+                LatencyCard.Value = $"R {rLat.Value.Value:0.0} ms";
+            else if (wLat.Value.HasValue)
+                LatencyCard.Value = $"W {wLat.Value.Value:0.0} ms";
+            else if (rLat.State == CounterValueState.NoActivityInInterval && wLat.State == CounterValueState.NoActivityInInterval)
                 LatencyCard.Value = "Idle";
             else
                 LatencyCard.Value = "—";
@@ -84,8 +88,8 @@ public sealed partial class DisksView : UserControl
                 var brush = (activePct ?? 0) >= 75 ? amber : (activePct ?? 0) >= 30 ? blue : green;
                 var rb = row.ReadBytesPerSecond.Value is { } r1 ? Display.Rate(r1) : "—";
                 var wb = row.WriteBytesPerSecond.Value is { } w1 ? Display.Rate(w1) : "—";
-                var rl = row.ReadLatencyMilliseconds.Value is { } l1 ? $"{l1:0.0} ms" : "idle";
-                var wl = row.WriteLatencyMilliseconds.Value is { } l2 ? $"{l2:0.0} ms" : "idle";
+                var rl = FormatLatency(row.ReadLatencyMilliseconds);
+                var wl = FormatLatency(row.WriteLatencyMilliseconds);
                 var qd = row.CurrentQueueLength.Value is { } q1 ? $"{q1:0.##}" : "—";
                 cards[i] = new PhysicalDiskCardItem(
                     $"Disk {row.Instance}",
@@ -139,6 +143,13 @@ public sealed partial class DisksView : UserControl
         DiskProcessesList.ItemsSource = items;
         DiskProcsEmpty.Visibility = items.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    private static string FormatLatency(CounterValue cv) => cv.Value is { } ms ? $"{ms:0.0} ms" : cv.State switch
+    {
+        CounterValueState.NoActivityInInterval => "idle",
+        CounterValueState.Warmup => "warming up",
+        _ => "—"
+    };
 
     private void ActionClick(object sender, RoutedEventArgs e)
     {

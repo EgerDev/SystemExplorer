@@ -31,7 +31,7 @@
                                       AccentBrush="{ThemeResource InteractionAccent}"/>
                 <controls:SummaryCard x:Name="WriteRateCard" Grid.Column="1" Label="Disk write" Glyph="&#xE898;" Value="—"
                                       AccentBrush="{ThemeResource StatusWarnBrush}"/>
-                <controls:SummaryCard x:Name="LatencyCard" Grid.Column="2" Label="Avg latency" Glyph="&#xE916;" Value="—"
+                <controls:SummaryCard x:Name="LatencyCard" Grid.Column="2" Label="R / W latency" Glyph="&#xE916;" Value="—"
                                       AccentBrush="{ThemeResource ChartVioletBrush}"/>
                 <controls:SummaryCard x:Name="QueueCard" Grid.Column="3" Label="Queue depth" Glyph="&#xE8FD;" Value="—"
                                       AccentBrush="{ThemeResource StatusLiveBrush}"/>
@@ -96,8 +96,8 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="Top disk I/O processes" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="1" Text="Read + Write / sec" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                            <TextBlock Text="Top process I/O (all I/O)" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="Disk, network &amp; pipe I/O" FontFamily="{StaticResource MonoFont}" FontSize="11"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
                         </Grid>
 

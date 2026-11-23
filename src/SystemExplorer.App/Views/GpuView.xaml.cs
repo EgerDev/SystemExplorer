@@ -60,23 +60,41 @@ public sealed partial class GpuView : UserControl
         var maxUtil = adapters.Select(a => a.HeadlineUtilizationPercent.Value).Where(v => v.HasValue).Select(v => v!.Value).ToArray();
         HeadlineUtilCard.Value = maxUtil.Length > 0 ? $"{maxUtil.Max():0.0}%" : "Unavailable";
 
-        var firstWithDed = adapters.FirstOrDefault(a => a.DedicatedUsageBytes.Value.HasValue || a.DedicatedVideoMemoryBytes.HasValue);
-        if (firstWithDed is not null)
+        var primary = adapters
+            .OrderByDescending(a => a.HasCounterInstances)
+            .ThenByDescending(a => a.HeadlineUtilizationPercent.Value ?? -1)
+            .ThenByDescending(a => a.DedicatedUsageBytes.Value ?? -1)
+            .ThenByDescending(a => a.DedicatedVideoMemoryBytes ?? 0)
+            .FirstOrDefault();
+        var multiSuffix = adapters.Count > 1 ? " (primary)" : "";
+        DedicatedVramCard.Label = $"Dedicated VRAM{multiSuffix}";
+        SharedMemCard.Label = $"Shared GPU memory{multiSuffix}";
+        if (primary is not null)
         {
-            var used = firstWithDed.DedicatedUsageBytes.Value is { } du ? DiagnosticData.Bytes((ulong)Math.Max(0, du)) : "—";
-            var cap = firstWithDed.DedicatedVideoMemoryBytes is { } dc ? DiagnosticData.Bytes(dc) : "—";
-            DedicatedVramCard.Value = firstWithDed.DedicatedUsageBytes.Value.HasValue ? $"{used} / {cap}" : cap;
-        }
-        else DedicatedVramCard.Value = "Unavailable";
+            var pName = primary.Description ?? $"Adapter 0x{primary.Luid:X}";
+            ToolTipService.SetToolTip(DedicatedVramCard, $"Showing primary active adapter: {pName}");
+            ToolTipService.SetToolTip(SharedMemCard, $"Showing primary active adapter: {pName} (shared is system RAM)");
+            if (primary.DedicatedUsageBytes.Value.HasValue || primary.DedicatedVideoMemoryBytes.HasValue)
+            {
+                var used = primary.DedicatedUsageBytes.Value is { } du ? DiagnosticData.Bytes((ulong)Math.Max(0, du)) : "—";
+                var cap = primary.DedicatedVideoMemoryBytes is { } dc ? DiagnosticData.Bytes(dc) : "—";
+                DedicatedVramCard.Value = primary.DedicatedUsageBytes.Value.HasValue ? $"{used} / {cap}" : cap;
+            }
+            else DedicatedVramCard.Value = "Unavailable";
 
-        var firstWithShared = adapters.FirstOrDefault(a => a.SharedUsageBytes.Value.HasValue || a.SharedSystemMemoryBytes.HasValue);
-        if (firstWithShared is not null)
-        {
-            var used = firstWithShared.SharedUsageBytes.Value is { } su ? DiagnosticData.Bytes((ulong)Math.Max(0, su)) : "—";
-            var cap = firstWithShared.SharedSystemMemoryBytes is { } sc ? DiagnosticData.Bytes(sc) : "—";
-            SharedMemCard.Value = firstWithShared.SharedUsageBytes.Value.HasValue ? $"{used} / {cap}" : cap;
+            if (primary.SharedUsageBytes.Value.HasValue || primary.SharedSystemMemoryBytes.HasValue)
+            {
+                var used = primary.SharedUsageBytes.Value is { } su ? DiagnosticData.Bytes((ulong)Math.Max(0, su)) : "—";
+                var cap = primary.SharedSystemMemoryBytes is { } sc ? DiagnosticData.Bytes(sc) : "—";
+                SharedMemCard.Value = primary.SharedUsageBytes.Value.HasValue ? $"{used} / {cap}" : cap;
+            }
+            else SharedMemCard.Value = "Unavailable";
         }
-        else SharedMemCard.Value = "Unavailable";
+        else
+        {
+            DedicatedVramCard.Value = "Unavailable";
+            SharedMemCard.Value = "Unavailable";
+        }
 
         var violet = ResolveThemeBrush("ChartVioletBrush") ?? new SolidColorBrush(Microsoft.UI.Colors.MediumPurple);
         var blue = ResolveThemeBrush("InteractionAccent") ?? new SolidColorBrush(Microsoft.UI.Colors.DodgerBlue);
