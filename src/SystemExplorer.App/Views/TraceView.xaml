@@ -97,11 +97,11 @@
                                 <TextBlock Margin="0" Style="{StaticResource DataCell}" Text="{Binding Time}" VerticalAlignment="Center"/>
                                 <TextBlock Style="{StaticResource DataCell}" Grid.Column="1" Text="{Binding Process}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,6,0"/>
                                 <TextBlock Style="{StaticResource DataCell}" Grid.Column="2" Text="{Binding Operation}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                <TextBlock Grid.Column="3" Text="{Binding Path}" Style="{StaticResource DataCell}" Margin="0,0,6,0" ToolTipService.ToolTip="{Binding Description}"/>
+                                <TextBlock Grid.Column="3" Text="{Binding PathAndDetail}" Style="{StaticResource DataCell}" Margin="0,0,6,0" ToolTipService.ToolTip="{Binding Description}"/>
                                 <TextBlock Margin="0" Style="{StaticResource DataCell}" Grid.Column="4" Text="{Binding Bytes}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                             </Grid>
                         </DataTemplate></ListView.ItemTemplate>
-                        <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="Padding" Value="0"/><Setter Property="MinHeight" Value="24"/></Style></ListView.ItemContainerStyle>
+                        <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="Padding" Value="0"/><Setter Property="MinHeight" Value="24"/><Setter Property="AutomationProperties.Name" Value="{Binding Description}"/></Style></ListView.ItemContainerStyle>
                     </ListView>
                     <Grid x:Name="TreeHeader" Grid.Row="1" Padding="10,6" Background="{ThemeResource HeaderSurface}" Visibility="Collapsed">
                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="110"/><ColumnDefinition Width="130"/></Grid.ColumnDefinitions>
@@ -126,6 +126,7 @@
                 <ScrollViewer x:Name="SummaryScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Spacing="8">
                         <TextBlock Margin="0" Style="{StaticResource DataCell}" x:Name="SummaryTitle" Text="Select an event or process" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="SelectedEventDetail" Style="{StaticResource Muted}" IsTextSelectionEnabled="True" Visibility="Collapsed"/>
                         <Button x:Name="InspectButton" Content="Inspect live process" Click="InspectClicked" IsEnabled="False"/>
                         <TextBlock x:Name="InspectReason" TextWrapping="Wrap" Style="{StaticResource Muted}"/>
                         <TextBlock Margin="0" Style="{StaticResource DataCell}" x:Name="SummaryText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>

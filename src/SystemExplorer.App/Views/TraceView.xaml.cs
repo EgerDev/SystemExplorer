@@ -233,7 +233,19 @@ public sealed partial class TraceView : UserControl
         else if (result is not null) ApplyFilter();
     }
     private void EventSelected(object sender, SelectionChangedEventArgs args)
-    { if (Timeline.SelectedItem is TraceTimelineRow row) ShowSummary(row.ProcessIndex); }
+    {
+        if (Timeline.SelectedItem is TraceTimelineRow row)
+        {
+            SelectedEventDetail.Text = row.Description;
+            SelectedEventDetail.Visibility = Visibility.Visible;
+            ShowSummary(row.ProcessIndex);
+        }
+        else
+        {
+            SelectedEventDetail.Text = "";
+            SelectedEventDetail.Visibility = Visibility.Collapsed;
+        }
+    }
     private void TreeSelected(object sender, SelectionChangedEventArgs args)
     {
         if (ProcessTree.SelectedItem is not TraceProcessRow row) return;
@@ -370,6 +382,7 @@ public sealed class TraceTimelineRow
     public string Detail { get; }
     public Visibility DetailVisibility => string.IsNullOrEmpty(Detail) ? Visibility.Collapsed : Visibility.Visible;
     public string Bytes { get; }
+    public string PathAndDetail => string.IsNullOrEmpty(Detail) ? Path : $"{Path} · {Detail}";
     public string Description => $"{Time} · {Process} · {Operation}\n{Path}\n{Detail} · {Bytes} bytes";
     internal TraceTimelineRow(SystemExplorer.Core.TraceEvent item, IReadOnlyList<TraceProcess> processes, object source, int position)
     {
