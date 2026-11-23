@@ -229,6 +229,16 @@ public sealed partial class TraceView : UserControl
         Timeline.Visibility = EventHeader.Visibility = tree ? Visibility.Collapsed : Visibility.Visible;
         ProcessTree.Visibility = TreeHeader.Visibility = tree ? Visibility.Visible : Visibility.Collapsed;
         Empty.Visibility = Visibility.Collapsed;
+        if (tree)
+        {
+            SelectedEventDetail.Text = "";
+            SelectedEventDetail.Visibility = Visibility.Collapsed;
+        }
+        else if (Timeline.SelectedItem is TraceTimelineRow selectedRow)
+        {
+            SelectedEventDetail.Text = selectedRow.Description;
+            SelectedEventDetail.Visibility = Visibility.Visible;
+        }
         if (tree) ViewCount.Text = $"{result?.Processes.Count ?? 0:N0} observed process instances · seeded = started before recording · parent not observed is not proof of no parent";
         else if (result is not null) ApplyFilter();
     }
