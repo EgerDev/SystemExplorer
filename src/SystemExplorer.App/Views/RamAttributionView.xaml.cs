@@ -248,7 +248,7 @@ public sealed partial class RamAttributionView : UserControl
         }
         var rows = result.Counts.Where(c => c.Use != PhysicalPageUse.Unused).GroupBy(c => c.Use)
             .Select(g => UseRow(RamAttributionPresentation.UseName(g.Key), g)).ToList();
-        rows.AddRange(result.Counts.Where(c => c.Use == PhysicalPageUse.Unused).Select(c => UseRow("Unused / " + c.List, [c])));
+        rows.AddRange(result.Counts.Where(c => c.Use == PhysicalPageUse.Unused).Select(c => UseRow("Unused / " + c.List, new[] { c })));
         Table(UseTable, headers, [215, 100, 100, 100, 100, 145, 100], [false, true, true, true, true, true, true], rows.ToArray(), 1, true);
         SaveRows(3, "Use × list (pages); Superfetch PFN attributes", headers, rows);
         var priorityHeaders = new[] { "Priority", "Standby pages", "Repurposed pages" };

@@ -295,11 +295,14 @@ public sealed partial class TraceView : UserControl
         {
             dialog.IsPrimaryButtonEnabled = InspectButton.IsEnabled;
             dialog.Title = SummaryTitle.Text;
-            if (dialog.Content is ScrollViewer { Content: StackPanel content })
+            if (dialog.Content is ScrollViewer { Content: StackPanel content } && content.Children.Count >= 4)
             {
-                ((TextBlock)content.Children[0]).Text = InspectReason.Text;
-                ((TextBlock)content.Children[1]).Text = SummaryText.Text;
-                ((TextBlock)content.Children[2]).Text = TopText.Text;
+                var detailBlock = (TextBlock)content.Children[0];
+                detailBlock.Text = SelectedEventDetail.Text;
+                detailBlock.Visibility = SelectedEventDetail.Visibility;
+                ((TextBlock)content.Children[1]).Text = InspectReason.Text;
+                ((TextBlock)content.Children[2]).Text = SummaryText.Text;
+                ((TextBlock)content.Children[3]).Text = TopText.Text;
             }
         }
     }
@@ -313,6 +316,7 @@ public sealed partial class TraceView : UserControl
         if (summaryDialog is not null || closing) return;
         RefreshInspect();
         var content = new StackPanel { Spacing = 10 };
+        content.Children.Add(new TextBlock { Text = SelectedEventDetail.Text, Visibility = SelectedEventDetail.Visibility, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Style = (Style)Application.Current.Resources["Muted"] });
         foreach (string text in new[] { InspectReason.Text, SummaryText.Text, TopText.Text })
             content.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Style = (Style)Application.Current.Resources["Muted"] });
         var dialog = new ContentDialog
@@ -394,6 +398,7 @@ public sealed class TraceTimelineRow
     public string Bytes { get; }
     public string PathAndDetail => string.IsNullOrEmpty(Detail) ? Path : $"{Path} · {Detail}";
     public string Description => $"{Time} · {Process} · {Operation}\n{Path}\n{Detail} · {Bytes} bytes";
+    public override string ToString() => Description;
     internal TraceTimelineRow(SystemExplorer.Core.TraceEvent item, IReadOnlyList<TraceProcess> processes, object source, int position)
     {
         Source = source; Position = position;
@@ -445,6 +450,7 @@ public sealed class TraceProcessRow
     public string Start => Process.Seeded ? "Before recording" : Process.StartUtc?.ToLocalTime().ToString("HH:mm:ss.fff") ?? "Unavailable";
     public string Exit => Process.ExitUtc is { } exit ? $"{exit.ToLocalTime():HH:mm:ss.fff}\ncode {Process.ExitCode?.ToString() ?? "unavailable"}" : "Not observed";
     public string Description => $"{Name}\n{Parent}\n{Process.ImagePath}\nStarted {Start} · Exit {Exit}";
+    public override string ToString() => Description;
     public TraceProcessRow(TraceTreeRow row, int events)
     {
         Process = row.Process; Indent = new(Math.Min(row.Depth, 16) * 12, 0, 6, 0);

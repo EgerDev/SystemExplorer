@@ -141,7 +141,7 @@ public sealed partial class MainWindow
                     var m = r.Memory;
                     InventoryRow Row(string name, CounterValue value, Func<double, string> format, string note) =>
                         new(name, note, V(value, format), Number1: N(value), FullText: $"{name}: {V(value, format)}{Why(value)}\n{note}");
-                    view.ShowRows($"{m.Status} · {r.CapturedAt.LocalDateTime:T} · interval {r.Interval?.TotalSeconds:F1} s · {m.Detail}", [
+                    view.ShowRows($"{m.Status} · {r.CapturedAt.LocalDateTime:T} · interval {r.Interval?.TotalSeconds:F1} s · {m.Detail}", new InventoryRow[] {
                         Row("Standby (reserve priority)", m.StandbyCacheReserveBytes, B, "Cached pages that can be repurposed; counted as available."),
                         Row("Standby (normal priority)", m.StandbyCacheNormalPriorityBytes, B, "Cached pages that can be repurposed; counted as available."),
                         Row("Standby (core)", m.StandbyCacheCoreBytes, B, "Cached pages that can be repurposed; counted as available."),
@@ -150,7 +150,7 @@ public sealed partial class MainWindow
                         Row("Page faults/s", m.PageFaultsPerSecond, Num, "Soft and hard faults combined."),
                         Row("Page reads/s (hard faults)", m.PageReadsPerSecond, Num, "Disk read operations to resolve hard faults."),
                         Row("Pages input/s", m.PagesInputPerSecond, Num, "Pages read from disk to resolve hard faults."),
-                        Row("Memory Compression store working set", m.CompressionStoreResidentWorkingSetBytes, B, $"{m.CompressionStatus}: {m.CompressionDetail} Resident size of the store, not bytes saved.")],
+                        Row("Memory Compression store working set", m.CompressionStoreResidentWorkingSetBytes, B, $"{m.CompressionStatus}: {m.CompressionDetail} Resident size of the store, not bytes saved.") },
                         "Counter", "Value", "", "");
                 });
                 break;
@@ -274,7 +274,7 @@ public sealed partial class MainWindow
             {
                 if (commandText is null || row.Value is not "reveal") return;
                 view.ShowRows("Command lines can contain secrets. Shown on request only; not logged or retained after this dialog closes.",
-                    [new InventoryRow("Command line", commandText, FullText: commandText)], "Command line", "", "", "", back: true);
+                    new[] { new InventoryRow("Command line", commandText, FullText: commandText) }, "Command line", "", "", "", back: true);
             };
             view.BackRequested += () => view.ShowRows($"{r.Status} · {r.CapturedAt.LocalDateTime:T} · {r.Detail}", rows, "Property", "Status", "", "", action: commandText is null ? null : "Show command line");
         });
