@@ -1,40 +1,31 @@
 namespace SystemExplorer.Core;
 
-public sealed record ProcessGroup(ProcessIdentity Key, string Name, IReadOnlyList<ProcessSnapshot> Members)
+public sealed record ProcessGroup
 {
-    private ulong? privateBytes;
-    private bool privateBytesComputed;
-    private double? cpuPercent;
-    private bool cpuPercentComputed;
+    private IReadOnlyList<ProcessSnapshot> members = Array.Empty<ProcessSnapshot>();
 
-    // Aggregates are computed once per group instance: sorting, KPI and insight
-    // projections read them repeatedly per refresh, and re-enumerating members
-    // with LINQ on every access multiplied cost without changing results.
-    public ulong? PrivateBytes
+    public ProcessGroup(ProcessIdentity key, string name, IReadOnlyList<ProcessSnapshot> members)
     {
-        get
+        Key = key;
+        Name = name;
+        Members = members;
+    }
+
+    public ProcessIdentity Key { get; init; }
+    public string Name { get; init; }
+    public IReadOnlyList<ProcessSnapshot> Members
+    {
+        get => members;
+        init
         {
-            if (!privateBytesComputed)
-            {
-                privateBytes = Members.All(p => p.PrivateBytes.HasValue) ? Members.Aggregate(0UL, (sum, p) => checked(sum + p.PrivateBytes!.Value)) : null;
-                privateBytesComputed = true;
-            }
-            return privateBytes;
+            members = Array.AsReadOnly(value.ToArray());
+            PrivateBytes = members.All(p => p.PrivateBytes.HasValue) ? members.Aggregate(0UL, (sum, p) => checked(sum + p.PrivateBytes!.Value)) : null;
+            CpuPercent = members.All(p => p.CpuPercent.HasValue) ? members.Sum(p => p.CpuPercent!.Value) : null;
         }
     }
 
-    public double? CpuPercent
-    {
-        get
-        {
-            if (!cpuPercentComputed)
-            {
-                cpuPercent = Members.All(p => p.CpuPercent.HasValue) ? Members.Sum(p => p.CpuPercent!.Value) : null;
-                cpuPercentComputed = true;
-            }
-            return cpuPercent;
-        }
-    }
+    public ulong? PrivateBytes { get; private init; }
+    public double? CpuPercent { get; private init; }
 }
 
 public static class ProcessGrouping
