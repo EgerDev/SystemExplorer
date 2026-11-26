@@ -24,6 +24,23 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
     private IntPtr diskReadCounter, diskWriteCounter;
     private bool diskPrimed;
     private long diskTimestamp;
+    private readonly Dictionary<ProcessIdentity, ProcessMetadata> metadata = new();
+    private const int MaximumImagePathCharacters = 32768;
+    private readonly StringBuilder pathBuffer = new(512);
+
+    // Process-instance metadata that cannot change during the instance lifetime
+    // (image path, owner SID, session). Owner account-name resolution is retried
+    // at most once per minute because domain lookups can recover.
+    private sealed class ProcessMetadata
+    {
+        internal string? ExecutablePath;
+        internal string? Sid;
+        internal string? Account;
+        internal int? Session;
+        internal string? Errors;
+        internal bool Denied;
+        internal long AccountRetryAt;
+    }
 
     public WindowsMonitorProvider()
     {
@@ -116,6 +133,13 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
         var (systemCpu, systemSample) = ReadSystemCpu(processors, limitations);
         var (diskRead, diskWrite) = ReadDisk(limitations);
         cancellationToken.ThrowIfCancellationRequested();
+        if (metadata.Count > 0)
+        {
+            List<ProcessIdentity>? stale = null;
+            foreach (var key in metadata.Keys)
+                if (!next.ContainsKey(key)) (stale ??= []).Add(key);
+            if (stale is not null) foreach (var key in stale) metadata.Remove(key);
+        }
         previous = next;
         previousSystem = systemSample;
         return new MonitorSnapshot
@@ -133,12 +157,12 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
     private ProcessSnapshot? ReadProcess(ProcessEntry entry, long enumerationStart, int processors,
         Dictionary<ProcessIdentity, Sample> next, CancellationToken cancellationToken)
     {
-        var errors = new List<string>();
+        List<string>? errorList = null;
         bool denied = false;
         void Error(string field, int error)
         {
             denied |= error == 5;
-            errors.Add($"{field}: Win32 {error}");
+            (errorList ??= []).Add($"{field}: Win32 {error}");
         }
         var row = new ProcessSnapshot
         {
@@ -151,14 +175,14 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
         {
             Error("Identity, path, owner, memory and counters unavailable (OpenProcess)", Marshal.GetLastWin32Error());
             return row with { Availability = denied ? DataAvailability.AccessDenied : DataAvailability.Error,
-                UnavailableReason = string.Join("; ", errors) };
+                UnavailableReason = string.Join("; ", errorList) };
         }
         long beforeCpu = Stopwatch.GetTimestamp();
         if (!GetProcessTimes(process, out var creation, out _, out var kernel, out var user))
         {
             Error("Identity unavailable (GetProcessTimes); handle metadata not joined", Marshal.GetLastWin32Error());
             return row with { Availability = denied ? DataAvailability.AccessDenied : DataAvailability.Error,
-                UnavailableReason = string.Join("; ", errors) };
+                UnavailableReason = string.Join("; ", errorList) };
         }
         long cpuTime = beforeCpu + (Stopwatch.GetTimestamp() - beforeCpu) / 2;
         if (creation.Ticks == 0 || creation.Ticks > long.MaxValue)
@@ -168,11 +192,17 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
         ulong cpuTicks = checked(kernel.Ticks + user.Ticks);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var path = new StringBuilder(32768);
-        uint pathLength = (uint)path.Capacity;
-        string? executable = null;
-        if (QueryFullProcessImageNameW(process, 0, path, ref pathLength)) executable = path.ToString();
-        else Error("Executable path", Marshal.GetLastWin32Error());
+        if (!metadata.TryGetValue(identity, out var meta))
+        {
+            meta = ReadProcessMetadata(process, cancellationToken);
+            metadata[identity] = meta;
+        }
+        else if (meta.AccountRetryAt != 0 && Stopwatch.GetTimestamp() >= meta.AccountRetryAt)
+        {
+            RetryAccountResolution(process, meta, cancellationToken);
+        }
+        if (meta.Errors is not null) (errorList ??= []).Add(meta.Errors);
+        denied |= meta.Denied;
 
         bool memoryAvailable = QueryProcessMemoryCounters(process, out var memory, out var privateWorkingSet,
             out var privateWorkingSetReason, out int memoryError);
@@ -186,7 +216,7 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
                     memoryError = Marshal.GetLastWin32Error();
                 else if (memoryCreation.Ticks != creation.Ticks)
                 {
-                    errors.Add("Private bytes and working set unavailable: PID lifetime changed while opening memory handle.");
+                    (errorList ??= []).Add("Private bytes and working set unavailable: PID lifetime changed while opening memory handle.");
                     memoryError = 0;
                 }
                 else
@@ -197,10 +227,9 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             }
             if (!memoryAvailable && memoryError != 0) Error("Private bytes and working set", memoryError);
         }
-        if (memoryAvailable && privateWorkingSetReason is not null) errors.Add(privateWorkingSetReason);
+        if (memoryAvailable && privateWorkingSetReason is not null) (errorList ??= []).Add(privateWorkingSetReason);
 
         cancellationToken.ThrowIfCancellationRequested();
-        var (sid, account, session) = ReadOwner(process, Error, cancellationToken);
         int? handles = null;
         if (GetProcessHandleCount(process, out uint handleCount)) handles = checked((int)handleCount);
         else Error("Handle count", Marshal.GetLastWin32Error());
@@ -225,8 +254,8 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
         next[identity] = new Sample(cpuTicks, cpuTime, io, ioTime, processors);
         return row with
         {
-            Identity = identity, ExecutablePath = executable, UserSid = sid, UserName = account,
-            SessionId = session, HandleCount = handles,
+            Identity = identity, ExecutablePath = meta.ExecutablePath, UserSid = meta.Sid, UserName = meta.Account,
+            SessionId = meta.Session, HandleCount = handles,
             WorkingSetBytes = memoryAvailable ? memory.WorkingSet.ToUInt64() : null,
             PrivateBytes = memoryAvailable ? memory.PrivateUsage.ToUInt64() : null,
             PrivateWorkingSetBytes = memoryAvailable ? privateWorkingSet : null,
@@ -236,9 +265,67 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
             ReadOperationCount = io?.ReadOperations, WriteOperationCount = io?.WriteOperations,
             OtherOperationCount = io?.OtherOperations, OtherTransferBytes = io?.OtherBytes,
             CpuPercent = cpu, ReadBytesPerSecond = read, WriteBytesPerSecond = write,
-            Availability = denied ? DataAvailability.AccessDenied : errors.Count > 0 ? DataAvailability.Partial : DataAvailability.Available,
-            UnavailableReason = errors.Count > 0 ? string.Join("; ", errors) : null
+            Availability = denied ? DataAvailability.AccessDenied : errorList is not null ? DataAvailability.Partial : DataAvailability.Available,
+            UnavailableReason = errorList is not null ? string.Join("; ", errorList) : null
         };
+    }
+
+    private ProcessMetadata ReadProcessMetadata(SafeProcessHandle process, CancellationToken cancellationToken)
+    {
+        var meta = new ProcessMetadata();
+        var errors = new List<string>();
+        bool denied = false;
+        void Error(string field, int error)
+        {
+            denied |= error == 5;
+            errors.Add($"{field}: Win32 {error}");
+        }
+        meta.ExecutablePath = QueryImagePath(process, out int pathError);
+        if (pathError != 0) Error("Executable path", pathError);
+        denied |= ReadOwner(process, meta, errors, cancellationToken);
+        meta.Denied = denied;
+        meta.Errors = errors.Count > 0 ? string.Join("; ", errors) : null;
+        return meta;
+    }
+
+    private string? QueryImagePath(SafeProcessHandle process, out int error)
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            uint length = (uint)pathBuffer.Capacity;
+            if (QueryFullProcessImageNameW(process, 0, pathBuffer, ref length))
+            {
+                error = 0;
+                return pathBuffer.ToString();
+            }
+            error = Marshal.GetLastWin32Error();
+            if (error != 122 || pathBuffer.Capacity >= MaximumImagePathCharacters) return null;
+            pathBuffer.EnsureCapacity(MaximumImagePathCharacters);
+        }
+        error = 122;
+        return null;
+    }
+
+    private void RetryAccountResolution(SafeProcessHandle process, ProcessMetadata meta, CancellationToken cancellationToken)
+    {
+        meta.AccountRetryAt = 0;
+        if (!OpenProcessToken(process, 8, out var token)) return;
+        using (token)
+        {
+            var (sid, account) = ResolveAccount(token, cancellationToken, out _);
+            if (account is not null)
+            {
+                meta.Account = account;
+                if (meta.Errors is not null)
+                {
+                    meta.Errors = string.Join("; ", meta.Errors.Split("; ", StringSplitOptions.RemoveEmptyEntries)
+                        .Where(e => !e.StartsWith("Owner account name", StringComparison.Ordinal)));
+                    if (meta.Errors.Length == 0) meta.Errors = null;
+                }
+            }
+            else meta.AccountRetryAt = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 60;
+            if (meta.Sid is null && sid is not null) meta.Sid = sid;
+        }
     }
 
     private static bool QueryProcessMemoryCounters(SafeProcessHandle process, out MemoryCounters memory,
@@ -267,66 +354,102 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
         return available;
     }
 
-    private static (string? Sid, string? Account, int? Session) ReadOwner(SafeProcessHandle process,
-        Action<string, int> error, CancellationToken cancellationToken)
+    private bool ReadOwner(SafeProcessHandle process, ProcessMetadata meta, List<string> errors,
+        CancellationToken cancellationToken)
     {
+        bool denied = false;
+        void Error(string field, int error)
+        {
+            denied |= error == 5;
+            errors.Add($"{field}: Win32 {error}");
+        }
         if (!OpenProcessToken(process, 8, out var token))
         {
             int code = Marshal.GetLastWin32Error();
             token.Dispose();
-            error("Owner and session", code);
-            return (null, null, null);
+            Error("Owner and session", code);
+            return denied;
         }
         using (token)
         {
-            int? session = null;
             IntPtr sessionBuffer = Marshal.AllocHGlobal(4);
             try
             {
-                if (GetTokenInformation(token, 12, sessionBuffer, 4, out _)) session = Marshal.ReadInt32(sessionBuffer);
-                else error("Session", Marshal.GetLastWin32Error());
+                if (GetTokenInformation(token, 12, sessionBuffer, 4, out _)) meta.Session = Marshal.ReadInt32(sessionBuffer);
+                else Error("Session", Marshal.GetLastWin32Error());
             }
             finally { Marshal.FreeHGlobal(sessionBuffer); }
-            GetTokenInformation(token, 1, IntPtr.Zero, 0, out uint required);
-            int queryError = Marshal.GetLastWin32Error();
-            if (queryError != 122 || required < IntPtr.Size || required > 65536)
+            var (sid, account) = ResolveAccount(token, cancellationToken, out int resolveError);
+            meta.Sid = sid;
+            meta.Account = account;
+            if (resolveError == -1) Error("Owner token buffer", Marshal.GetLastWin32Error());
+            else if (resolveError == -2) Error("Owner", Marshal.GetLastWin32Error());
+            else if (resolveError == -3) Error("Owner SID", Marshal.GetLastWin32Error());
+            else if (resolveError > 0)
             {
-                error("Owner token buffer", queryError);
-                return (null, null, session);
+                Error("Owner account name", resolveError);
+                if (sid is not null) meta.AccountRetryAt = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 60;
             }
-            IntPtr buffer = Marshal.AllocHGlobal(checked((int)required));
-            try
-            {
-                if (!GetTokenInformation(token, 1, buffer, required, out _))
-                {
-                    error("Owner", Marshal.GetLastWin32Error());
-                    return (null, null, session);
-                }
-                IntPtr sidPointer = Marshal.ReadIntPtr(buffer);
-                string? sid = null, account = null;
-                if (ConvertSidToStringSidW(sidPointer, out var sidText))
-                {
-                    try { sid = Marshal.PtrToStringUni(sidText); }
-                    finally { LocalFree(sidText); }
-                }
-                else error("Owner SID", Marshal.GetLastWin32Error());
-                cancellationToken.ThrowIfCancellationRequested();
-                uint nameLength = 0, domainLength = 0;
-                LookupAccountSidW(null, sidPointer, null, ref nameLength, null, ref domainLength, out _);
-                int lookupError = Marshal.GetLastWin32Error();
-                if (lookupError == 122 && nameLength is > 0 and <= 32768 && domainLength <= 32768)
-                {
-                    var name = new StringBuilder((int)nameLength);
-                    var domain = new StringBuilder(Math.Max(1, (int)domainLength));
-                    if (LookupAccountSidW(null, sidPointer, name, ref nameLength, domain, ref domainLength, out _))
-                        account = domain.Length == 0 ? name.ToString() : $"{domain}\\{name}";
-                    else error("Owner account name", Marshal.GetLastWin32Error());
-                }
-                else error("Owner account name", lookupError);
-                return (sid, account, session);
-            }
-            finally { Marshal.FreeHGlobal(buffer); }
         }
+        return denied;
+    }
+
+    // Returns (sid, account); account is null when the name lookup fails.
+    // resolveError: 0 resolved, -1 buffer query failure, -2 owner read failure,
+    // -3 SID conversion failure, positive Win32 code = account lookup failure.
+    private static (string? Sid, string? Account) ResolveAccount(SafeAccessTokenHandle token,
+        CancellationToken cancellationToken, out int resolveError)
+    {
+        GetTokenInformation(token, 1, IntPtr.Zero, 0, out uint required);
+        int queryError = Marshal.GetLastWin32Error();
+        if (queryError != 122 || required < IntPtr.Size || required > 65536)
+        {
+            resolveError = -1;
+            return (null, null);
+        }
+        IntPtr buffer = Marshal.AllocHGlobal(checked((int)required));
+        try
+        {
+            if (!GetTokenInformation(token, 1, buffer, required, out _))
+            {
+                resolveError = -2;
+                return (null, null);
+            }
+            IntPtr sidPointer = Marshal.ReadIntPtr(buffer);
+            string? sid = null, account = null;
+            int sidError = 0;
+            if (ConvertSidToStringSidW(sidPointer, out var sidText))
+            {
+                try { sid = Marshal.PtrToStringUni(sidText); }
+                finally { LocalFree(sidText); }
+            }
+            else sidError = Marshal.GetLastWin32Error();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (sid is null)
+            {
+                resolveError = -3;
+                return (null, null);
+            }
+            uint nameLength = 0, domainLength = 0;
+            LookupAccountSidW(null, sidPointer, null, ref nameLength, null, ref domainLength, out _);
+            int lookupError = Marshal.GetLastWin32Error();
+            if (lookupError == 122 && nameLength is > 0 and <= 32768 && domainLength <= 32768)
+            {
+                var name = new StringBuilder((int)nameLength);
+                var domain = new StringBuilder(Math.Max(1, (int)domainLength));
+                if (LookupAccountSidW(null, sidPointer, name, ref nameLength, domain, ref domainLength, out _))
+                {
+                    account = domain.Length == 0 ? name.ToString() : $"{domain}\\{name}";
+                    resolveError = 0;
+                    return (sid, account);
+                }
+                resolveError = Marshal.GetLastWin32Error();
+                return (sid, null);
+            }
+            resolveError = lookupError;
+            return (sid, null);
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
     }
 
     private static MemorySnapshot ReadMemory(List<string> limitations)

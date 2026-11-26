@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.ComponentModel;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using SystemExplorer.Core;
@@ -141,6 +142,10 @@ static async Task CheckProcessChurn(WindowsMonitorProvider provider, Cancellatio
 using var selfProcess = Process.GetCurrentProcess();
 int selfPid = Environment.ProcessId;
 long creation = selfProcess.StartTime.ToUniversalTime().ToFileTimeUtc();
+var imagePathLimit = typeof(WindowsMonitorProvider).GetField("MaximumImagePathCharacters", BindingFlags.NonPublic | BindingFlags.Static)?.GetRawConstantValue();
+Check(imagePathLimit is int maximumImagePathCharacters && maximumImagePathCharacters == 32768,
+    "Process image path queries must retain the 32768-character native limit.");
+
 using var provider = new WindowsMonitorProvider();
 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 var first = await provider.CaptureAsync(timeout.Token);

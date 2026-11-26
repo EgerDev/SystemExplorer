@@ -2,8 +2,11 @@ namespace SystemExplorer.Core;
 
 public sealed record ProcessGroup(ProcessIdentity Key, string Name, IReadOnlyList<ProcessSnapshot> Members)
 {
-    public ulong? PrivateBytes => Members.All(p => p.PrivateBytes.HasValue) ? Members.Aggregate(0UL, (sum, p) => checked(sum + p.PrivateBytes!.Value)) : null;
-    public double? CpuPercent => Members.All(p => p.CpuPercent.HasValue) ? Members.Sum(p => p.CpuPercent!.Value) : null;
+    public ulong? PrivateBytes => Members.All(p => p.PrivateBytes.HasValue)
+        ? Members.Aggregate(0UL, (sum, p) => checked(sum + p.PrivateBytes!.Value)) : null;
+
+    public double? CpuPercent => Members.All(p => p.CpuPercent.HasValue)
+        ? Members.Sum(p => p.CpuPercent!.Value) : null;
 }
 
 public static class ProcessGrouping

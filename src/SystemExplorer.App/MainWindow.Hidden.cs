@@ -164,8 +164,13 @@ public sealed partial class MainWindow
     {
         const int processCap = 8192, targetCap = 4096, signatureCap = 300;
         var at = DateTimeOffset.UtcNow;
-        var processes = new BoundedItems<ProcessSnapshot>(Model.Snapshot?.Processes ?? [], processCap);
-        var endpoints = new BoundedItems<ConnectionSnapshot>(Model.Relationships?.Connections ?? [], 16384);
+        var processSnapshot = Model.Snapshot;
+        var relationshipSnapshot = Model.Relationships;
+        bool endpointsFresh = processSnapshot is not null && relationshipSnapshot is not null &&
+            SuspiciousLeadRules.AreRelationshipObservationsFresh(processSnapshot.CapturedAt, relationshipSnapshot.CapturedAt, at);
+        var processes = new BoundedItems<ProcessSnapshot>(processSnapshot?.Processes ?? [], processCap);
+        IReadOnlyList<ConnectionSnapshot> endpointRows = endpointsFresh ? relationshipSnapshot!.Connections : Array.Empty<ConnectionSnapshot>();
+        var endpoints = new BoundedItems<ConnectionSnapshot>(endpointRows, 16384);
         var watch = Stopwatch.StartNew();
         var windows = await Task.Run(() => WindowsHiddenEnvironment.GetVisibleWindowOwners(token), token);
         var configured = await persistence.CaptureAsync(token);
@@ -222,12 +227,13 @@ public sealed partial class MainWindow
             }
             return new PersistenceTarget(t.Name, t.Parsed.Path, status, exists, t.Parsed.Path is { } parsed ? provenance.GetValueOrDefault(parsed) : null, t.Reference);
         }).ToArray(), token);
-        var input = new LeadSweepInput(new(processInputs, processCap, processes.Truncated), endpoints, new(persistenceTargets, targetCap, targets.Truncated), Model.Snapshot is not null && !processes.Truncated);
+        var input = new LeadSweepInput(new(processInputs, processCap, processes.Truncated), endpoints, new(persistenceTargets, targetCap, targets.Truncated), processSnapshot is not null && !processes.Truncated);
         var leads = await Task.Run(() => SuspiciousLeadRules.Evaluate(input, Environment.GetFolderPath(Environment.SpecialFolder.Windows), Path.GetTempPath(), cancellationToken: token), token);
-        leads = SuspiciousLeadRules.Aggregate(leads, (Model.Snapshot?.Processes ?? []).Select(p => p.Identity).Where(i => i.IsStable).ToHashSet());
+        leads = SuspiciousLeadRules.Aggregate(leads, (processSnapshot?.Processes ?? []).Select(p => p.Identity).Where(i => i.IsStable).ToHashSet());
         int unverified = provenance.Values.Count(p => p.Status != InspectionStatus.Available || p.Signature is SignatureState.NotChecked or SignatureState.Unreadable);
+        string endpointStatus = endpointsFresh ? "fresh observation" : processSnapshot is null || relationshipSnapshot is null ? "unavailable" : "stale or future observation omitted";
         return new(at, $"{leads.Items.Count} local leads · {processes.Items.Count} process observations · {targets.Items.Count} persistence targets",
-            $"Visible-window coverage: {HiddenStatus(windows.Status)} · {windows.Detail}\nPersistence: {HiddenStatus(configured.Status)}; {startupError ?? "startup inventory from existing snapshot"}.\nSignatures: {provenance.Count}/{Math.Min(paths.Length, signatureCap)} checked, {unverified} unavailable; unique-image cap {signatureCap}; no online revocation. Endpoints: {endpoints.Items.Count}, {(Model.Relationships is null ? "Unavailable" : "existing observation")}. Total {watch.Elapsed.TotalMilliseconds:F1} ms. Unknown paths/signatures are not treated as missing/unsigned. Raw values and arguments are not displayed.",
+            $"Visible-window coverage: {HiddenStatus(windows.Status)} · {windows.Detail}\nPersistence: {HiddenStatus(configured.Status)}; {startupError ?? "startup inventory from existing snapshot"}.\nSignatures: {provenance.Count}/{Math.Min(paths.Length, signatureCap)} checked, {unverified} unavailable; unique-image cap {signatureCap}; no online revocation. Endpoints: {endpoints.Items.Count}, {endpointStatus}. Total {watch.Elapsed.TotalMilliseconds:F1} ms. Unknown paths/signatures are not treated as missing/unsigned. Raw values and arguments are not displayed.",
             leads.Items, leads.Truncated || paths.Length > signatureCap);
     }
 }

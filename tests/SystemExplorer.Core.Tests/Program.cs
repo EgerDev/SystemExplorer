@@ -639,6 +639,33 @@ var tests = new (string Name, Action Run)[]
         var groups = ProcessGrouping.Create([P(10, 100), P(11, 200, 10), P(12, 300, null), P(13, 400, 10) with { UserSid = "other" }]);
         Check(groups.Count == 3 && groups.Single(g => g.Key.Pid == 10).Members.Count == 2);
     }),
+    ("Hidden endpoint joins require fresh process and relationship observations", () =>
+    {
+        var scanAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        Check(SuspiciousLeadRules.AreRelationshipObservationsFresh(scanAt.AddSeconds(-10), scanAt, scanAt));
+        Check(SuspiciousLeadRules.AreRelationshipObservationsFresh(scanAt, scanAt.AddSeconds(-10), scanAt));
+        Check(!SuspiciousLeadRules.AreRelationshipObservationsFresh(scanAt.AddMilliseconds(1), scanAt, scanAt));
+        Check(!SuspiciousLeadRules.AreRelationshipObservationsFresh(scanAt, scanAt.AddMilliseconds(1), scanAt));
+        Check(!SuspiciousLeadRules.AreRelationshipObservationsFresh(scanAt.AddSeconds(-10).AddMilliseconds(-1), scanAt, scanAt));
+        Check(!SuspiciousLeadRules.AreRelationshipObservationsFresh(scanAt, scanAt.AddSeconds(-10).AddMilliseconds(-1), scanAt));
+        var oldAt = scanAt.AddHours(-1);
+        Check(!SuspiciousLeadRules.AreRelationshipObservationsFresh(oldAt, oldAt.AddSeconds(-1), scanAt));
+    }),
+    ("Hidden section refreshes relationship observations using its navigation token", () =>
+    {
+        foreach (var section in new[] { "Overview", "Network", "Services", "Startup", "Insights", "Hidden" })
+            Check(RelationshipCapturePolicy.SectionConsumesRelationships(section));
+        Check(!RelationshipCapturePolicy.SectionConsumesRelationships("Hidden items"));
+        Check(!RelationshipCapturePolicy.SectionConsumesRelationships("CPU"));
+    }),
+    ("Relationship capture selection requires the current process lifetime", () =>
+    {
+        var process = P(10, 100);
+        Check(ProcessSelectionPolicy.IsSelectedProcessObserved(process.Identity, [process]));
+        Check(!ProcessSelectionPolicy.IsSelectedProcessObserved(process.Identity, []));
+        Check(!ProcessSelectionPolicy.IsSelectedProcessObserved(null, [process]));
+        Check(!ProcessSelectionPolicy.IsSelectedProcessObserved(process.Identity, [P(10, 101)]));
+    }),
     ("Reused parent PID is not related", () => Check(ProcessGrouping.Create([P(10, 300), P(11, 200, 10)]).Count == 2)),
     ("Missing metadata remains singleton", () => Check(ProcessGrouping.Create([P(10, 100), P(11, 200, 10) with { UserSid = null }]).Count == 2)),
     ("Unknown sessions are not evidence of shared ownership", () =>
@@ -654,6 +681,29 @@ var tests = new (string Name, Action Run)[]
         var group = ProcessGrouping.Create([P(10, 100), P(11, 200, 10)]).Single();
         Check(group.PrivateBytes == 200);
         Check(ProcessGrouping.Create([P(10, 100), P(11, 200, 10) with { PrivateBytes = null }]).Single().PrivateBytes is null);
+    }),
+    ("Group aggregates preserve positional record semantics", () =>
+    {
+        var first = P(10, 100) with { PrivateBytes = 100, CpuPercent = 1 };
+        var second = P(11, 200, 10) with { PrivateBytes = 200, CpuPercent = 2 };
+        IReadOnlyList<ProcessSnapshot> sharedMembers = [first, second];
+        var group = new ProcessGroup(Key: first.Identity, Name: first.Name, Members: sharedMembers);
+        var equivalent = new ProcessGroup(first.Identity, first.Name, sharedMembers);
+        var hash = group.GetHashCode();
+        var copy = group with { };
+        if (group != equivalent || group != copy || equivalent.GetHashCode() != hash)
+            throw new InvalidOperationException("Groups constructed with the same members list did not retain positional equality and hash.");
+        var (key, name, members) = group;
+        if (key != first.Identity || name != first.Name || !ReferenceEquals(members, sharedMembers))
+            throw new InvalidOperationException("Positional record deconstruction changed.");
+        if (group.PrivateBytes != 300 || group.CpuPercent != 3) throw new InvalidOperationException("Initial group aggregates were incorrect.");
+        if (group != equivalent || group != copy || group.GetHashCode() != hash)
+            throw new InvalidOperationException("Reading aggregates changed equality or hash.");
+        IReadOnlyList<ProcessSnapshot> replacementMembers = [first with { PrivateBytes = 400, CpuPercent = 4 }];
+        var replacement = group with { Members = replacementMembers };
+        if (replacement.PrivateBytes != 400 || replacement.CpuPercent != 4) throw new InvalidOperationException("Replacing members retained stale aggregates.");
+        if (replacement == group) throw new InvalidOperationException("Replacing members did not update positional record equality.");
+        if (group.PrivateBytes != 300 || group.CpuPercent != 3) throw new InvalidOperationException("Replacing members changed the original aggregates.");
     }),
     ("Prompt input requires non-blank text and trims it", () =>
     {
