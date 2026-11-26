@@ -41,8 +41,12 @@ public sealed partial class MainWindow : Window
     private int processAnchorAttempts;
     private bool restoreProcessKeyboardFocus;
     private bool windowActive;
+    private double lastScanMilliseconds;
+    private volatile TaskCompletionSource refreshWake = NewWakeSignal();
+    private static TaskCompletionSource NewWakeSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IReadOnlyList<StartupItem> startup = Array.Empty<StartupItem>();
     private DateTimeOffset? startupCapturedAt;
+    private DateTimeOffset? relationshipsCapturedAt;
     private string? startupError;
     private string? relationshipError;
     private int publisherGeneration;
@@ -106,6 +110,7 @@ public sealed partial class MainWindow : Window
         Activated += (_, args) =>
         {
             windowActive = args.WindowActivationState != WindowActivationState.Deactivated;
+            if (windowActive) refreshWake.TrySetResult();
             polling ??= PollAsync();
         };
         Closed += async (_, _) =>
@@ -145,7 +150,9 @@ public sealed partial class MainWindow : Window
             {
                 if (!paused)
                 {
+                    var scanStart = Stopwatch.GetTimestamp();
                     var next = await monitor.CaptureAsync(shutdown.Token);
+                    lastScanMilliseconds = Stopwatch.GetElapsedTime(scanStart).TotalMilliseconds;
                     if (shutdown.IsCancellationRequested) break;
                     if (paused || generation != observationGeneration) continue;
                     if (Model.Snapshot is { } previous && next.CapturedAt <= previous.CapturedAt)
@@ -157,7 +164,9 @@ public sealed partial class MainWindow : Window
                     StartDescriptionRefresh();
                     overviewStale = false;
                     tray.Update(next);
-                    if (cycle++ % 3 == 0)
+                    cycle++;
+                    if (SectionConsumesRelationships(section) &&
+                        (relationshipsCapturedAt is null || next.CapturedAt - relationshipsCapturedAt.Value > TimeSpan.FromSeconds(6)))
                     {
                         try
                         {
@@ -165,6 +174,7 @@ public sealed partial class MainWindow : Window
                             if (shutdown.IsCancellationRequested) break;
                             if (paused || generation != observationGeneration) continue;
                             Model.Relationships = related;
+                            relationshipsCapturedAt = next.CapturedAt;
                             relationshipError = null;
                         }
                         catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { break; }
@@ -175,7 +185,8 @@ public sealed partial class MainWindow : Window
                             relationshipError = $"Relationship data unavailable: {ex.Message}";
                         }
                     }
-                    if (cycle % 30 == 1)
+                    if (SectionConsumesStartup(section) &&
+                        (startupCapturedAt is null || next.CapturedAt - startupCapturedAt.Value > TimeSpan.FromSeconds(60)))
                     {
                         try
                         {
@@ -199,7 +210,7 @@ public sealed partial class MainWindow : Window
                     StatusText.Text = paused ? "Paused · displayed measurements are frozen" : $"Updated {next.CapturedAt.LocalDateTime:T} · Local, read-only · {next.Processes.Count} processes" + (relationshipError is not null ? " · Relationship data unavailable" : "");
                     ToolTipService.SetToolTip(StatusText, string.Join("\n", gaps.Append(relationshipError).Where(g => !string.IsNullOrEmpty(g))));
                 }
-                await Task.Delay(TimeSpan.FromSeconds(2), shutdown.Token);
+                await WaitForNextCycle(shutdown.Token);
             }
             catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { break; }
             catch (Exception ex)
@@ -217,6 +228,60 @@ public sealed partial class MainWindow : Window
             }
         }
     }
+
+    // Visible windows sample every 2 seconds; a minimized window drops to 6
+    // seconds — comfortably below the 10-second history continuity threshold —
+    // and restoring the window triggers an immediate out-of-cycle refresh.
+    private static readonly TimeSpan VisibleCadence = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan MinimizedCadence = TimeSpan.FromSeconds(6);
+
+    private bool IsWindowMinimized()
+    {
+        try
+        {
+            return AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter &&
+                presenter.State == Microsoft.UI.Windowing.OverlappedPresenterState.Minimized;
+        }
+        catch { return false; }
+    }
+
+    private async Task WaitForNextCycle(CancellationToken cancellationToken)
+    {
+        // Capture the current signal once: a wake that arrives before or during
+        // the wait completes it exactly once, and the completed instance is
+        // swapped out so later wakes re-arm the next wait. No waiter accumulation.
+        var signal = refreshWake;
+        var cadence = IsWindowMinimized() ? MinimizedCadence : VisibleCadence;
+        var delay = Task.Delay(cadence, cancellationToken);
+        var finished = await Task.WhenAny(delay, signal.Task).ConfigureAwait(false);
+        if (finished == signal.Task)
+        {
+            Interlocked.CompareExchange(ref refreshWake, NewWakeSignal(), signal);
+            GC.KeepAlive(delay);
+        }
+    }
+
+    private void RefreshSettings()
+    {
+        if (Model.Snapshot is not { } snapshot) return;
+        var self = snapshot.Processes.FirstOrDefault(p => p.Identity.Pid == Environment.ProcessId);
+        OverheadCpu.Text = Display.Percent(self?.CpuPercent);
+        OverheadPrivate.Text = Display.Bytes(self?.PrivateBytes);
+        OverheadWorkingSet.Text = Display.Bytes(self?.WorkingSetBytes);
+        OverheadThreadsHandles.Text = self is null ? "—"
+            : $"{(self.ThreadCount?.ToString() ?? "—")} / {(self.HandleCount?.ToString() ?? "—")}";
+        OverheadScanCost.Text = lastScanMilliseconds > 0 ? $"{lastScanMilliseconds:F1} ms" : "—";
+        OverheadCadence.Text = IsWindowMinimized() ? "6 s (minimized)" : "2 s";
+    }
+
+    // Endpoint/service and startup scans only run while a section that displays
+    // them is visible; Hidden items reuses whatever observation already exists.
+    // Collection resumes within one refresh when the user opens a consuming section.
+    private static bool SectionConsumesRelationships(string value) =>
+        value is "Overview" or "Network" or "Services" or "Startup" or "Insights";
+
+    private static bool SectionConsumesStartup(string value) =>
+        value is "Startup" or "Insights";
 
     private void StartDescriptionRefresh()
     {
@@ -877,7 +942,8 @@ public sealed partial class MainWindow : Window
 
     private void RefreshDiagnostics()
     {
-        if (!ready || section is "Processes" or "Settings") return;
+        if (!ready || section is "Processes") return;
+        if (section == "Settings") { RefreshSettings(); return; }
         if (section == "Overview") { RefreshOverview(); return; }
         if (section == "CPU") { RefreshCpu(); return; }
         if (section == "GPU") { RefreshGpu(); return; }

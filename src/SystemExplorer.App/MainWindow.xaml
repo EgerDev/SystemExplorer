@@ -382,6 +382,40 @@
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource Card}">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="SystemExplorer overhead" Style="{StaticResource SectionLabel}"/>
+                                <TextBlock Text="This monitor's own cost, measured with the same documented per-process APIs as every other row. Measuring itself adds observer overhead; values are not a steady-state guarantee." Style="{StaticResource Muted}"/>
+                                <Grid ColumnSpacing="12" RowSpacing="8">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <StackPanel Spacing="1">
+                                        <TextBlock Text="CPU" Style="{StaticResource Muted}" FontSize="11"/>
+                                        <TextBlock x:Name="OverheadCpu" Text="—" FontFamily="{ThemeResource MonoFont}" FontSize="14"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="1">
+                                        <TextBlock Text="Private commit" Style="{StaticResource Muted}" FontSize="11"/>
+                                        <TextBlock x:Name="OverheadPrivate" Text="—" FontFamily="{ThemeResource MonoFont}" FontSize="14"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Spacing="1">
+                                        <TextBlock Text="Working set" Style="{StaticResource Muted}" FontSize="11"/>
+                                        <TextBlock x:Name="OverheadWorkingSet" Text="—" FontFamily="{ThemeResource MonoFont}" FontSize="14"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Spacing="1">
+                                        <TextBlock Text="Threads / handles" Style="{StaticResource Muted}" FontSize="11"/>
+                                        <TextBlock x:Name="OverheadThreadsHandles" Text="—" FontFamily="{ThemeResource MonoFont}" FontSize="14"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="1" Spacing="1">
+                                        <TextBlock Text="Scan cost" Style="{StaticResource Muted}" FontSize="11"/>
+                                        <TextBlock x:Name="OverheadScanCost" Text="—" FontFamily="{ThemeResource MonoFont}" FontSize="14"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="2" Spacing="1">
+                                        <TextBlock Text="Refresh cadence" Style="{StaticResource Muted}" FontSize="11"/>
+                                        <TextBlock x:Name="OverheadCadence" Text="—" FontFamily="{ThemeResource MonoFont}" FontSize="14"/>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Card}">
                             <StackPanel Spacing="8">
                                 <TextBlock Text="Privacy &amp; telemetry scope" Style="{StaticResource SectionLabel}"/>
                                 <TextBlock Text="Local and read-only. Process information is never uploaded. Refresh is every two seconds; pause stops new samples. History is bounded to 180 samples and is not saved to disk." Style="{StaticResource Muted}"/>

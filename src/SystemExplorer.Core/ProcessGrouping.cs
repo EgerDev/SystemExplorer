@@ -2,8 +2,39 @@ namespace SystemExplorer.Core;
 
 public sealed record ProcessGroup(ProcessIdentity Key, string Name, IReadOnlyList<ProcessSnapshot> Members)
 {
-    public ulong? PrivateBytes => Members.All(p => p.PrivateBytes.HasValue) ? Members.Aggregate(0UL, (sum, p) => checked(sum + p.PrivateBytes!.Value)) : null;
-    public double? CpuPercent => Members.All(p => p.CpuPercent.HasValue) ? Members.Sum(p => p.CpuPercent!.Value) : null;
+    private ulong? privateBytes;
+    private bool privateBytesComputed;
+    private double? cpuPercent;
+    private bool cpuPercentComputed;
+
+    // Aggregates are computed once per group instance: sorting, KPI and insight
+    // projections read them repeatedly per refresh, and re-enumerating members
+    // with LINQ on every access multiplied cost without changing results.
+    public ulong? PrivateBytes
+    {
+        get
+        {
+            if (!privateBytesComputed)
+            {
+                privateBytes = Members.All(p => p.PrivateBytes.HasValue) ? Members.Aggregate(0UL, (sum, p) => checked(sum + p.PrivateBytes!.Value)) : null;
+                privateBytesComputed = true;
+            }
+            return privateBytes;
+        }
+    }
+
+    public double? CpuPercent
+    {
+        get
+        {
+            if (!cpuPercentComputed)
+            {
+                cpuPercent = Members.All(p => p.CpuPercent.HasValue) ? Members.Sum(p => p.CpuPercent!.Value) : null;
+                cpuPercentComputed = true;
+            }
+            return cpuPercent;
+        }
+    }
 }
 
 public static class ProcessGrouping
