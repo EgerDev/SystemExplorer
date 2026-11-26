@@ -57,8 +57,11 @@ and total working set. Service base start types are best-effort configuration
 observations; denied, unavailable or budget-skipped values remain unknown. The
 enrichment budget is checked between synchronous calls, not a hard timeout.
 
-Catalog signature verification is not implemented. Command lines are captured
-but masked until explicit per-row reveal, never uploaded. Delayed/trigger service startup behavior is not inferred.
+Catalog signature verification is not implemented. The live process monitor does
+not capture command lines. An on-demand Security inspection can query a
+kernel-supplied command line, which may contain secrets and is shown only after
+explicit reveal. Provenance checks inspect executable paths and signatures, not
+command-line text. Delayed/trigger service startup behavior is not inferred.
 There are no termination, suspension, startup-modification or driver-install actions.
 Windows App SDK dependencies follow the pinned app lockfile; WebView features are
 not initialized by this application. Dependency footprint and
