@@ -165,7 +165,7 @@ public sealed partial class MainWindow : Window
                     overviewStale = false;
                     tray.Update(next);
                     cycle++;
-                    if ((SectionConsumesRelationships(section) ||
+                    if ((RelationshipCapturePolicy.SectionConsumesRelationships(section) ||
                         (section == "Processes" && ProcessSelectionPolicy.IsSelectedProcessObserved(selectedIdentity, next.Processes))) &&
                         (relationshipsCapturedAt is null || next.CapturedAt - relationshipsCapturedAt.Value > TimeSpan.FromSeconds(6)))
                     {
@@ -274,12 +274,6 @@ public sealed partial class MainWindow : Window
         OverheadScanCost.Text = lastScanMilliseconds > 0 ? $"{lastScanMilliseconds:F1} ms" : "—";
         OverheadCadence.Text = IsWindowMinimized() ? "6 s (minimized)" : "2 s";
     }
-
-    // Endpoint/service and startup scans only run while a section that displays
-    // them is visible; Hidden items reuses whatever observation already exists.
-    // Collection resumes within one refresh when the user opens a consuming section.
-    private static bool SectionConsumesRelationships(string value) =>
-        value is "Overview" or "Network" or "Services" or "Startup" or "Insights";
 
     private static bool SectionConsumesStartup(string value) =>
         value is "Startup" or "Insights";

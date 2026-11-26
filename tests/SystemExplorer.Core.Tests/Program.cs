@@ -651,6 +651,13 @@ var tests = new (string Name, Action Run)[]
         var oldAt = scanAt.AddHours(-1);
         Check(!SuspiciousLeadRules.AreRelationshipObservationsFresh(oldAt, oldAt.AddSeconds(-1), scanAt));
     }),
+    ("Hidden section refreshes relationship observations using its navigation token", () =>
+    {
+        foreach (var section in new[] { "Overview", "Network", "Services", "Startup", "Insights", "Hidden" })
+            Check(RelationshipCapturePolicy.SectionConsumesRelationships(section));
+        Check(!RelationshipCapturePolicy.SectionConsumesRelationships("Hidden items"));
+        Check(!RelationshipCapturePolicy.SectionConsumesRelationships("CPU"));
+    }),
     ("Relationship capture selection requires the current process lifetime", () =>
     {
         var process = P(10, 100);
