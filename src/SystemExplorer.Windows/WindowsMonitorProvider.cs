@@ -25,6 +25,7 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
     private bool diskPrimed;
     private long diskTimestamp;
     private readonly Dictionary<ProcessIdentity, ProcessMetadata> metadata = new();
+    private const int MaximumImagePathCharacters = 32768;
     private readonly StringBuilder pathBuffer = new(512);
 
     // Process-instance metadata that cannot change during the instance lifetime
@@ -298,8 +299,8 @@ public sealed class WindowsMonitorProvider : IMonitorProvider
                 return pathBuffer.ToString();
             }
             error = Marshal.GetLastWin32Error();
-            if (error != 122 || pathBuffer.Capacity >= 8192) return null;
-            pathBuffer.EnsureCapacity(8192);
+            if (error != 122 || pathBuffer.Capacity >= MaximumImagePathCharacters) return null;
+            pathBuffer.EnsureCapacity(MaximumImagePathCharacters);
         }
         error = 122;
         return null;
