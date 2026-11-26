@@ -53,11 +53,20 @@ function Step($name, [scriptblock]$body) {
     }
 }
 
+function Convert-ProbeTimestamp($Value) {
+    if ($Value -is [DateTimeOffset]) { return $Value.ToUniversalTime() }
+    if ($Value -is [DateTime]) {
+        if ($Value.Kind -eq [DateTimeKind]::Unspecified) { $Value = [DateTime]::SpecifyKind($Value, [DateTimeKind]::Utc) }
+        return [DateTimeOffset]::new($Value).ToUniversalTime()
+    }
+    return [DateTimeOffset]::Parse([string]$Value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal).ToUniversalTime()
+}
+
 function Get-MatchedSamples($ProbeSamples, $CounterRows, [timespan]$Tolerance = [timespan]::FromSeconds(1)) {
     $pairs = New-Object 'System.Collections.Generic.List[object]'
     $counterIndex = 0
     foreach ($sample in $ProbeSamples) {
-        $probeAt = [DateTimeOffset]::Parse([string]$sample.atUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal)
+        $probeAt = Convert-ProbeTimestamp $sample.atUtc
         while ($counterIndex -lt $CounterRows.Count -and ($probeAt - $CounterRows[$counterIndex].CapturedAt) -gt $Tolerance) { $counterIndex++ }
         $bestIndex = -1
         $bestMilliseconds = [double]::PositiveInfinity
@@ -175,6 +184,24 @@ Step 'cross-validation-regression-tests' {
         Remove-Item -LiteralPath $fixturePath -Force -ErrorAction SilentlyContinue
     }
 
+    $probeAt = [DateTimeOffset]::Parse('2026-01-01T00:00:00.9000000Z')
+    $nearbyCounters = @(
+        [pscustomobject]@{ CapturedAt = $probeAt.AddTicks(-10000) }
+        [pscustomobject]@{ CapturedAt = $probeAt.AddTicks(1) }
+    )
+    $typedProbes = @(
+        [pscustomobject]@{ Kind = 'DateTime'; atUtc = [DateTime]::SpecifyKind($probeAt.UtcDateTime, [DateTimeKind]::Utc) }
+        [pscustomobject]@{ Kind = 'DateTimeOffset'; atUtc = $probeAt.ToOffset([TimeSpan]::FromHours(2)) }
+        [pscustomobject]@{ Kind = 'Unspecified DateTime'; atUtc = [DateTime]::SpecifyKind($probeAt.UtcDateTime, [DateTimeKind]::Unspecified) }
+        [pscustomobject]@{ Kind = 'string'; atUtc = $probeAt.ToString('o') }
+    )
+    foreach ($typedProbe in $typedProbes) {
+        $matched = @(Get-MatchedSamples @($typedProbe) $nearbyCounters)
+        if ($matched.Count -ne 1 -or $matched[0].Counter.CapturedAt -ne $nearbyCounters[1].CapturedAt -or $matched[0].OffsetMilliseconds -gt 0.001) {
+            throw "$($typedProbe.Kind) probe timestamp lost precision or timezone while matching"
+        }
+    }
+
     $base = [DateTimeOffset]::Parse('2026-01-01T00:00:00Z')
     $counterRows = @([pscustomobject]@{ CapturedAt = $base; MemAvailable = 1000.0; CpuTotal = $null; DiskRead = $null; DiskWrite = $null })
     $probeRows = @()
@@ -210,7 +237,7 @@ Step 'cross-validation-regression-tests' {
     $failed = $false
     try { Assert-CrossValidation (Get-CrossValidationResult (Get-MatchedSamples $emptyProbes $counterRows)) } catch { $failed = $true }
     if (-not $failed) { throw 'zero comparable metrics did not fail' }
-    'timestamp pairing and comparison gates passed'
+    'timestamp pairing, typed timestamps, local Typeperf time-zone conversion and comparison gates passed'
 }
 
 Step 'clean-exit-regression-tests' {
