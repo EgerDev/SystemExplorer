@@ -639,6 +639,21 @@ var tests = new (string Name, Action Run)[]
         var groups = ProcessGrouping.Create([P(10, 100), P(11, 200, 10), P(12, 300, null), P(13, 400, 10) with { UserSid = "other" }]);
         Check(groups.Count == 3 && groups.Single(g => g.Key.Pid == 10).Members.Count == 2);
     }),
+    ("Hidden endpoint joins require fresh process and relationship observations", () =>
+    {
+        var processAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        Check(SuspiciousLeadRules.AreRelationshipObservationsFresh(processAt, processAt.AddSeconds(10)));
+        Check(SuspiciousLeadRules.AreRelationshipObservationsFresh(processAt, processAt.AddSeconds(-10)));
+        Check(!SuspiciousLeadRules.AreRelationshipObservationsFresh(processAt, processAt.AddSeconds(10).AddMilliseconds(1)));
+        Check(!SuspiciousLeadRules.AreRelationshipObservationsFresh(processAt, processAt.AddSeconds(-10).AddMilliseconds(-1)));
+    }),
+    ("Exited process selection clears when rebuilt rows no longer contain it", () =>
+    {
+        var identity = P(10, 100).Identity;
+        Check(ProcessSelectionPolicy.ShouldClearAfterRowRebuild(identity, rowFound: false));
+        Check(!ProcessSelectionPolicy.ShouldClearAfterRowRebuild(identity, rowFound: true));
+        Check(!ProcessSelectionPolicy.ShouldClearAfterRowRebuild(null, rowFound: false));
+    }),
     ("Reused parent PID is not related", () => Check(ProcessGrouping.Create([P(10, 300), P(11, 200, 10)]).Count == 2)),
     ("Missing metadata remains singleton", () => Check(ProcessGrouping.Create([P(10, 100), P(11, 200, 10) with { UserSid = null }]).Count == 2)),
     ("Unknown sessions are not evidence of shared ownership", () =>
@@ -654,6 +669,20 @@ var tests = new (string Name, Action Run)[]
         var group = ProcessGrouping.Create([P(10, 100), P(11, 200, 10)]).Single();
         Check(group.PrivateBytes == 200);
         Check(ProcessGrouping.Create([P(10, 100), P(11, 200, 10) with { PrivateBytes = null }]).Single().PrivateBytes is null);
+    }),
+    ("Group aggregates preserve equality and recalculate on member replacement", () =>
+    {
+        var first = P(10, 100) with { PrivateBytes = 100, CpuPercent = 1 };
+        var second = P(11, 200, 10) with { PrivateBytes = 200, CpuPercent = 2 };
+        var group = new ProcessGroup(first.Identity, first.Name, [first, second]);
+        var hash = group.GetHashCode();
+        var copy = group with { };
+        if (group != copy || group.GetHashCode() != hash) throw new InvalidOperationException("An empty with-copy changed equality or hash.");
+        if (group.PrivateBytes != 300 || group.CpuPercent != 3) throw new InvalidOperationException("Initial group aggregates were incorrect.");
+        if (group != copy || group.GetHashCode() != hash) throw new InvalidOperationException("Reading aggregates changed equality or hash.");
+        var replacement = group with { Members = [first with { PrivateBytes = 400, CpuPercent = 4 }] };
+        if (replacement.PrivateBytes != 400 || replacement.CpuPercent != 4) throw new InvalidOperationException("Replacing members retained stale aggregates.");
+        if (group.PrivateBytes != 300 || group.CpuPercent != 3) throw new InvalidOperationException("Replacing members changed the original aggregates.");
     }),
     ("Prompt input requires non-blank text and trims it", () =>
     {
