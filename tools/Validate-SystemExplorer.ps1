@@ -75,14 +75,24 @@ function Get-MatchedSamples($ProbeSamples, $CounterRows, [timespan]$Tolerance = 
     return $pairs.ToArray()
 }
 
+function Convert-TypeperfTimestamp($Value, [int]$BiasMinutes) {
+    $localTimestamp = [DateTime]::Parse([string]$Value, [Globalization.CultureInfo]::CurrentCulture, [Globalization.DateTimeStyles]::AllowWhiteSpaces)
+    $localTimestamp = [DateTime]::SpecifyKind($localTimestamp, [DateTimeKind]::Unspecified)
+    return [DateTimeOffset]::new($localTimestamp, [TimeSpan]::FromMinutes(-$BiasMinutes)).ToUniversalTime()
+}
+
 function Convert-TypeperfRows($Path) {
     $rows = New-Object 'System.Collections.Generic.List[object]'
-    $culture = [Globalization.CultureInfo]::GetCultureInfo('en-US')
-    $styles = [Globalization.DateTimeStyles]::AssumeUniversal
+    $biasMinutes = $null
     foreach ($row in Import-Csv -LiteralPath $Path) {
         $properties = @($row.PSObject.Properties)
         if ($properties.Count -lt 5) { continue }
-        $capturedAt = [DateTimeOffset]::Parse([string]$properties[0].Value, $culture, $styles)
+        if ($null -eq $biasMinutes) {
+            $header = [string]$properties[0].Name
+            if ($header -notmatch '\((-?\d+)\)$') { throw "Typeperf CSV header has no time-zone bias: $header" }
+            $biasMinutes = [int]$Matches[1]
+        }
+        $capturedAt = Convert-TypeperfTimestamp $properties[0].Value $biasMinutes
         $values = New-Object 'System.Collections.Generic.List[object]'
         for ($i = 1; $i -le 4; $i++) {
             $raw = [string]$properties[$i].Value
@@ -150,6 +160,21 @@ function Test-CleanExitVerdict($CloseRequested, $Exited, $ExitCode) {
 }
 
 Step 'cross-validation-regression-tests' {
+    $fixturePath = Join-Path $OutputDirectory ('typeperf-offset-' + [guid]::NewGuid().ToString('N') + '.csv')
+    try {
+        $fixtureLocal = [DateTime]::new(2026, 1, 1, 4, 0, 0)
+        $fixtureHeader = '"(PDH-CSV 4.0) (Pacific Standard Time)(480)","\\FIXTURE\Memory\Available Bytes","\\FIXTURE\Processor(_Total)\% Processor Time","\\FIXTURE\PhysicalDisk(_Total)\Disk Read Bytes/sec","\\FIXTURE\PhysicalDisk(_Total)\Disk Write Bytes/sec"'
+        $fixtureRow = '"{0}","1024","10","0","0"' -f $fixtureLocal.ToString('G', [Globalization.CultureInfo]::CurrentCulture)
+        [IO.File]::WriteAllLines($fixturePath, @($fixtureHeader, $fixtureRow), [Text.Encoding]::ASCII)
+        $fixtureRows = @(Convert-TypeperfRows $fixturePath)
+        $expectedUtc = [DateTimeOffset]::new($fixtureLocal, [TimeSpan]::FromHours(-8)).ToUniversalTime()
+        if ($fixtureRows.Count -ne 1 -or $fixtureRows[0].CapturedAt -ne $expectedUtc) {
+            throw 'Typeperf local timestamp was not converted using the CSV header time-zone bias'
+        }
+    } finally {
+        Remove-Item -LiteralPath $fixturePath -Force -ErrorAction SilentlyContinue
+    }
+
     $base = [DateTimeOffset]::Parse('2026-01-01T00:00:00Z')
     $counterRows = @([pscustomobject]@{ CapturedAt = $base; MemAvailable = 1000.0; CpuTotal = $null; DiskRead = $null; DiskWrite = $null })
     $probeRows = @()

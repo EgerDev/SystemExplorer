@@ -19,8 +19,11 @@ public static class SuspiciousLeadRules
 {
     private static readonly string[] SystemNames = ["lsass", "csrss", "smss", "wininit", "winlogon", "services", "svchost", "lsm", "explorer", "spoolsv", "taskhostw", "dwm", "conhost", "rundll32", "dllhost"];
 
-    public static bool AreRelationshipObservationsFresh(DateTimeOffset processCapturedAt, DateTimeOffset relationshipsCapturedAt) =>
-        Math.Abs((processCapturedAt - relationshipsCapturedAt).TotalSeconds) <= 10;
+    public static bool AreRelationshipObservationsFresh(DateTimeOffset processCapturedAt, DateTimeOffset relationshipsCapturedAt, DateTimeOffset scanStartedAt) =>
+        IsObservationFresh(processCapturedAt, scanStartedAt) && IsObservationFresh(relationshipsCapturedAt, scanStartedAt);
+
+    private static bool IsObservationFresh(DateTimeOffset capturedAt, DateTimeOffset scanStartedAt) =>
+        capturedAt <= scanStartedAt && scanStartedAt - capturedAt <= TimeSpan.FromSeconds(10);
 
     private static string ConfusableName(string name) => string.Concat(name.ToLowerInvariant().Normalize(System.Text.NormalizationForm.FormKC).Select(c => c switch
     {

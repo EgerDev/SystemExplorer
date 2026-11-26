@@ -165,7 +165,8 @@ public sealed partial class MainWindow : Window
                     overviewStale = false;
                     tray.Update(next);
                     cycle++;
-                    if ((SectionConsumesRelationships(section) || (section == "Processes" && selectedIdentity is not null)) &&
+                    if ((SectionConsumesRelationships(section) ||
+                        (section == "Processes" && ProcessSelectionPolicy.IsSelectedProcessObserved(selectedIdentity, next.Processes))) &&
                         (relationshipsCapturedAt is null || next.CapturedAt - relationshipsCapturedAt.Value > TimeSpan.FromSeconds(6)))
                     {
                         try
@@ -681,7 +682,7 @@ public sealed partial class MainWindow : Window
         {
             if (!ReferenceEquals(ProcessList.SelectedItem, row)) ProcessList.SelectedItem = row;
             foreach (var current in Model.Rows) current.SetSelected(ReferenceEquals(row, current));
-            if (expired || ProcessSelectionPolicy.ShouldClearAfterRowRebuild(selectedIdentity, row is not null))
+            if (expired || row is null && SelectedProcess is not null)
             {
                 selectedIdentity = null;
                 selectedCapturedAt = null;

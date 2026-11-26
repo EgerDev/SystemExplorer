@@ -1,31 +1,12 @@
 namespace SystemExplorer.Core;
 
-public sealed record ProcessGroup
+public sealed record ProcessGroup(ProcessIdentity Key, string Name, IReadOnlyList<ProcessSnapshot> Members)
 {
-    private IReadOnlyList<ProcessSnapshot> members = Array.Empty<ProcessSnapshot>();
+    public ulong? PrivateBytes => Members.All(p => p.PrivateBytes.HasValue)
+        ? Members.Aggregate(0UL, (sum, p) => checked(sum + p.PrivateBytes!.Value)) : null;
 
-    public ProcessGroup(ProcessIdentity key, string name, IReadOnlyList<ProcessSnapshot> members)
-    {
-        Key = key;
-        Name = name;
-        Members = members;
-    }
-
-    public ProcessIdentity Key { get; init; }
-    public string Name { get; init; }
-    public IReadOnlyList<ProcessSnapshot> Members
-    {
-        get => members;
-        init
-        {
-            members = Array.AsReadOnly(value.ToArray());
-            PrivateBytes = members.All(p => p.PrivateBytes.HasValue) ? members.Aggregate(0UL, (sum, p) => checked(sum + p.PrivateBytes!.Value)) : null;
-            CpuPercent = members.All(p => p.CpuPercent.HasValue) ? members.Sum(p => p.CpuPercent!.Value) : null;
-        }
-    }
-
-    public ulong? PrivateBytes { get; private init; }
-    public double? CpuPercent { get; private init; }
+    public double? CpuPercent => Members.All(p => p.CpuPercent.HasValue)
+        ? Members.Sum(p => p.CpuPercent!.Value) : null;
 }
 
 public static class ProcessGrouping
