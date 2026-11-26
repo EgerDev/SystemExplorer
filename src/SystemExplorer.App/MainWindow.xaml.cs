@@ -165,7 +165,7 @@ public sealed partial class MainWindow : Window
                     overviewStale = false;
                     tray.Update(next);
                     cycle++;
-                    if (SectionConsumesRelationships(section) &&
+                    if ((SectionConsumesRelationships(section) || (section == "Processes" && selectedIdentity is not null)) &&
                         (relationshipsCapturedAt is null || next.CapturedAt - relationshipsCapturedAt.Value > TimeSpan.FromSeconds(6)))
                     {
                         try
