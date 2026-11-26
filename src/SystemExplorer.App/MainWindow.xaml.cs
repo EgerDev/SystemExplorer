@@ -681,7 +681,7 @@ public sealed partial class MainWindow : Window
         {
             if (!ReferenceEquals(ProcessList.SelectedItem, row)) ProcessList.SelectedItem = row;
             foreach (var current in Model.Rows) current.SetSelected(ReferenceEquals(row, current));
-            if (expired || row is null && SelectedProcess is not null)
+            if (expired || ProcessSelectionPolicy.ShouldClearAfterRowRebuild(selectedIdentity, row is not null))
             {
                 selectedIdentity = null;
                 selectedCapturedAt = null;
